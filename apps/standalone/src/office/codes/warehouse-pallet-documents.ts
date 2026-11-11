@@ -45,6 +45,7 @@ export function warehousePalletPlacardData(
     ...warehousePalletReportData(pallet, logo),
     gtin14: pallet.gtin14,
     shelfLifeDays: pallet.shelfLifeDays,
+    ...(pallet.lotNumber == null ? {} : { lotNumber: pallet.lotNumber }),
     boxes: pallet.members.map((box) => ({
       productionDate: box.productionDate,
       codeCount: box.units,

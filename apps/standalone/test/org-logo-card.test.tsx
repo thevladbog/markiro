@@ -198,6 +198,37 @@ describe("the organization's print logo", () => {
   });
 });
 
+describe("lot numbers in the organization profile", () => {
+  it("defaults an old profile to off and saves the checkbox with the profile revision", async () => {
+    const fake = session(null);
+    fake.api.updateOrg.mockResolvedValue({
+      ...ORG_PROFILE,
+      useLotNumbers: true,
+      rev: ORG_PROFILE.rev + 1,
+    });
+    await openProfile(fake);
+    const setting = await screen.findByRole("checkbox", { name: "Использовать номера партий" });
+    expect(setting.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(setting);
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() =>
+      expect(fake.api.updateOrg).toHaveBeenCalledWith(
+        TOKEN,
+        expect.objectContaining({ expectedRev: ORG_PROFILE.rev, useLotNumbers: true }),
+      ),
+    );
+  });
+
+  it("shows the technologist the setting in read-only mode", async () => {
+    const fake = session(null, TECHNOLOGIST);
+    fake.api.getOrg.mockResolvedValue({ ...ORG_PROFILE, useLotNumbers: true });
+    await openProfile(fake);
+    const setting = await screen.findByRole("checkbox", { name: "Использовать номера партий" });
+    expect(setting.getAttribute("aria-checked")).toBe("true");
+    expect(setting).toHaveProperty("disabled", true);
+  });
+});
+
 describe("picking a logo file", () => {
   it("refuses a file of another type before it is read, in words", async () => {
     await openProfile(session(null));

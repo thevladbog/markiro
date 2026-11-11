@@ -1,3 +1,4 @@
+import { LOT_NUMBER_LABEL_FIELD } from "./model.js";
 import {
   parsePalletSheetSpec,
   type PalletSheetSpecV2,
@@ -34,7 +35,11 @@ function row(id: string, children: SheetNode[], gapMm = 4): SheetNode {
 function stack(id: string, children: SheetNode[], gapMm = 1): SheetNode {
   return { id, kind: "stack", gapMm, children };
 }
-function make(orientation: "portrait" | "landscape", copies: 1 | 2): PalletSheetSpecV2 {
+function make(
+  orientation: "portrait" | "landscape",
+  copies: 1 | 2,
+  withLotNumber = false,
+): PalletSheetSpecV2 {
   const small = copies === 2;
   const header = row(
     "header",
@@ -79,11 +84,12 @@ function make(orientation: "portrait" | "landscape", copies: 1 | 2): PalletSheet
     id: "product",
     kind: "field",
     field: "product.printName",
-    fontSizePt: small ? 14 : 22,
+    fontSizePt: small ? (withLotNumber ? 13 : 14) : 22,
     bold: true,
     maxLines: orientation === "landscape" && !small ? 4 : 5,
     underline: { thicknessMm: 0.15, gapMm: 1 },
-    reservedLines: orientation === "landscape" && !small ? 4 : 5,
+    // Make room for the lot while keeping the fifth product-name line available.
+    reservedLines: small && withLotNumber ? 3 : orientation === "landscape" && !small ? 4 : 5,
   };
   const quantities = row("quantities", [
     fieldRow("boxes", "КОРОБОВ", "boxCount", small ? 28 : 36),
@@ -114,6 +120,18 @@ function make(orientation: "portrait" | "landscape", copies: 1 | 2): PalletSheet
           ),
         ]
       : [header, separator, product, quantities, dates, identifiers, egais];
+  const lot: SheetNode = {
+    id: "lot-number",
+    kind: "field_row",
+    label: "Номер партии",
+    field: LOT_NUMBER_LABEL_FIELD,
+    when: { field: LOT_NUMBER_LABEL_FIELD, op: "present" },
+    fontSizePt: small ? 11 : 13,
+    minFontSizePt: 8,
+    labelFontSizePt: 7,
+    maxLines: 2,
+    gapMm: 0.6,
+  };
   return parsePalletSheetSpec({
     schemaVersion: 2,
     kind: "pallet_sheet",
@@ -125,7 +143,7 @@ function make(orientation: "portrait" | "landscape", copies: 1 | 2): PalletSheet
       cutLine: small,
       marginsMm: { top: 10, bottom: 10, left: small ? 7 : 10, right: small ? 7 : 10 },
     },
-    body: [stack("content", body, small ? 1 : 3)],
+    body: [stack("content", body, small ? 1 : 3), ...(withLotNumber ? [lot] : [])],
     footer: {
       id: "sscc",
       kind: "sscc",
@@ -165,4 +183,18 @@ export function buildPalletSheetPresets(): PalletSheetPreset[] {
       spec: make("landscape", 2),
     },
   ];
+}
+
+export function buildPalletSheetLotNumberPresets(): (PalletSheetPreset & {
+  sourceKey: string;
+  sourceSpec: PalletSheetSpecV2;
+})[] {
+  return buildPalletSheetPresets().map(({ key, name, purpose, spec }) => ({
+    key: `${key}-lot-number`,
+    sourceKey: key,
+    sourceSpec: spec,
+    name: `${name} · номер партии`,
+    purpose,
+    spec: make(spec.page.orientation, spec.page.copies, true),
+  }));
 }

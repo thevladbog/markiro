@@ -231,10 +231,21 @@ describe("the shifts of the station's line", () => {
     },
   );
 
+  it("shows the planned and frozen lot numbers on the line's cards, even offline", async () => {
+    const planned = { ...PLANNED, lotNumber: "0042Бк07A" };
+    const entered = { ...ENTERED_MINE, snapshot: { ...ENTERED_MINE.snapshot, lotNumber: "001Ё9" } };
+    const { executor } = await copiesOf([MINE, planned], [entered]);
+    renderList(executor, { online: false });
+    await screen.findByText(PLANNED.number);
+    expect(within(card(PLANNED.number)).getByText("Партия 0042Бк07A")).toBeTruthy();
+    expect(within(card(MINE.number)).getByText("Партия 001Ё9")).toBeTruthy();
+  });
+
   it("names each shift, its product, date, plan and counterparty in words", async () => {
     const { executor } = await copiesOf([PLANNED, MINE]);
     renderList(executor);
     await screen.findByText("OCT26-004");
+    expect(screen.queryByText(/^Партия /)).toBeNull();
     const active = card("OCT26-004");
     expect(within(active).getByText("В работе")).toBeTruthy();
     expect(within(active).getByText("Молоко 3,2% 0,9 л")).toBeTruthy();
@@ -303,7 +314,7 @@ describe("the shifts of the station's line", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
     expect(handlers.enter).toHaveBeenCalledWith(PLANNED.id, {
-      supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1"],
+      supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1", "lot-number"],
     });
     const [shift] = handlers.onEntered.mock.calls[0] ?? [];
     expect(shift).toMatchObject({
@@ -1426,7 +1437,7 @@ describe("the shifts several devices work (plan 2b)", () => {
       ownerDeviceId: OTHER_STATION,
     });
   const MULTI_ENTRY = {
-    supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1"],
+    supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1", "lot-number"],
   };
 
   it("offers to join a shift another station works while a slot is free, and names who works it", async () => {

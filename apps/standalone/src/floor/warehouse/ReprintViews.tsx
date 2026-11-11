@@ -63,6 +63,7 @@ const TITLED = new Set([
   "lookup_failed",
   "offline",
   "host_outdated",
+  "station_update",
   "restore_pending",
   "released",
   "disassembled",

@@ -1,6 +1,6 @@
 import { effectiveProductionIsoDate } from "./box-label.js";
 import { formatLabelDate } from "./date.js";
-import type { LabelField } from "./model.js";
+import { LOT_NUMBER_LABEL_FIELD, type LabelFieldData } from "./model.js";
 import { shelfLifeExpiryDate } from "./shelf-life.js";
 
 /**
@@ -41,9 +41,10 @@ export interface PalletLabelInput {
   productionDate: string | null;
   /** `AUG26-003/S`; null when the mirror predates the shift-number sync. */
   shiftNumber: string | null;
+  lotNumber?: string | null;
 }
 
-export function palletLabelFields(input: PalletLabelInput): Record<LabelField, string> {
+export function palletLabelFields(input: PalletLabelInput): LabelFieldData {
   const effectiveDate = effectiveProductionIsoDate(input.closedAt, input.productionDate);
   const effectiveExpiry = shelfLifeExpiryDate(effectiveDate, input.shelfLifeDays);
 
@@ -56,6 +57,7 @@ export function palletLabelFields(input: PalletLabelInput): Record<LabelField, s
     "km.code": "",
     sscc: input.sscc,
     "shift.no": input.shiftNumber ?? "",
+    ...(input.lotNumber ? { [LOT_NUMBER_LABEL_FIELD]: input.lotNumber } : {}),
     date: formatLabelDate(effectiveDate),
     expiry: formatLabelDate(effectiveExpiry),
     qty: String(input.itemCount),

@@ -14,6 +14,7 @@ export interface PalletAssemblyBox {
   sscc: string;
   shiftNumber: string | null;
   productionDate: string | null;
+  lotNumber?: string | null;
   itemCount: number;
   syncState: "pending" | "accepted";
 }
@@ -33,6 +34,7 @@ export interface PalletAssemblyPallet {
     boxCount: number;
     itemCount: number;
     productionDate: string | null;
+    lotNumber?: string | null | undefined;
   } | null;
   labelVersion: number;
   isCorrection: boolean;

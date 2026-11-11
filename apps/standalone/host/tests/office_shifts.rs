@@ -3988,3 +3988,76 @@ async fn null_without_pallets_asks_for_nothing_and_an_open_shift_keeps_its_sheet
     let (_, now) = admin.call("GET", &path(&held), None).await;
     assert_eq!(now["palletSheetTemplateId"], json!(portrait));
 }
+
+#[tokio::test]
+async fn lot_number_is_validated_and_can_be_changed_only_in_a_planned_shift() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let mut body = shift_body(&setup);
+    body["lotNumber"] = json!("  0042Бк07AЁ  ");
+    let (status, refusal) = admin
+        .call("POST", "/v1/office/shifts", Some(body.clone()))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refusal}");
+    assert_eq!(
+        refusal["error"]["details"]["constraint"],
+        "lot_template_missing"
+    );
+    sqlx::query(
+        "UPDATE label_templates SET spec = json_set(spec, '$.elements', json(?)) WHERE id = ?",
+    )
+    .bind(json!([{ "kind": "field", "field": "shift.lotNumber" }]).to_string())
+    .bind(&setup.template)
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let shift = plan_shift(&admin, body.clone()).await;
+    assert_eq!(shift["lotNumber"], "0042Бк07AЁ");
+    let id = shift["id"].as_str().unwrap();
+    assert_eq!(
+        audit_trail(&admin.app, "shift.create").await,
+        vec![admin.row(
+            "shift.create",
+            "shift",
+            id,
+            json!({
+                "number": shift["number"], "productId": setup.product, "lineId": setup.line,
+                "productionDate": "2026-10-08", "lotNumber": "0042Бк07AЁ"
+            })
+        )]
+    );
+
+    let url = path(&shift);
+    let (status, kept) = admin
+        .call("PUT", &url, Some(json!({ "expectedRev": shift["rev"] })))
+        .await;
+    assert_eq!(
+        (status, kept["lotNumber"].clone()),
+        (StatusCode::OK, json!("0042Бк07AЁ"))
+    );
+    let (status, cleared) = admin
+        .call(
+            "PUT",
+            &url,
+            Some(json!({ "expectedRev": kept["rev"], "lotNumber": null })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{cleared}");
+    assert!(cleared["lotNumber"].is_null());
+    assert_ne!(cleared["rev"], kept["rev"]);
+
+    body["lotNumber"] = json!("0042-БК");
+    let (status, invalid) = admin.call("POST", "/v1/office/shifts", Some(body)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{invalid}");
+    assert_eq!(invalid["error"]["details"]["field"], "lotNumber");
+
+    open_directly(&admin, &cleared).await;
+    let (status, active) = admin
+        .call(
+            "PUT",
+            &url,
+            Some(json!({ "expectedRev": cleared["rev"], "lotNumber": "А1" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{active}");
+}

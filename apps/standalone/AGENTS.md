@@ -1719,7 +1719,7 @@ nothing new. An unreadable release is quarantined like any record (the code
 stays a local duplicate, fail closed). Its statement is pinned on the shell's
 SQLite in `tests/local_db.rs`.
 `ENTITY_SET` names the kept entities, the acted-on ones and `SYNC_SCHEMA_VERSION`
-(`"org_profile,site,lines,operators,operator_badges,products,label_templates,category_template_defaults,code_releases;v5"`):
+(`"org_profile,site,lines,operators,operator_badges,products,label_templates,category_template_defaults,code_releases;v6"`):
 raise the version whenever a record schema or the meaning of a copy table
 changes, so every device syncs from zero once and gets back what an older
 build quarantined or kept differently.
@@ -4029,6 +4029,18 @@ planned shift offline or bypasses the license/participation rules.
   copies'.
 
 ## Shifts
+
+The organization setting `useLotNumbers` controls the optional input in the
+office and on the station. Planned shifts can change `lotNumber`. On the first
+entry the host freezes it in the shift snapshot used for printing. Linked stock
+variants are separate templates, leaving previous IDs and snapshots intact.
+Entry advertises `lot-number` in `ShiftEnter.supports`. Warehouse lookup
+advertises `?lotNumbers=1`, and warehouse close sends its optional frozen lot
+only when the station's box registry advertises `lotNumbersSupported`. These
+capabilities preserve protocol 8 compatibility. A warehouse close with unknown
+or mixed member lots keeps the lot blank. A corrected close uses the approved
+membership's lot reported by the host. See the
+[lot number design](../../docs/superpowers/specs/2026-11-11-standalone-lot-numbers-design.md).
 
 Stage 2a (`docs/superpowers/specs/2026-10-08-standalone-2a-shift-and-boxes-design.md`;
 plan 2a1 built the host's side). The host numbers a shift: a counter per

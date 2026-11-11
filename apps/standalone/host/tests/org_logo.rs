@@ -594,7 +594,7 @@ async fn a_database_without_0016_takes_it_and_starts_with_no_logo() {
     let before = Migrator {
         migrations: markiro_host::db::MIGRATOR
             .iter()
-            .filter(|migration| migration.version != 16)
+            .filter(|migration| migration.version < 16)
             .cloned()
             .collect::<Vec<_>>()
             .into(),
@@ -686,9 +686,9 @@ async fn a_host_takes_0015_and_0016_together_and_a_later_0013_and_0014_on_top() 
         assert_eq!(rows, 0, "{table}");
     }
 
-    // The СКЛ build (0015, no 0016) takes 0016 alone.
+    // The СКЛ build (through 0015) takes 0016 with the later migrations.
     let mut skl = SqliteConnection::connect("sqlite::memory:").await.unwrap();
-    only(&|version| version != 16).run(&mut skl).await.unwrap();
+    only(&|version| version <= 15).run(&mut skl).await.unwrap();
     let before = versions(&applied(&mut skl).await);
     assert!(before.contains(&15) && !before.contains(&16), "{before:?}");
     sqlx::query("UPDATE site SET initialized_at = ? WHERE id = 1")

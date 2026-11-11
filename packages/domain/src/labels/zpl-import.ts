@@ -181,7 +181,7 @@ function finalizeField(
   }
 
   const payload = decodeFieldData(state.data ?? "", state.hexIndicator);
-  const parsed = parseTemplatePayload(payload, state.line);
+  const parsed = parseTemplatePayload(payload, state.line, "text");
   const common = {
     id,
     xMm,

@@ -94,6 +94,7 @@ struct OrgFeedRow {
     gln: String,
     gs1_prefixes: String,
     time_zone: String,
+    use_lot_numbers: bool,
     default_box_template_id: Option<String>,
     default_pallet_template_id: Option<String>,
     default_duplicate_template_id: Option<String>,
@@ -123,6 +124,7 @@ struct TemplateFeedRow {
     enabled: bool,
     category_codes: Option<String>,
     stock: bool,
+    lot_number_source_id: Option<String>,
     spec: String,
 }
 
@@ -265,7 +267,7 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
     let value = match key.entity.as_str() {
         entities::ORG_PROFILE => {
             let row: OrgFeedRow = sqlx::query_as(
-                "SELECT name, inn, gln, gs1_prefixes, time_zone, default_box_template_id, \
+                "SELECT name, inn, gln, gs1_prefixes, time_zone, use_lot_numbers, default_box_template_id, \
                  default_pallet_template_id, default_duplicate_template_id \
                  FROM org_profile WHERE id = 1",
             )
@@ -279,6 +281,7 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
                 gs1_prefixes: serde_json::from_str(&row.gs1_prefixes)
                     .map_err(ApiError::internal)?,
                 time_zone: row.time_zone,
+                use_lot_numbers: row.use_lot_numbers,
                 default_box_template_id: row.default_box_template_id,
                 default_pallet_template_id: row.default_pallet_template_id,
                 default_duplicate_template_id: row.default_duplicate_template_id,
@@ -365,7 +368,7 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
         }
         entities::LABEL_TEMPLATES => {
             let row: TemplateFeedRow = sqlx::query_as(
-                "SELECT name, purpose, enabled, category_codes, stock, spec \
+                "SELECT name, purpose, enabled, category_codes, stock, lot_number_source_id, spec \
                  FROM label_templates WHERE id = ?",
             )
             .bind(&key.id)
@@ -382,6 +385,7 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
                     .transpose()
                     .map_err(ApiError::internal)?,
                 stock: row.stock,
+                lot_number_source_id: row.lot_number_source_id,
                 spec: serde_json::from_str(&row.spec).map_err(ApiError::internal)?,
             })
         }

@@ -1264,6 +1264,12 @@
   color: var(--fg-2);
 }
 
+.shift-cell__lot {
+  max-inline-size: 22ch;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 /* The files an export, a form or a card kept on the host, with «Скачать» for each. */
 .stored-files {
   display: grid;
@@ -2333,6 +2339,11 @@
    whole window on a narrow one (the kit's panel does the same below its breakpoint). */
 .mk-side-panel.shift-drawer {
   --mk-panel-width: min(960px, 92vw);
+}
+
+.shift-drawer__lot {
+  display: block;
+  user-select: text;
 }
 
 @media (max-width: 1100px) {

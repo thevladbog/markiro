@@ -4,7 +4,7 @@ import { formatSsccHri } from "../gs1/sscc.js";
 import { formatLabelDate } from "./date.js";
 import { canonicalizeKm } from "../gs1/km.js";
 
-/** Data sources a text/field element on a label can be bound to. */
+/** Legacy sources shared by text, barcodes and exhaustive saved field records. */
 export const LABEL_FIELDS = [
   "product.name",
   // The catalog's optional short print name; the station substitutes the full
@@ -34,6 +34,21 @@ export type LabelField = (typeof LABEL_FIELDS)[number];
 
 const labelFieldSchema = z.enum(LABEL_FIELDS);
 
+export const LOT_NUMBER_LABEL_FIELD = "shift.lotNumber";
+/** Text also supports the optional lot number supplied by Avtonom. */
+export const LABEL_TEXT_FIELDS = [...LABEL_FIELDS, LOT_NUMBER_LABEL_FIELD] as const;
+export type LabelTextField = (typeof LABEL_TEXT_FIELDS)[number];
+
+/** Saved label jobs can predate the optional lot number. */
+export const labelFieldDataSchema = z.strictObject({
+  ...(Object.fromEntries(LABEL_FIELDS.map((field) => [field, z.string()])) as Record<
+    LabelField,
+    z.ZodString
+  >),
+  [LOT_NUMBER_LABEL_FIELD]: z.string().optional(),
+});
+export type LabelFieldData = z.infer<typeof labelFieldDataSchema>;
+
 const alignSchema = z.enum(["left", "center", "right"]);
 
 /** Shared placement fields every element carries. */
@@ -61,6 +76,12 @@ const wrappableTextShape = {
   align: alignSchema.optional(),
   maxWidthMm: z.number().positive().optional(),
   maxLines: z.number().int().min(1).max(16).optional(),
+  when: z
+    .strictObject({
+      field: z.enum([LOT_NUMBER_LABEL_FIELD, "product.egais"]),
+      op: z.literal("present"),
+    })
+    .optional(),
 };
 
 /*
@@ -82,7 +103,7 @@ export type LabelTextElement = z.infer<typeof textElementSchema>;
 const fieldElementShape = {
   kind: z.literal("field"),
   ...elementBaseShape,
-  field: labelFieldSchema,
+  field: z.enum(LABEL_TEXT_FIELDS),
   /** Human-readable identity only; the barcode continues to use the original field bytes. */
   textFormat: z
     .enum(["km_without_crypto", "quantity_number", "sscc_with_title", "sscc_spaced"])
@@ -418,8 +439,8 @@ export const BOX_QTY_UNIT_SUFFIX = "кор.";
  * there.
  */
 export function labelFieldDisplayValue(
-  field: LabelField,
-  data: Record<LabelField, string>,
+  field: LabelTextField,
+  data: LabelFieldData,
   textFormat?: LabelFieldElement["textFormat"],
 ): string {
   const value = data[field] ?? "";
@@ -452,4 +473,15 @@ export function labelFieldDisplayValue(
     if (/^\d+$/.test(digits)) return `${digits} ${BOX_QTY_UNIT_SUFFIX}`;
   }
   return value;
+}
+
+/** Skip conditional captions and values without their source data. */
+export function labelElementVisible(element: LabelElement, data: LabelFieldData): boolean {
+  if (element.kind !== "text" && element.kind !== "field") return true;
+  if (element.when && !data[element.when.field]) return false;
+  return (
+    element.kind !== "field" ||
+    element.field !== LOT_NUMBER_LABEL_FIELD ||
+    Boolean(data[LOT_NUMBER_LABEL_FIELD])
+  );
 }

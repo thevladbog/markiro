@@ -1,4 +1,4 @@
-import { LABEL_FIELDS, type LabelTemplateSpec } from "@markiro/domain";
+import { DomainError, labelFieldDataSchema, type LabelTemplateSpec } from "@markiro/domain";
 import { z } from "zod";
 
 import { bytesToBase64 } from "../../hardware/hardware.js";
@@ -45,6 +45,7 @@ export type PrintJobState = (typeof PRINT_JOB_STATES)[number];
 export const FAILED_CODES = [
   "printer_unconfigured",
   "render_failed",
+  "lot_template_overflow",
   "not_sent",
   "invalid_target",
   "invalid_payload",
@@ -145,7 +146,6 @@ const jobRow = z.object({
 });
 
 /** Every field of the domain, each a string: what `boxLabelData` gives. */
-const fieldsSchema = z.record(z.enum(LABEL_FIELDS), z.string());
 
 /**
  * A stored job this build cannot read: its printer profile or its fields are
@@ -177,7 +177,7 @@ function toJob(row: z.infer<typeof jobRow>): PrintJob {
       printer = parsePrinterProfile(JSON.parse(row.printer));
       if (printer === null) throw new UnreadableJobError(row.id);
     }
-    fields = fieldsSchema.parse(JSON.parse(row.fields));
+    fields = labelFieldDataSchema.parse(JSON.parse(row.fields));
   } catch {
     throw new UnreadableJobError(row.id);
   }
@@ -307,8 +307,11 @@ export async function prepareLabelJob(
   if (printer !== null) {
     try {
       bytes = bytesToBase64(await render(label.template.spec, label.fields, printer));
-    } catch {
-      error = "render_failed";
+    } catch (cause) {
+      error =
+        cause instanceof DomainError && cause.code === "LABEL_LOT_NUMBER_OVERFLOW"
+          ? "lot_template_overflow"
+          : "render_failed";
     }
   }
   return {

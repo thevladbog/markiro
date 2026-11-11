@@ -39,7 +39,7 @@ use sqlx::SqliteConnection;
 use crate::auth::AuthDevice;
 use crate::cloud_history::warehouse as history;
 use crate::db::begin_write;
-use crate::error::{ApiError, ApiJson};
+use crate::error::{ApiError, ApiJson, ApiQuery};
 use crate::facts::rules;
 use crate::server::AppState;
 use crate::shifts;
@@ -86,6 +86,7 @@ struct ShiftPart {
     counterparty_name: Option<String>,
     shift_number: String,
     production_date: String,
+    lot_number: Option<String>,
 }
 
 async fn shift_part(conn: &mut SqliteConnection, shift_id: &str) -> Result<ShiftPart, ApiError> {
@@ -103,6 +104,7 @@ async fn shift_part(conn: &mut SqliteConnection, shift_id: &str) -> Result<Shift
     Ok(ShiftPart {
         product: snapshot.product,
         counterparty_name: snapshot.counterparty_name,
+        lot_number: snapshot.lot_number,
         shift_number: shifts::format_number(&month_key, seq, origin),
         production_date,
     })
@@ -121,14 +123,22 @@ enum Asked<'a> {
 
 const STATION_ONLY: &str = "only a station reprints warehouse labels";
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WarehouseLookupQuery {
+    lot_numbers: Option<u8>,
+}
+
 /// `POST /v1/device/warehouse/lookup`: a station of the site (another kind of
 /// device is `forbidden`: the answer carries a unit's full code); exactly one
 /// of `codeHash` (64 lower-case hex digits) and `sscc` (18 digits),
 /// `validation_failed` otherwise. An explicit `null` reads as an absent
 /// field (it is an `Option`); the station's Zod schema is the stricter side.
+/// A station asks with `lotNumbers=1` before it can reprint a source with a lot.
 pub async fn lookup(
     State(state): State<AppState>,
     device: AuthDevice,
+    ApiQuery(query): ApiQuery<WarehouseLookupQuery>,
     ApiJson(what): ApiJson<WarehouseLookup>,
 ) -> Result<Json<WarehouseLookupResult>, ApiError> {
     if !matches!(device.kind, DeviceKind::Station | DeviceKind::Handheld) {
@@ -157,7 +167,17 @@ pub async fn lookup(
         Asked::Sscc(sscc) => find_sscc(&mut tx, sscc).await,
     };
     tx.rollback().await.map_err(ApiError::internal)?;
-    found.map(Json)
+    let found = found?;
+    if device.kind == DeviceKind::Station
+        && query.lot_numbers != Some(1)
+        && matches!(&found, WarehouseLookupResult::Found { source } if source.lot_number.is_some())
+    {
+        return Err(ApiError::conflict(
+            "station_update",
+            "this station cannot reprint a lot number: update it",
+        ));
+    }
+    Ok(Json(found))
 }
 
 async fn find_unit(
@@ -197,6 +217,7 @@ async fn find_unit(
     let shift = shift_part(conn, &shift_id).await?;
     Ok(WarehouseLookupResult::Found {
         source: WarehouseSource {
+            lot_number: shift.lot_number,
             kind: WarehouseSubjectKind::Unit,
             subject_id: scan_id,
             identity: code_hash.to_owned(),
@@ -246,6 +267,7 @@ async fn find_sscc(
         let shift = shift_part(conn, &shift_id).await?;
         return Ok(WarehouseLookupResult::Found {
             source: WarehouseSource {
+                lot_number: shift.lot_number,
                 kind: WarehouseSubjectKind::Box,
                 subject_id: id,
                 identity: sscc.to_owned(),
@@ -297,6 +319,7 @@ async fn find_sscc(
     let shift = shift_part(conn, &shift_id).await?;
     Ok(WarehouseLookupResult::Found {
         source: WarehouseSource {
+            lot_number: shift.lot_number,
             kind: WarehouseSubjectKind::Pallet,
             subject_id: id,
             identity: sscc.to_owned(),

@@ -14,16 +14,16 @@ use crate::error::{ApiError, ApiJson};
 use crate::server::AppState;
 use crate::validate;
 
-type OrgRow = (String, Option<String>, String, String, String, i64);
+type OrgRow = (String, Option<String>, String, String, String, bool, i64);
 
 async fn read_org(conn: &mut SqliteConnection) -> Result<OrgProfile, ApiError> {
     let row: Option<OrgRow> = sqlx::query_as(
-        "SELECT name, inn, gln, gs1_prefixes, time_zone, rev FROM org_profile WHERE id = 1",
+        "SELECT name, inn, gln, gs1_prefixes, time_zone, use_lot_numbers, rev FROM org_profile WHERE id = 1",
     )
     .fetch_optional(conn)
     .await
     .map_err(ApiError::internal)?;
-    let (name, inn, gln, gs1_prefixes, time_zone, rev) =
+    let (name, inn, gln, gs1_prefixes, time_zone, use_lot_numbers, rev) =
         row.ok_or_else(|| ApiError::not_found("the host is not initialized"))?;
     Ok(OrgProfile {
         name,
@@ -31,6 +31,7 @@ async fn read_org(conn: &mut SqliteConnection) -> Result<OrgProfile, ApiError> {
         gln,
         gs1_prefixes: serde_json::from_str(&gs1_prefixes).map_err(ApiError::internal)?,
         time_zone,
+        use_lot_numbers,
         rev,
     })
 }
@@ -76,6 +77,7 @@ pub async fn put_org(
             "this GLN's prefix is the demo data's; remove the demo data first",
         ));
     }
+    let use_lot_numbers = update.use_lot_numbers.unwrap_or(current.use_lot_numbers);
     let Some(details) = audit::update_details(&[
         ("name", json!(current.name), json!(org.name)),
         ("inn", json!(current.inn), json!(org.inn)),
@@ -86,6 +88,11 @@ pub async fn put_org(
             json!(org.gs1_prefixes),
         ),
         ("timeZone", json!(current.time_zone), json!(org.time_zone)),
+        (
+            "useLotNumbers",
+            json!(current.use_lot_numbers),
+            json!(use_lot_numbers),
+        ),
     ]) else {
         // Nothing actually changed: report the profile as-is without bumping
         // the revision, writing a row nobody changed, or auditing a no-op.
@@ -93,13 +100,14 @@ pub async fn put_org(
     };
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query(
-        "UPDATE org_profile SET name = ?, inn = ?, gln = ?, gs1_prefixes = ?, time_zone = ?, rev = ? WHERE id = 1",
+        "UPDATE org_profile SET name = ?, inn = ?, gln = ?, gs1_prefixes = ?, time_zone = ?, use_lot_numbers = ?, rev = ? WHERE id = 1",
     )
     .bind(&org.name)
     .bind(&org.inn)
     .bind(&org.gln)
     .bind(serde_json::to_string(&org.gs1_prefixes).map_err(ApiError::internal)?)
     .bind(&org.time_zone)
+    .bind(use_lot_numbers)
     .bind(rev)
     .execute(&mut *tx)
     .await

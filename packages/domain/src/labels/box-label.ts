@@ -1,5 +1,5 @@
 import { formatLabelDate } from "./date.js";
-import type { LabelField } from "./model.js";
+import { LOT_NUMBER_LABEL_FIELD, type LabelFieldData } from "./model.js";
 import { addCalendarDays, shelfLifeExpiryDate } from "./shelf-life.js";
 
 export interface BoxLabelInput {
@@ -17,6 +17,7 @@ export interface BoxLabelInput {
   productionDate: string | null;
   /** `AUG26-003/S`; null when the mirror predates the shift-number sync. */
   shiftNumber: string | null;
+  lotNumber?: string | null;
 }
 
 function pad(value: number, width: number): string {
@@ -92,7 +93,7 @@ export function expiryIsoDate(
  * instant — only the rendering is local and reformatted, and no
  * machine-readable export reads these two fields.
  */
-export function boxLabelFields(input: BoxLabelInput): Record<LabelField, string> {
+export function boxLabelFields(input: BoxLabelInput): LabelFieldData {
   const effectiveDate = effectiveProductionIsoDate(input.closedAt, input.productionDate);
   const effectiveExpiry = shelfLifeExpiryDate(effectiveDate, input.shelfLifeDays);
 
@@ -104,6 +105,7 @@ export function boxLabelFields(input: BoxLabelInput): Record<LabelField, string>
     "km.code": "",
     sscc: input.sscc,
     "shift.no": input.shiftNumber ?? "",
+    ...(input.lotNumber ? { [LOT_NUMBER_LABEL_FIELD]: input.lotNumber } : {}),
     date: formatLabelDate(effectiveDate),
     expiry: formatLabelDate(effectiveExpiry),
     qty: String(input.itemCount),

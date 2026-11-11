@@ -1,3 +1,4 @@
+import { lotNumberLabelWidthDots, rasterizeLabelLotNumber } from "./lot-number-raster.js";
 import { renderLabelLogo } from "./label-logo.js";
 import type { MonoBitmap } from "./mono-compose.js";
 import bwipjs from "bwip-js/generic";
@@ -7,10 +8,12 @@ import { renderCode128Svg, renderLiteralDataMatrixSvg } from "../barcodes/svg.js
 import { code128ModuleCount, EAN13_MODULES } from "./code128.js";
 import {
   labelFieldDisplayValue,
+  labelElementVisible,
+  LOT_NUMBER_LABEL_FIELD,
   mmToDots,
   ptToDots,
   type LabelBarcodeElement,
-  type LabelField,
+  type LabelFieldData,
   type LabelTemplateSpec,
   type PrinterDpi,
 } from "./model.js";
@@ -57,7 +60,7 @@ export interface LabelRenderPlan {
   heightMm: number;
   widthDots: number;
   heightDots: number;
-  fields: Record<LabelField, string>;
+  fields: LabelFieldData;
   elements: LabelRenderElement[];
 }
 
@@ -66,7 +69,7 @@ export interface LabelRenderPlan {
  * Existing production emitters and previously frozen bytes are unaffected. */
 export async function createLabelRenderPlan(
   spec: LabelTemplateSpec,
-  fields: Record<LabelField, string>,
+  fields: LabelFieldData,
   destination: {
     language: LabelTemplateSpec["language"];
     dpi: PrinterDpi;
@@ -76,9 +79,11 @@ export async function createLabelRenderPlan(
 ): Promise<LabelRenderPlan> {
   const { dpi, language, rasterizeText } = destination;
   const data = { ...fields };
+  const target = { dpi, widthMm: spec.widthMm, heightMm: spec.heightMm };
   const elements: LabelRenderElement[] = [];
   const toMm = (dots: number) => (dots * 25.4) / dpi;
   for (const element of spec.elements) {
+    if (!labelElementVisible(element, data)) continue;
     const position = {
       id: element.id,
       xDots: mmToDots(element.xMm, dpi),
@@ -89,19 +94,25 @@ export async function createLabelRenderPlan(
         element.kind === "text"
           ? element.text
           : labelFieldDisplayValue(element.field, data, element.textFormat);
-      const maxWidthPx =
-        element.maxWidthMm === undefined ? undefined : mmToDots(element.maxWidthMm, dpi);
-      const raster = await rasterizeText(text, {
-        fontFamily: element.fontFamily ?? "sans-serif",
-        ...(element.minFontSizePt === undefined
-          ? {}
-          : { minFontSizePx: ptToDots(element.minFontSizePt, dpi) }),
-        ...(element.lineHeight === undefined ? {} : { lineHeight: element.lineHeight }),
-        fontSizePx: ptToDots(element.fontSizePt, dpi),
-        bold: element.bold ?? false,
-        maxWidthPx,
-        maxLines: element.maxLines ?? 1,
-      });
+      const lot = element.kind === "field" && element.field === LOT_NUMBER_LABEL_FIELD;
+      const maxWidthPx = lot
+        ? lotNumberLabelWidthDots(element, target)
+        : element.maxWidthMm === undefined
+          ? undefined
+          : mmToDots(element.maxWidthMm, dpi);
+      const raster = lot
+        ? await rasterizeLabelLotNumber(element, target, text, rasterizeText)
+        : await rasterizeText(text, {
+            fontFamily: element.fontFamily ?? "sans-serif",
+            ...(element.minFontSizePt === undefined
+              ? {}
+              : { minFontSizePx: ptToDots(element.minFontSizePt, dpi) }),
+            ...(element.lineHeight === undefined ? {} : { lineHeight: element.lineHeight }),
+            fontSizePx: ptToDots(element.fontSizePt, dpi),
+            bold: element.bold ?? false,
+            maxWidthPx,
+            maxLines: element.maxLines ?? 1,
+          });
       elements.push({
         ...position,
         xDots: position.xDots + rasterAlignOffsetDots(element.align, maxWidthPx, raster.width),

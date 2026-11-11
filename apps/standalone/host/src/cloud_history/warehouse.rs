@@ -190,6 +190,7 @@ fn source(
     };
     WarehouseLookupResult::Found {
         source: WarehouseSource {
+            lot_number: None,
             kind,
             subject_id,
             identity: identity.to_owned(),

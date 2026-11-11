@@ -288,6 +288,7 @@ export function ShiftsPage() {
       sortable: true,
       title: t("office.shifts.table.number"),
       mono: true,
+      ...(filtered.some((shift) => shift.lotNumber) ? { minWidth: 144 } : {}),
       // The number opens the shift's card (plan О-Ф).
       render: (shift) => (
         <span className="shift-cell">
@@ -297,6 +298,11 @@ export function ShiftsPage() {
           >
             {shift.number}
           </Link>
+          {shift.lotNumber && (
+            <span className="shift-cell__quiet shift-cell__lot">
+              {t("office.shifts.lot", { number: shift.lotNumber })}
+            </span>
+          )}
           {isDemoShift(shift, products.data) && <DemoBadge />}
         </span>
       ),

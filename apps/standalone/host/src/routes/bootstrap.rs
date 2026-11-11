@@ -217,6 +217,9 @@ pub async fn bootstrap(
         .map_err(ApiError::internal)?;
         template_ids.push(id);
     }
+    crate::lot_templates::add_label_variants(&mut tx, Some(rev))
+        .await
+        .map_err(ApiError::internal)?;
     let default_of = |purpose: TemplatePurpose| {
         defaults
             .get(&purpose)

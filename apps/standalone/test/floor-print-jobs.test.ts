@@ -22,6 +22,7 @@ import { processScan, type ScanContext } from "../src/floor/work/scan-pipeline.j
 import type { LocalExecutor } from "../src/local/executor.js";
 import {
   enteredShift,
+  ENTERED,
   failingWrites,
   holdingWrites,
   km,
@@ -53,9 +54,14 @@ const BLOCK = "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a";
 const SSCC = buildSscc(0, PREFIX, 1500);
 const OTHER_DEVICE = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
 
-async function station() {
+async function station(lotNumber?: string) {
   const { db, executor } = openLocalDb();
-  const shift = await enteredShift(executor);
+  const shift = await enteredShift(
+    executor,
+    lotNumber === undefined
+      ? ENTERED
+      : { ...ENTERED, lotNumber, snapshot: { ...ENTERED.snapshot, lotNumber } },
+  );
   seedBlock(db, { blockId: BLOCK, from: 1500, to: 3499 });
   return { db, local: executor, shift };
 }
@@ -138,6 +144,13 @@ describe("a box's print job", () => {
     const stored = await job(at);
     expect(stored.fields).toEqual(render.mock.calls[0]?.[1]);
     expect(isOpenJob(stored)).toBe(true);
+  });
+
+  it("reads the exact lot from the prepared job for recovery and repeat printing", async () => {
+    const at = await station("0042Бк07A");
+    await setUpPrinting(at.local);
+    expect((await closeWithLabel(at)).kind).toBe("closed");
+    expect((await job(at)).fields["shift.lotNumber"]).toBe("0042Бк07A");
   });
 
   it("takes the layout of the snapshot's template revision, not the station's newer copy of it", async () => {

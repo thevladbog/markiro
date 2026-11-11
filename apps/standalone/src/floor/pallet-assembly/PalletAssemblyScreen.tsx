@@ -253,7 +253,11 @@ export function PalletAssemblyScreen({
     }
     const [prefix, template] = await Promise.all([
       assemblyIssuerPrefix(local),
-      assemblyTemplate(local, pallet.product),
+      assemblyTemplate(
+        local,
+        pallet.product,
+        pallet.boxes.some((box) => box.lotNumber != null),
+      ),
     ]);
     if (prefix === null || template === null) {
       setFailure(prefix === null ? "issuerMissing" : "templateMissing");

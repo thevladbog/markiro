@@ -36,7 +36,8 @@ use crate::validate;
 /// numbers are read as JSON text and parsed here, never as SQLite values: an
 /// integer above `i64::MAX` comes back from `json_extract` as a REAL that
 /// sqlx cannot decode, and one stored layout would make the whole list fail.
-const SUMMARY: &str = "SELECT id, name, purpose, enabled, category_codes, stock, rev, \
+const SUMMARY: &str =
+    "SELECT id, name, purpose, enabled, category_codes, stock, lot_number_source_id, rev, \
      CASE WHEN json_type(spec, '$.widthMm') IN ('integer', 'real') \
          THEN spec -> '$.widthMm' END AS width_mm, \
      CASE WHEN json_type(spec, '$.heightMm') IN ('integer', 'real') \
@@ -47,7 +48,7 @@ const SUMMARY: &str = "SELECT id, name, purpose, enabled, category_codes, stock,
      FROM label_templates";
 
 const SELECT: &str =
-    "SELECT id, name, purpose, enabled, category_codes, stock, spec, rev FROM label_templates";
+    "SELECT id, name, purpose, enabled, category_codes, stock, lot_number_source_id, spec, rev FROM label_templates";
 
 #[derive(sqlx::FromRow)]
 struct SummaryRow {
@@ -57,6 +58,7 @@ struct SummaryRow {
     enabled: bool,
     category_codes: Option<String>,
     stock: bool,
+    lot_number_source_id: Option<String>,
     rev: i64,
     width_mm: Option<String>,
     height_mm: Option<String>,
@@ -72,6 +74,7 @@ struct TemplateRow {
     enabled: bool,
     category_codes: Option<String>,
     stock: bool,
+    lot_number_source_id: Option<String>,
     spec: String,
     rev: i64,
 }
@@ -95,6 +98,7 @@ fn summary(row: SummaryRow) -> Result<LabelTemplateSummary, ApiError> {
         enabled: row.enabled,
         chz_product_group_codes: parse_codes(row.category_codes)?,
         stock: row.stock,
+        lot_number_source_id: row.lot_number_source_id,
         width_mm: spec_number(row.width_mm),
         height_mm: spec_number(row.height_mm),
         // An integer that fits a `u32`: a negative one, or one above the
@@ -113,6 +117,7 @@ fn template(row: TemplateRow) -> Result<LabelTemplate, ApiError> {
         enabled: row.enabled,
         chz_product_group_codes: parse_codes(row.category_codes)?,
         stock: row.stock,
+        lot_number_source_id: row.lot_number_source_id,
         spec: serde_json::from_str(&row.spec).map_err(ApiError::internal)?,
         rev: row.rev,
     })

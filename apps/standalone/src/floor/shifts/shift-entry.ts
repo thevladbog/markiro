@@ -37,6 +37,7 @@ export type EntryRefusal =
   | "pallet_template_not_fit"
   | "duplicate_template_not_fit"
   | "station_update"
+  | "lot_template_missing"
   | "line_full"
   | "part_closed"
   | "unreadable"
@@ -85,6 +86,7 @@ const CONFLICTS: Readonly<Record<string, EntryRefusal>> = {
   pallet_template_not_fit: "pallet_template_not_fit",
   duplicate_template_not_fit: "duplicate_template_not_fit",
   station_update: "station_update",
+  lot_template_missing: "lot_template_missing",
 };
 
 /**

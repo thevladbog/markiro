@@ -1045,6 +1045,18 @@ fn without_0016(rows: Vec<Value>, before: &[Value]) -> Vec<Value> {
         .filter(|row| row["tbl_name"] != "installation_dataset_epochs")
         .filter(|row| row["tbl_name"] != "floor_shift_participation")
         .map(|mut row| {
+            // The historical migrations are compared against a database that has since taken 0025.
+            let lot_column = match row["name"].as_str() {
+                Some("ref_org") => Some(", use_lot_numbers INTEGER NOT NULL DEFAULT 0 CHECK (use_lot_numbers IN (0, 1))"),
+                Some("ref_templates") => Some(", lot_number_source_id TEXT"),
+                Some("floor_shifts") => Some(", lot_number TEXT"),
+                _ => None,
+            };
+            if let Some(column) = lot_column {
+                let sql = row["sql"].as_str().unwrap();
+                assert!(sql.contains(column), "0025 appends {column}");
+                row["sql"] = json!(sql.replacen(column, "", 1));
+            }
             if row["type"] == "table" && row["name"] == "ref_products" {
                 let old = before
                     .iter()

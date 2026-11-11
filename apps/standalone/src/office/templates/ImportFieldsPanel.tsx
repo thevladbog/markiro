@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { LABEL_FIELDS, type LabelField } from "@markiro/domain";
+import { LABEL_TEXT_FIELDS, type LabelTextField } from "@markiro/domain";
 import { Button } from "@markiro/ui";
 
 /** The i18n key of each field a layout can print, under `office.labelFields`. */
-export const LABEL_FIELD_KEYS: Record<LabelField, string> = {
+export const LABEL_FIELD_KEYS: Record<LabelTextField, string> = {
   "product.name": "office.labelFields.productName",
   "product.printName": "office.labelFields.productPrintName",
   "product.gtin": "office.labelFields.productGtin",
@@ -13,6 +13,7 @@ export const LABEL_FIELD_KEYS: Record<LabelField, string> = {
   "km.code": "office.labelFields.kmCode",
   sscc: "office.labelFields.sscc",
   "shift.no": "office.labelFields.shiftNo",
+  "shift.lotNumber": "office.labelFields.lotNumber",
   date: "office.labelFields.date",
   expiry: "office.labelFields.expiry",
   qty: "office.labelFields.qty",
@@ -65,7 +66,7 @@ export function ImportFieldsPanel({ syntax }: ImportFieldsPanelProps) {
             : "office.templateImport.fieldsHint",
         )}
       </p>
-      {LABEL_FIELDS.map((field) => {
+      {LABEL_TEXT_FIELDS.map((field) => {
         const token = syntax === "json" ? field : `{{${field}}}`;
         return (
           <div className="template-import__field" key={field}>

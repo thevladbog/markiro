@@ -72,7 +72,7 @@ import { completeWizard, expectedRequest } from "./support/wizard.js";
 
 /** The body of every entry this station sends (`shift-enter.json`, plan РЕЖ). */
 const STATION_ENTRY = {
-  supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1"],
+  supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1", "lot-number"],
 };
 
 /**

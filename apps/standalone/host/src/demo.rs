@@ -156,6 +156,7 @@ pub async fn create(conn: &mut SqliteConnection, wizard: &Wizard<'_>) -> Result<
     shifts::insert(
         conn,
         &NewShift {
+            lot_number: None,
             origin: ShiftOrigin::Office,
             mode: ShiftMode::Aggregation,
             created_by: wizard.admin_id,

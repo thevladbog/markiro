@@ -26,6 +26,9 @@ pub struct OfficeWarehousePalletMember {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OfficeWarehousePalletDetail {
+    /// The common lot of all member boxes at close, when there was one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lot_number: Option<String>,
     pub id: String,
     pub sscc: Option<String>,
     pub source: String,

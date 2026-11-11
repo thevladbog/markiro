@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { lotNumberSchema } from "./protocol.js";
+
 const ssccSchema = z.string().regex(/^\d{18}$/);
 
 /** `markiro_proto::BoxRegistryItem`. A removal carries only the identity and change time. */
@@ -16,6 +18,7 @@ export const boxRegistryItemSchema = z.object({
   closedAt: z.iso.datetime().optional(),
   productionDate: z.iso.date().optional(),
   shiftNumber: z.string().optional(),
+  lotNumber: lotNumberSchema,
 });
 
 export const boxRegistryPageSchema = z.object({
@@ -24,6 +27,7 @@ export const boxRegistryPageSchema = z.object({
   nextCursor: z.string().min(1).optional(),
   restoreEpoch: z.string().optional(),
   canOpenPallets: z.boolean().optional(),
+  lotNumbersSupported: z.boolean().optional(),
 });
 
 export type BoxRegistryItem = z.infer<typeof boxRegistryItemSchema>;
@@ -40,6 +44,7 @@ export const palletAssemblyCloseIssueSchema = z.object({
   currentBoxSsccs: z.array(ssccSchema),
   approvedBoxes: z.number().int().nonnegative().optional(),
   approvedBoxSsccs: z.array(ssccSchema).optional(),
+  approvedLotNumber: lotNumberSchema,
   createdAt: z.iso.datetime(),
   deviceName: z.string().optional(),
 });

@@ -438,6 +438,14 @@
   white-space: nowrap;
 }
 
+.shift-hub .shift-card__lot {
+  flex: none;
+  overflow: hidden;
+  font: 600 18px/22px var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .shift-hub .shift-card .mk-tag {
   border-radius: var(--r-round);
 }
@@ -746,8 +754,10 @@
     line-height: 18px;
   }
 
-  /* A shared card in the shortest window: the count says the progress, the bar gives its row up. */
-  .shift-hub .shift-card__details:has(.shift-card__participants) .shift-card__progress-bar {
+  /* Short cards with a lot or participants keep the count and give up the bar's row. */
+  .shift-hub
+    .shift-card__details:has(.shift-card__participants, .shift-card__lot)
+    .shift-card__progress-bar {
     display: none;
   }
 
@@ -922,6 +932,44 @@
 
 .new-shift .new-shift__fields p {
   margin: 0;
+}
+
+.new-shift .new-shift__panel--lot {
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0;
+}
+
+.new-shift .new-shift__panel--lot .new-shift__message:empty {
+  min-height: 0;
+}
+
+.new-shift__lot {
+  display: grid;
+  justify-self: center;
+  width: min(100%, 940px);
+  min-width: 0;
+  gap: var(--sp-3);
+  padding-bottom: var(--sp-1);
+}
+
+.new-shift__lot-keyboard {
+  display: grid;
+  gap: 4px;
+}
+
+.new-shift__lot-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+}
+
+.new-shift__lot .mk-btn.new-shift__lot-key {
+  width: 64px;
+  min-width: 64px;
+  height: 64px;
+  min-height: 64px;
+  padding-inline: 0;
 }
 
 .new-shift .new-shift__left {

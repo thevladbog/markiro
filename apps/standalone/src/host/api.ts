@@ -1298,7 +1298,7 @@ export function createHostApi(client: HostClient): HostApi {
         { schema: palletSheetsSchema },
       ),
     warehouseLookup: (lookup) =>
-      client.request("POST", "/v1/device/warehouse/lookup", {
+      client.request("POST", "/v1/device/warehouse/lookup?lotNumbers=1", {
         body: lookup,
         schema: warehouseLookupResultSchema,
       }),

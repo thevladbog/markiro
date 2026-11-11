@@ -5,6 +5,9 @@ import {
   kmHash,
   isPalletSheetSpec,
   palletLabelFields,
+  palletSheetUsesLotNumber,
+  labelTemplateUsesField,
+  LOT_NUMBER_LABEL_FIELD,
   parseDuplicateKm,
   parseStoredLabelTemplate,
   resolveWarehouseReprintScan,
@@ -220,6 +223,7 @@ export type LookupAnswer =
   | { kind: "unavailable"; reason: WarehouseUnavailableReason }
   | { kind: "offline" }
   | { kind: "host_outdated" }
+  | { kind: "station_update" }
   | { kind: "restore_pending" }
   | { kind: "lookup_failed" }
   | { kind: "host_error"; error: unknown };
@@ -256,6 +260,9 @@ export async function lookUp(
         return error.code === "invalid_response" ? { kind: "lookup_failed" } : { kind: "offline" };
       }
       if (error.code === "not_found") return { kind: "host_outdated" };
+      if (error.code === "conflict" && error.details["constraint"] === "station_update") {
+        return { kind: "station_update" };
+      }
       if (error.code === "restore_pending") return { kind: "restore_pending" };
     }
     return { kind: "lookup_failed" };
@@ -290,6 +297,7 @@ export function sourceFields(source: WarehouseSource): LabelFields {
     closedAt: source.at,
     productionDate: source.productionDate,
     shiftNumber: source.shiftNumber,
+    lotNumber: source.lotNumber ?? null,
   };
   if (source.kind === "unit") {
     const km = parseDuplicateKm(source.canonical ?? "");
@@ -322,6 +330,8 @@ export type PrepareRefusal =
   | "no_template"
   | "template_unavailable"
   | "template_unfit"
+  | "lot_template_missing"
+  | "lot_template_overflow"
   | "operator_denied"
   | "busy";
 
@@ -353,10 +363,22 @@ async function sheetFor(
   } catch {
     return { kind: "refused", reason: "sheets_unavailable" };
   }
-  const sheet = chosenSheet(listed, choice);
+  const selected = chosenSheet(listed, choice);
+  const sheet =
+    source.lotNumber == null
+      ? selected
+      : (listed.sheets.find(
+          (candidate) =>
+            candidate.enabled &&
+            candidate.lotNumberSourceId != null &&
+            candidate.lotNumberSourceId === selected?.id,
+        ) ?? selected);
   if (sheet === null) return { kind: "refused", reason: "template_unavailable" };
   const spec = sheetSpecOf(sheet);
   if (spec === null) return { kind: "refused", reason: "template_unfit" };
+  if (source.lotNumber != null && !palletSheetUsesLotNumber(spec)) {
+    return { kind: "refused", reason: "lot_template_missing" };
+  }
   return { kind: "ok", frozen: { id: sheet.id, rev: sheet.revision, spec } };
 }
 
@@ -402,13 +424,24 @@ export async function prepareWarehouseJob(
     if (sheet.kind === "refused") return sheet;
     frozen = sheet.frozen;
   } else {
+    const templates = await readWarehouseTemplates(local);
+    const selected = session.templates[source.kind];
+    const sibling =
+      source.lotNumber == null
+        ? undefined
+        : templates.find(
+            (candidate) => candidate.enabled && candidate.lotNumberSourceId === selected,
+          );
     const check = checkTemplate(
-      await readWarehouseTemplates(local),
-      session.templates[source.kind],
+      templates,
+      sibling?.id ?? selected,
       source.kind,
       source.product.chzProductGroupCode,
     );
     if (check.kind !== "ok") return { kind: "refused", reason: check.kind };
+    if (source.lotNumber != null && !labelTemplateUsesField(check.spec, LOT_NUMBER_LABEL_FIELD)) {
+      return { kind: "refused", reason: "lot_template_missing" };
+    }
     frozen = { id: check.template.id, rev: check.template.rev, spec: check.spec };
   }
   if ((await readOpenJob(local, pairing, session.id)) !== null) {
@@ -421,7 +454,10 @@ export async function prepareWarehouseJob(
       bytes = bytesToBase64(
         await renderOf(context)(frozen.spec, fields, printer, renderOptions(source.kind)),
       );
-    } catch {
+    } catch (cause) {
+      if (cause instanceof DomainError && cause.code === "LABEL_LOT_NUMBER_OVERFLOW") {
+        return { kind: "refused", reason: "lot_template_overflow" };
+      }
       error = "render_failed";
     }
   }
@@ -742,6 +778,7 @@ export type ScanOutcome =
   | { kind: "duplicate"; job: WarehouseJob }
   | { kind: "offline" }
   | { kind: "host_outdated" }
+  | { kind: "station_update" }
   | { kind: "restore_pending" }
   | { kind: "lookup_failed" }
   | { kind: "not_found" }

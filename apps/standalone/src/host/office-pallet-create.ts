@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { lotNumberSchema } from "./protocol.js";
+
 export const PALLET_CODE_ERRORS = [
   "invalid_sscc",
   "not_box",
@@ -46,6 +48,7 @@ export const officeWarehousePalletDetailSchema = z.object({
   productId: z.uuid(),
   productName: z.string(),
   gtin14: z.string(),
+  lotNumber: lotNumberSchema,
   shelfLifeDays: z.number().int().nullable(),
   openedAt: z.string(),
   closedAt: z.string().nullable(),

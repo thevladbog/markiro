@@ -71,6 +71,10 @@ export { boxMembershipDigestV1 } from "./sync/box-reconciliation.js";
 export type { ScanVerdict, ShiftScanContext } from "./scan/validate.js";
 export {
   LABEL_FIELDS,
+  LABEL_TEXT_FIELDS,
+  LOT_NUMBER_LABEL_FIELD,
+  labelElementVisible,
+  labelFieldDataSchema,
   labelFieldDisplayValue,
   labelTemplateSpecSchema,
   labelTemplateSpecStrictSchema,
@@ -81,6 +85,7 @@ export {
   sampleLabelData,
   withPrinterDpi,
 } from "./labels/model.js";
+export { lotNumberLabelWidthDots, rasterizeLabelLotNumber } from "./labels/lot-number-raster.js";
 export {
   isBoxLabelTemplateEligible,
   isPalletLabelTemplateEligible,
@@ -127,15 +132,19 @@ export {
   PALLET_LABEL_58X40_TEMPLATE_NAME,
   PALLET_LABEL_TEMPLATE_NAME,
 } from "./labels/pallet-defaults.js";
+export { buildStockLotNumberLabelVariants } from "./labels/stock-lot-number.js";
+export type { StockLotNumberLabelVariant } from "./labels/stock-lot-number.js";
 export type {
   LabelBarcodeElement,
   LabelBoxElement,
   LabelElement,
   LabelField,
+  LabelFieldData,
   LabelFieldElement,
   LabelLineElement,
   LabelTemplateSpec,
   LabelTextElement,
+  LabelTextField,
   PrinterDpi,
 } from "./labels/model.js";
 export {
@@ -456,6 +465,7 @@ export { renderMonoLabel } from "./labels/mono-render.js";
 
 export {
   palletSheetSpecSchema,
+  palletSheetUsesLotNumber,
   sheetNodeSchema,
   parsePalletSheetSpec,
   ssccWidthMm,
@@ -496,7 +506,10 @@ export type {
 } from "./labels/stored-template.js";
 
 export { wrapTextToWidthStrict } from "./labels/wrap.js";
-export { buildPalletSheetPresets } from "./labels/pallet-sheet-defaults.js";
+export {
+  buildPalletSheetLotNumberPresets,
+  buildPalletSheetPresets,
+} from "./labels/pallet-sheet-defaults.js";
 export type { PalletSheetPreset } from "./labels/pallet-sheet-defaults.js";
 export {
   renderPalletSheet,

@@ -3121,3 +3121,127 @@ async fn a_snapshot_stored_before_plan_tov_reads_as_no_code() {
     assert_eq!(again["snapshot"]["product"]["egaisCode"], Value::Null);
     assert_eq!(again["snapshot"]["product"]["gtin14"], "04600682000013");
 }
+
+#[tokio::test]
+async fn station_create_replays_the_stored_lot_and_entry_checks_capability() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    sqlx::query(
+        "UPDATE label_templates SET spec = json_set(spec, '$.elements', json(?)) WHERE id = ?",
+    )
+    .bind(json!([{ "kind": "field", "field": "shift.lotNumber" }]).to_string())
+    .bind(&setup.template)
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let mut request = device_create(&setup, REQUEST);
+    request["lotNumber"] = json!(" 0042Бк07AЁ ");
+    let (status, planned) = device_call(
+        &admin,
+        &admin.key,
+        "POST",
+        "/v1/device/shifts",
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{planned}");
+    assert_eq!(planned["lotNumber"], "0042Бк07AЁ");
+    let rev = host_revision(&admin.app).await;
+    request["lotNumber"] = json!("другая-партия");
+    let replay = device_call(
+        &admin,
+        &admin.key,
+        "POST",
+        "/v1/device/shifts",
+        Some(request),
+    )
+    .await;
+    assert_eq!(replay, (StatusCode::OK, planned.clone()));
+    assert_eq!(host_revision(&admin.app).await, rev);
+    let rows = audit_trail(&admin.app, "shift.create").await;
+    assert_eq!(
+        rows,
+        vec![device_row(
+            &device_id(&admin, &admin.key).await,
+            "shift.create",
+            planned["id"].as_str().unwrap(),
+            json!({
+                "number": planned["number"], "productId": setup.product, "lineId": setup.line,
+                "productionDate": "2026-10-09", "lotNumber": "0042Бк07AЁ"
+            }),
+        )]
+    );
+
+    let (status, refused) = enter(&admin, &admin.key, &planned).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"]["details"]["constraint"], "station_update");
+    assert_eq!(host_revision(&admin.app).await, rev);
+    let (status, active) = enter_with(
+        &admin,
+        &admin.key,
+        &planned,
+        json!({ "supports": ["lot-number"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{active}");
+    assert_eq!(active["lotNumber"], "0042Бк07AЁ");
+    assert_eq!(active["snapshot"]["lotNumber"], "0042Бк07AЁ");
+
+    let (status, refused) = enter(&admin, &admin.key, &active).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"]["details"]["constraint"], "station_update");
+
+    let without_lot = plan_shift(&admin, shift_body(&setup)).await;
+    let (status, refused) = enter(&admin, &admin.key, &without_lot).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"]["details"]["constraint"], "station_update");
+}
+
+#[tokio::test]
+async fn organization_lot_flag_is_synced_and_legacy_edits_keep_it() {
+    let admin = admin().await;
+    let path = "/v1/office/org";
+    let (status, org) = admin.call("GET", path, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_ne!(org["useLotNumbers"], true);
+    let mut update = json!({
+        "name": org["name"], "inn": org["inn"], "gln": org["gln"], "gs1Prefixes": org["gs1Prefixes"],
+        "timeZone": org["timeZone"], "expectedRev": org["rev"], "useLotNumbers": true,
+    });
+    let (status, enabled) = admin.call("PUT", path, Some(update.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{enabled}");
+    assert_eq!(enabled["useLotNumbers"], true);
+    assert_eq!(
+        audit_trail(&admin.app, "org.update").await,
+        vec![admin.row(
+            "org.update",
+            "org_profile",
+            "1",
+            json!({ "changed": ["useLotNumbers"], "useLotNumbers": { "from": false, "to": true } }),
+        )],
+    );
+    let (status, feed) = device_call(
+        &admin,
+        &admin.key,
+        "GET",
+        &format!("/v1/changes?since={}", org["rev"]),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{feed}");
+    let item = feed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["entity"] == "org_profile")
+        .unwrap();
+    assert_eq!(item["data"]["useLotNumbers"], true);
+
+    update.as_object_mut().unwrap().remove("useLotNumbers");
+    update["expectedRev"] = enabled["rev"].clone();
+    update["name"] = json!("Новое название");
+    let (status, kept) = admin.call("PUT", path, Some(update)).await;
+    assert_eq!(status, StatusCode::OK, "{kept}");
+    assert_eq!(kept["useLotNumbers"], true);
+}

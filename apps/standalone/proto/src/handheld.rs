@@ -101,6 +101,13 @@ pub struct PalletBoxRemovedData {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WarehousePalletClosedData {
+    /// The lot on the station's frozen print. Explicit null means its label omits the lot.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::nullable"
+    )]
+    pub lot_number: Option<Option<String>>,
     pub pallet_id: String,
     pub sscc: String,
     pub block_id: String,
@@ -126,6 +133,13 @@ pub struct WarehousePalletCloseIssue {
     pub approved_boxes: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approved_box_ssccs: Option<Vec<String>>,
+    /// Common lot of the approved set. Explicit null means the corrected label has no lot.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::nullable"
+    )]
+    pub approved_lot_number: Option<Option<String>>,
     pub created_at: String,
     pub device_name: String,
 }
@@ -224,6 +238,9 @@ pub struct BoxRegistryItem {
     /// The source shift's display number, sent only to stations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shift_number: Option<String>,
+    /// The source shift’s frozen lot number, sent only to stations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lot_number: Option<String>,
 }
 
 impl BoxRegistryItem {
@@ -242,6 +259,7 @@ impl BoxRegistryItem {
             closed_at: None,
             production_date: None,
             shift_number: None,
+            lot_number: None,
         }
     }
 }
@@ -261,6 +279,9 @@ pub struct BoxRegistryPage {
     /// Whether the license allows a new pallet. Only stations receive this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub can_open_pallets: Option<bool>,
+    /// When present, a station may include its frozen lot on a close event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lot_numbers_supported: Option<bool>,
 }
 
 /// `GET /v1/device/org/print`: what a device prints about the organization when no shift is open.

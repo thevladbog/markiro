@@ -123,6 +123,7 @@ function placard(rows: PalletReportRows, pallet: Pallet, logo: string | null): P
     productName: rows.shift.productName,
     gtin14: rows.shift.gtin14,
     shelfLifeDays: rows.shift.shelfLifeDays,
+    ...(rows.shift.lotNumber == null ? {} : { lotNumber: rows.shift.lotNumber }),
     org: reportOrg(rows.organization, logo),
     // Every box of a standalone pallet is of its own shift, so each carries
     // the shift's declared production date (the host's date is never empty).

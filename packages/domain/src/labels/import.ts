@@ -1,5 +1,11 @@
 import { DomainError } from "../errors.js";
-import { LABEL_FIELDS, type LabelField, type LabelTemplateSpec } from "./model.js";
+import {
+  LABEL_FIELDS,
+  LOT_NUMBER_LABEL_FIELD,
+  type LabelField,
+  type LabelTextField,
+  type LabelTemplateSpec,
+} from "./model.js";
 import { parseTsplLabel } from "./tspl-import.js";
 import { parseZplLabel } from "./zpl-import.js";
 
@@ -70,14 +76,27 @@ function invalidPayload(value: string, line: number, message: string): never {
   });
 }
 
+type TemplatePayload<Field extends LabelTextField> =
+  { kind: "field"; field: Field } | { kind: "literal"; value: string };
+
 export function parseTemplatePayload(
   value: string,
   line: number,
-): { kind: "field"; field: LabelField } | { kind: "literal"; value: string } {
+  element: "text",
+): TemplatePayload<LabelTextField>;
+export function parseTemplatePayload(value: string, line: number): TemplatePayload<LabelField>;
+export function parseTemplatePayload(
+  value: string,
+  line: number,
+  element?: "text",
+): TemplatePayload<LabelTextField> {
   const match = /^\{\{([^{}]+)\}\}$/.exec(value);
   if (match) {
     const candidate = match[1];
-    if (candidate !== undefined && isLabelField(candidate)) {
+    if (
+      candidate !== undefined &&
+      (isLabelField(candidate) || (element === "text" && candidate === LOT_NUMBER_LABEL_FIELD))
+    ) {
       return { kind: "field", field: candidate };
     }
     invalidPayload(value, line, `unknown label field placeholder "${candidate}"`);

@@ -1,8 +1,11 @@
 import { act, fireEvent, screen, waitFor, within, type RenderResult } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { buildStockLotNumberLabelVariants } from "@markiro/domain";
+
 import { HostError } from "../src/host/client.js";
 import type { OfficeShift, TemplateDefaults } from "../src/host/protocol.js";
+import * as lotFit from "../src/labels/lot-number-fit.js";
 import { ORG_PROFILE, TECHNOLOGIST, type FakeOfficeSession } from "./support/office.js";
 import {
   ACTIVE,
@@ -112,6 +115,73 @@ describe("office shifts: planning a shift", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("shows the optional lot field when enabled and sends the trimmed number with its original case", async () => {
+    const session = shiftsSession();
+    const stock = buildStockLotNumberLabelVariants().find((each) => each.purpose === "box");
+    if (stock === undefined) throw new Error("stock lot label missing");
+    const lotTemplate = {
+      ...MILK_BOX,
+      id: "5c6d7e8f-9a0b-4c1d-8e2f-3a4b5c6d7e8f",
+      name: "Коробка 58×40 с партией",
+      lotNumberSourceId: MILK_BOX.id,
+    };
+    session.api.listTemplates.mockResolvedValue([MILK_BOX, lotTemplate]);
+    session.api.getTemplate.mockResolvedValue({ ...lotTemplate, spec: stock.spec });
+    const check = vi.spyOn(lotFit, "checkThermalLotNumber").mockResolvedValue(null);
+    session.api.getOrg.mockResolvedValue({ ...ORG_PROFILE, useLotNumbers: true });
+    session.api.createShift.mockResolvedValue({ ...CREATED, lotNumber: "0042Бк07A" });
+    await openCreate(session);
+    fillMilk();
+    expect(valueOf("Шаблон этикетки короба")).toBe(MILK_BOX.id);
+    expect(options("Шаблон этикетки короба")).not.toContain(lotTemplate.name);
+    set("Номер партии (необязательно)", "0042-Бк");
+    submit();
+    await waitFor(() =>
+      expect(messageOf("Номер партии (необязательно)")).toContain(
+        "Только русские и латинские буквы",
+      ),
+    );
+    expect(session.api.createShift).not.toHaveBeenCalled();
+    set("Номер партии (необязательно)", "");
+    fireEvent.paste(field("Номер партии (необязательно)"), {
+      clipboardData: { getData: () => " 0042Бк07A " },
+    });
+    expect(valueOf("Номер партии (необязательно)")).toBe("0042Бк07A");
+    expect(valueOf("Шаблон этикетки короба")).toBe(lotTemplate.id);
+    submit();
+    await waitFor(() =>
+      expect(session.api.createShift).toHaveBeenCalledWith(
+        TOKEN,
+        expect.objectContaining({
+          lotNumber: "0042Бк07A",
+          boxTemplateId: lotTemplate.id,
+        }),
+      ),
+    );
+    expect(check).toHaveBeenCalledWith(stock.spec, "0042Бк07A");
+    check.mockRestore();
+  });
+
+  it("keeps a new shift in the drawer when the custom template has no lot field", async () => {
+    const session = shiftsSession();
+    const stock = buildStockLotNumberLabelVariants().find((each) => each.purpose === "box");
+    if (stock === undefined) throw new Error("stock label missing");
+    session.api.getOrg.mockResolvedValue({ ...ORG_PROFILE, useLotNumbers: true });
+    session.api.getTemplate.mockResolvedValue({ ...MILK_BOX, spec: stock.sourceSpec });
+    await openCreate(session);
+    fillMilk();
+    set("Номер партии (необязательно)", "0042Бк07A");
+    submit();
+    await waitFor(() => expect(session.api.getTemplate).toHaveBeenCalledWith(TOKEN, MILK_BOX.id));
+    expect(await screen.findByText(/нет поля «Номер партии»/)).toBeTruthy();
+    expect(session.api.createShift).not.toHaveBeenCalled();
+  });
+
+  it("keeps the field hidden on an old profile", async () => {
+    await openCreate(shiftsSession());
+    expect(within(dialog()).queryByLabelText("Номер партии (необязательно)")).toBeNull();
   });
 
   it("offers «Запланировать смену» to both roles", async () => {

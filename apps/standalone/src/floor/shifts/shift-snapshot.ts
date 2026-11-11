@@ -22,6 +22,7 @@ export interface CheckedSnapshot {
   boxTemplate: SnapshotTemplate;
   issuerPrefix: string;
   counterpartyName: string | null;
+  lotNumber?: string;
   /** The pallet layout of a shift with pallets (plan ПЛ-Ц); `null` — a shift without. */
   palletTemplate: SnapshotTemplate | null;
   /** The A4 sheet (plan А4); `null` — none, or one this build does not read. */
@@ -153,6 +154,7 @@ export function checkShiftSnapshot(raw: unknown, palletsEnabled = false): Snapsh
       boxTemplate: box,
       issuerPrefix,
       counterpartyName,
+      ...(parsed.data.lotNumber == null ? {} : { lotNumber: parsed.data.lotNumber }),
       palletTemplate: palletsEnabled ? pallet : null,
       palletSheet,
       organization,

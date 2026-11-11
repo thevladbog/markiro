@@ -35,6 +35,7 @@ export interface ShiftProduct {
 /** A box template of the copies, with what decides whether it fits. */
 export interface ShiftTemplate extends BoxTemplateCandidate {
   name: string;
+  lotNumberSourceId?: string;
 }
 
 /** What a new shift is chosen from: the copies of products, templates and defaults, and the site's zone. */
@@ -47,6 +48,7 @@ export interface NewShiftChoices {
   duplicateTemplates: ShiftTemplate[];
   defaults: BoxTemplateDefaults & PalletTemplateDefaults;
   timeZone: string | null;
+  useLotNumbers?: boolean;
 }
 
 const productRow = z.object({
@@ -66,6 +68,7 @@ const templateRow = z.object({
   purpose: z.enum(["box", "pallet", "product_duplicate"]),
   enabled: z.number(),
   category_codes: z.string().nullable(),
+  lot_number_source_id: z.string().nullish(),
 });
 const defaultRow = z.object({
   chz_group_code: z.number(),
@@ -74,6 +77,7 @@ const defaultRow = z.object({
 });
 const orgRow = z.object({
   time_zone: z.string(),
+  use_lot_numbers: z.number().optional(),
   default_box_template_id: z.string().nullable(),
   default_pallet_template_id: z.string().nullable(),
 });
@@ -99,7 +103,7 @@ export async function readNewShiftChoices(
     productRow,
   );
   const templates = await local.query(
-    "SELECT id, name, purpose, enabled, category_codes FROM ref_templates " +
+    "SELECT id, name, purpose, enabled, category_codes, lot_number_source_id FROM ref_templates " +
       "WHERE purpose IN ('box', 'pallet', 'product_duplicate') ORDER BY name, id",
     [],
     templateRow,
@@ -110,7 +114,7 @@ export async function readNewShiftChoices(
     defaultRow,
   );
   const [org] = await local.query(
-    "SELECT time_zone, default_box_template_id, default_pallet_template_id FROM ref_org",
+    "SELECT time_zone, default_box_template_id, default_pallet_template_id, use_lot_numbers FROM ref_org",
     [],
     orgRow,
   );
@@ -141,6 +145,7 @@ export async function readNewShiftChoices(
       })),
     },
     timeZone: org?.time_zone ?? null,
+    ...(org?.use_lot_numbers === 1 ? { useLotNumbers: true } : {}),
   };
 }
 
@@ -151,6 +156,7 @@ function toTemplate(row: z.infer<typeof templateRow>): ShiftTemplate {
     name: row.name,
     purpose: row.purpose,
     enabled: row.enabled === 1,
+    ...(row.lot_number_source_id == null ? {} : { lotNumberSourceId: row.lot_number_source_id }),
     chzProductGroupCodes:
       row.category_codes === null ? null : codesSchema.parse(JSON.parse(row.category_codes)),
   };
@@ -256,6 +262,7 @@ export type CreateRefusal =
   | "template"
   | "pallet_template"
   | "duplicate_template"
+  | "lot_template_missing"
   | "invalid"
   | "no_line"
   | "failed"
@@ -301,6 +308,8 @@ export async function createStationShift(
       const constraint = error.details["constraint"];
       if (constraint === "product_inactive") return { kind: "refused", reason: "product_inactive" };
       if (constraint === "shift_line") return { kind: "refused", reason: "no_line" };
+      if (constraint === "lot_template_missing")
+        return { kind: "refused", reason: "lot_template_missing" };
       if (constraint === "license_restricted") {
         return { kind: "refused", reason: licenseRefusalOf(error.details) };
       }
@@ -349,6 +358,7 @@ export function isShiftOfRequest(shift: DeviceShift, input: DeviceShiftInput): b
       input.plannedDate === undefined ||
       shift.plannedDate === input.plannedDate) &&
     (input.boxCapacity === undefined || shift.boxCapacity === input.boxCapacity) &&
+    (shift.lotNumber ?? null) === (input.lotNumber ?? null) &&
     shift.plannedQty === input.plannedQty &&
     // A host before beta 3.2 names a station's shift an aggregation one.
     shift.mode === (input.mode ?? "aggregation") &&
@@ -364,8 +374,10 @@ export function isShiftOfRequest(shift: DeviceShift, input: DeviceShiftInput): b
  * shift froze it, and every screen of the shift reads that.
  */
 export function createdCopy(shift: DeviceShift): ShiftCopy {
+  const { lotNumber, ...fields } = shift;
   return {
-    ...shift,
+    ...fields,
+    ...(lotNumber == null ? {} : { lotNumber }),
     productPrintName: null,
     plannedDate: shift.plannedDate ?? null,
     palletBoxCapacity: shift.palletBoxCapacity ?? null,

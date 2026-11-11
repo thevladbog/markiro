@@ -585,6 +585,31 @@ async fn mark_revision(
     Ok(())
 }
 
+/// Number of live boxes and their common lot, when every box has the same nonempty lot.
+pub(crate) async fn pallet_contents(
+    conn: &mut SqliteConnection,
+    pallet_id: &str,
+) -> Result<(i64, Option<String>), ApiError> {
+    sqlx::query_as(
+        "SELECT COUNT(*), CASE WHEN COUNT(*) = COUNT(s.lot_number) \
+         AND COUNT(DISTINCT s.lot_number) = 1 THEN MIN(s.lot_number) END \
+         FROM warehouse_pallet_boxes wb JOIN boxes b ON b.sscc = wb.box_sscc \
+         JOIN shifts s ON s.id = b.shift_id \
+         WHERE wb.pallet_id = ? AND wb.removed_at IS NULL AND b.disassembled_at IS NULL",
+    )
+    .bind(pallet_id)
+    .fetch_one(conn)
+    .await
+    .map_err(ApiError::internal)
+}
+
+fn accepted_close(lot_number: Option<String>, reported: bool) -> Applied {
+    Applied {
+        details: (reported || lot_number.is_some()).then(|| json!({ "lotNumber": lot_number })),
+        ..Applied::accepted()
+    }
+}
+
 async fn closed(
     conn: &mut SqliteConnection,
     context: &Context<'_>,
@@ -593,15 +618,15 @@ async fn closed(
 ) -> Result<Applied, Failure> {
     let (closed_at, _) = own_pallet(conn, context, &data.pallet_id).await?;
     if closed_at.is_some() {
-        let stored: Option<String> =
-            sqlx::query_scalar("SELECT sscc FROM warehouse_pallets WHERE id = ?")
+        let (stored, lot_number): (Option<String>, Option<String>) =
+            sqlx::query_as("SELECT sscc, lot_number FROM warehouse_pallets WHERE id = ?")
                 .bind(&data.pallet_id)
                 .fetch_one(&mut *conn)
                 .await
                 .map_err(ApiError::internal)?;
         // The same close sent again under another id changes nothing.
         return if stored.as_deref() == Some(data.sscc.as_str()) {
-            Ok(Applied::accepted())
+            Ok(accepted_close(lot_number, data.lot_number.is_some()))
         } else {
             Err(Reject::new(receipt_codes::PALLET_ALREADY_CLOSED).into())
         };
@@ -616,14 +641,7 @@ async fn closed(
     .await?;
     // A box the production side took apart after the scan stays live in the table but is not on
     // the pallet any more (the registry told the handheld to drop it).
-    let counted: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM warehouse_pallet_boxes wb JOIN boxes b ON b.sscc = wb.box_sscc \
-         WHERE wb.pallet_id = ? AND wb.removed_at IS NULL AND b.disassembled_at IS NULL",
-    )
-    .bind(&data.pallet_id)
-    .fetch_one(&mut *conn)
-    .await
-    .map_err(ApiError::internal)?;
+    let (counted, common_lot) = pallet_contents(conn, &data.pallet_id).await?;
     if counted != i64::from(data.box_count) {
         return Err(Reject {
             code: receipt_codes::PALLET_COUNT_MISMATCH,
@@ -631,9 +649,25 @@ async fn closed(
         }
         .into());
     }
+    let lot_number = match (&data.lot_number, context.device_kind) {
+        (Some(Some(reported)), _) if Some(reported) != common_lot.as_ref() => {
+            return Err(Reject {
+                code: receipt_codes::PALLET_STATE,
+                details: Some(json!({
+                    "reason": "pallet_lot_mismatch",
+                    "lotNumber": common_lot,
+                })),
+            }
+            .into());
+        }
+        (Some(reported), _) => reported.clone(),
+        // A pre-lot station could have printed a blank lot before syncing.
+        (None, DeviceKind::Station) => None,
+        (None, _) => common_lot,
+    };
     sqlx::query(
         "UPDATE warehouse_pallets SET opened_at = ?, closed_at = ?, sscc = ?, block_id = ?, \
-         serial = ?, box_count_reported = ?, operator_id = ? WHERE id = ?",
+         serial = ?, box_count_reported = ?, operator_id = ?, lot_number = ? WHERE id = ?",
     )
     .bind(&data.opened_at)
     .bind(&data.closed_at)
@@ -642,6 +676,7 @@ async fn closed(
     .bind(serial)
     .bind(data.box_count)
     .bind(context.operator_id)
+    .bind(&lot_number)
     .bind(&data.pallet_id)
     .execute(&mut *conn)
     .await
@@ -651,7 +686,7 @@ async fn closed(
     blocks::consume(&mut *conn, &data.block_id, serial).await?;
     // A pallet's close is an event for the office, as a shift's close is.
     mark_revision(conn, revision).await?;
-    Ok(Applied::accepted())
+    Ok(accepted_close(lot_number, data.lot_number.is_some()))
 }
 
 /// An unused serial of the original device block, even if the site's GLN later changed.

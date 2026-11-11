@@ -2021,3 +2021,29 @@ async fn handheld_reprints_a_closed_site_box_with_exact_operator_and_idempotency
     let stored:(String,String,String,String,String) = sqlx::query_as("SELECT device_id,operator_id,subject_id,identity,outcome FROM warehouse_reprints WHERE record_id=?").bind(record_id(91)).fetch_one(&admin.app.state.pool).await.unwrap();
     assert_eq!(stored, (id, operator, box_id(1), sscc(1500), "sent".into()));
 }
+
+#[tokio::test]
+async fn a_warehouse_box_reprint_reads_the_lot_from_its_frozen_shift() {
+    let (admin, floor, asking, _) = closed_shift_with_a_box().await;
+    sqlx::query(
+        "UPDATE shifts SET snapshot = json_set(snapshot, '$.lotNumber', '0042Бк07A') WHERE id = ?",
+    )
+    .bind(&floor.shift)
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let body = json!({ "sscc": sscc(1500) });
+    let (status, refused) = lookup(&admin, &asking, body.clone()).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"]["details"]["constraint"], "station_update");
+    let (status, answer) = post(
+        &admin,
+        &asking,
+        "/v1/device/warehouse/lookup?lotNumbers=1",
+        body,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer["status"], "found");
+    assert_eq!(answer["source"]["lotNumber"], "0042Бк07A");
+}

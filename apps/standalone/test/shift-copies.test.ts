@@ -99,6 +99,24 @@ describe("the station's copies of its shifts", () => {
     expect(await readShiftCopies(executor, OTHER_PAIRING, LINE_ID)).toEqual([]);
   });
 
+  it("preserves the lot number in the offline snapshot", async () => {
+    const { executor } = openLocalDb();
+    const lotNumber = "0042Бк07A";
+    await keepEnteredShift(
+      executor,
+      PAIRING,
+      { ...ENTERED, lotNumber, snapshot: { ...ENTERED.snapshot, lotNumber } },
+      AT,
+      SEEN,
+    );
+    await replaceShiftCopies(executor, PAIRING, [], SEEN + 1);
+    const stored = await readStoredWork(executor, PAIRING, ENTERED.id);
+    expect(stored).toMatchObject({
+      kind: "ready",
+      shift: { copy: { lotNumber }, snapshot: { lotNumber } },
+    });
+  });
+
   it("follow a later list: changed fields, and a planned shift that left the list goes", async () => {
     const { executor } = openLocalDb();
     await replaceShiftCopies(executor, PAIRING, [ACTIVE, PLANNED], SEEN);

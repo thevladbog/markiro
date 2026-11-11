@@ -373,3 +373,26 @@ async fn blank_lines_do_not_count_towards_the_box_limit() {
         (json!(true), json!(1))
     );
 }
+
+#[tokio::test]
+async fn office_creation_freezes_the_common_box_lot_for_its_document() {
+    let (admin, codes) = fixture(2).await;
+    sqlx::query(
+        "UPDATE shifts SET lot_number = '0042Бк07A' WHERE id = (SELECT shift_id FROM boxes WHERE sscc = ?)",
+    )
+    .bind(&codes[0])
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let (status, created) = create(&admin, &uuid::Uuid::new_v4().to_string(), &codes).await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let (status, detail) = admin
+        .call(
+            "GET",
+            &format!("{CREATE}/{}", created["id"].as_str().unwrap()),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["lotNumber"], "0042Бк07A");
+}

@@ -1,4 +1,4 @@
-import type { LabelField, LabelTemplateSpec } from "./model.js";
+import type { LabelTextField, LabelTemplateSpec } from "./model.js";
 import type { LabelTemplatePurpose } from "../product-labels/contracts.js";
 
 /** The selection metadata a template carries besides its print spec. */
@@ -65,7 +65,7 @@ export function resolveBoxLabelTemplateDefault(input: {
 }
 
 /** True when any field element or field-bound barcode in the spec reads `field`. */
-export function labelTemplateUsesField(spec: LabelTemplateSpec, field: LabelField): boolean {
+export function labelTemplateUsesField(spec: LabelTemplateSpec, field: LabelTextField): boolean {
   return spec.elements.some((element) => {
     if (element.kind === "field") return element.field === field;
     if (element.kind === "barcode") return element.data === field;

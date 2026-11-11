@@ -8,12 +8,13 @@ const stateRow = z.object({
   until_at: z.string(),
   restore_epoch: z.string().nullable(),
   synced_at: z.string().nullable(),
+  lot_numbers_supported: z.number().optional(),
   can_open_pallets: z.union([z.literal(0), z.literal(1)]).nullable(),
 });
 
 export async function readPalletRegistryState(local: LocalExecutor, pairing: Pairing) {
   const [row] = await local.query(
-    "SELECT until_at, restore_epoch, synced_at, can_open_pallets FROM pallet_registry_state " +
+    "SELECT until_at, restore_epoch, synced_at, can_open_pallets, lot_numbers_supported FROM pallet_registry_state " +
       "WHERE host_id = ? AND device_id = ?",
     [pairing.hostId, pairing.deviceId],
     stateRow,
@@ -24,6 +25,7 @@ export async function readPalletRegistryState(local: LocalExecutor, pairing: Pai
         until: row.until_at,
         restoreEpoch: row.restore_epoch,
         syncedAt: row.synced_at,
+        lotNumbersSupported: row.lot_numbers_supported === 1,
         canOpenPallets: row.can_open_pallets === null ? null : row.can_open_pallets === 1,
       };
 }
@@ -58,10 +60,18 @@ export async function applyPalletRegistryPage(
   if (page.nextCursor === undefined) {
     statements.push({
       sql:
-        "INSERT INTO pallet_registry_state (host_id, device_id, until_at, restore_epoch, synced_at, can_open_pallets) " +
-        "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (host_id, device_id) DO UPDATE SET until_at = excluded.until_at, " +
-        "restore_epoch = excluded.restore_epoch, synced_at = excluded.synced_at, can_open_pallets = excluded.can_open_pallets",
-      values: [...owner, page.until, page.restoreEpoch ?? null, now, page.canOpenPallets ?? null],
+        "INSERT INTO pallet_registry_state (host_id, device_id, until_at, restore_epoch, synced_at, can_open_pallets, lot_numbers_supported) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (host_id, device_id) DO UPDATE SET until_at = excluded.until_at, " +
+        "restore_epoch = excluded.restore_epoch, synced_at = excluded.synced_at, can_open_pallets = excluded.can_open_pallets, " +
+        "lot_numbers_supported = excluded.lot_numbers_supported",
+      values: [
+        ...owner,
+        page.until,
+        page.restoreEpoch ?? null,
+        now,
+        page.canOpenPallets ?? null,
+        page.lotNumbersSupported === true ? 1 : 0,
+      ],
     });
   }
   await local.transaction(statements);

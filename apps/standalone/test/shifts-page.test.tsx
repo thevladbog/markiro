@@ -363,16 +363,16 @@ describe("office shifts: the list", () => {
     chooseText("Линия", LINE_10.name);
     expect(numbers()).toEqual(["OCT26-005"]);
     chooseText("Линия", "Все линии");
-    fireEvent.change(screen.getByLabelText("Поиск по номеру и товару"), {
+    fireEvent.change(screen.getByLabelText("Поиск по сменам"), {
       target: { value: "мОЛОКО" },
     });
     expect(numbers()).toEqual(["OCT26-004", "OCT26-001/S"]);
-    fireEvent.change(screen.getByLabelText("Поиск по номеру и товару"), {
+    fireEvent.change(screen.getByLabelText("Поиск по сменам"), {
       target: { value: " /s " },
     });
     expect(numbers()).toEqual(["OCT26-001/S"]);
     expect(screen.getByText("Показано 1 из 3")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Поиск по номеру и товару"), {
+    fireEvent.change(screen.getByLabelText("Поиск по сменам"), {
       target: { value: "кефир" },
     });
     expect(screen.getByText("Ничего не найдено. Измените отбор.")).toBeTruthy();
@@ -380,6 +380,23 @@ describe("office shifts: the list", () => {
     fireEvent.click(screen.getByRole("button", { name: "Сбросить отбор" }));
     expect(numbers()).toHaveLength(3);
     expect(screen.queryByRole("button", { name: "Сбросить" })).toBeNull();
+  });
+
+  it("shows and searches lots by a case-insensitive fragment within the selected filters", async () => {
+    await openShifts(
+      shiftsSession([
+        { ...ACTIVE, lotNumber: "0042Бк07A" },
+        { ...PLANNED, lotNumber: "0042БК07B" },
+        CLOSED,
+      ]),
+    );
+    expect(within(shiftRow(ACTIVE.number)).getByText("Партия 0042Бк07A")).toBeTruthy();
+    expect(within(shiftRow(CLOSED.number)).queryByText(/^Партия /)).toBeNull();
+    fireEvent.change(screen.getByLabelText("Поиск по сменам"), { target: { value: "0042бк" } });
+    expect(shiftRows()).toHaveLength(2);
+    chooseText("Статус", "Активна");
+    expect(shiftRows()).toHaveLength(1);
+    expect(shiftRow(ACTIVE.number)).toBeTruthy();
   });
 
   it("says when there are no shifts at all", async () => {
@@ -396,7 +413,7 @@ describe("office shifts: the list", () => {
       "OCT26-011",
     ]);
     expect(within(pager).getByText("Страница 2 из 2")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Поиск по номеру и товару"), {
+    fireEvent.change(screen.getByLabelText("Поиск по сменам"), {
       target: { value: "OCT26" },
     });
     expect(shiftRows()).toHaveLength(10);
@@ -587,11 +604,11 @@ describe("office shifts: the list, boundaries and states", () => {
     expect(within(pager()).getByText("Страница 1 из 3")).toBeTruthy();
     chooseText("Линия", "Все линии");
     second();
-    fireEvent.change(screen.getByLabelText("Поиск по номеру и товару"), {
+    fireEvent.change(screen.getByLabelText("Поиск по сменам"), {
       target: { value: "OCT26" },
     });
     expect(within(pager()).getByText("Страница 1 из 3")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Поиск по номеру и товару"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Поиск по сменам"), { target: { value: "" } });
     second();
     // The first date of a period, then the second.
     pickDate("Дата производства с", "1 сентября 2026", 1);
@@ -613,7 +630,7 @@ describe("office shifts: the list, boundaries and states", () => {
 
   it("keeps a shift only when the status, the line and the search all keep it, and finds a number without case", async () => {
     await openShifts(shiftsSession());
-    const search = screen.getByLabelText("Поиск по номеру и товару");
+    const search = screen.getByLabelText("Поиск по сменам");
     chooseText("Статус", "Закрыта");
     fireEvent.change(search, { target: { value: "молоко" } });
     expect(numbersOnScreen()).toEqual(["OCT26-001/S"]);
@@ -630,7 +647,7 @@ describe("office shifts: the list, boundaries and states", () => {
     const session = shiftsSession();
     await openShifts(session);
     const reset = () => screen.queryByRole("button", { name: "Сбросить" });
-    const search = screen.getByLabelText("Поиск по номеру и товару");
+    const search = screen.getByLabelText("Поиск по сменам");
     fireEvent.change(search, { target: { value: "   " } });
     expect(reset()).toBeNull();
     fireEvent.change(search, { target: { value: "" } });
@@ -715,7 +732,7 @@ describe("office shifts: the list, boundaries and states", () => {
     expect(await screen.findByText("Загрузка…")).toBeTruthy();
     // The card stands with its heading, and nothing else of the list yet: no row, no filters.
     expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(2);
-    expect(screen.queryByLabelText("Поиск по номеру и товару")).toBeNull();
+    expect(screen.queryByLabelText("Поиск по сменам")).toBeNull();
     expect(screen.queryByText(/Показано \d+ из/)).toBeNull();
     expect(screen.queryByText(/Не все справочники загрузились/)).toBeNull();
   });
@@ -766,7 +783,7 @@ describe("office shifts: the list, boundaries and states", () => {
     lost.api.listProducts.mockRejectedValue(unreachable());
     await openShifts(lost);
     await screen.findByText(/Не все справочники загрузились/);
-    const search = screen.getByLabelText("Поиск по номеру и товару");
+    const search = screen.getByLabelText("Поиск по сменам");
     fireEvent.change(search, { target: { value: "товар" } });
     expect(screen.getByText("Ничего не найдено. Измените отбор.")).toBeTruthy();
     // The number still finds a shift.
@@ -779,7 +796,7 @@ describe("office shifts: the list, boundaries and states", () => {
     ]);
     await openShifts(marked);
     expect(cells("OCT26-005")[PRODUCT]).toBe("Айран (в архиве)");
-    const again = screen.getByLabelText("Поиск по номеру и товару");
+    const again = screen.getByLabelText("Поиск по сменам");
     fireEvent.change(again, { target: { value: "в архиве" } });
     expect(screen.getByText("Ничего не найдено. Измените отбор.")).toBeTruthy();
     fireEvent.change(again, { target: { value: "айран" } });
