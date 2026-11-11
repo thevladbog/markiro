@@ -39,15 +39,22 @@ export const LOT_NUMBER_LABEL_FIELD = "shift.lotNumber";
 export const LABEL_TEXT_FIELDS = [...LABEL_FIELDS, LOT_NUMBER_LABEL_FIELD] as const;
 export type LabelTextField = (typeof LABEL_TEXT_FIELDS)[number];
 
+/** Present fields are always strings, including for legacy print consumers. */
+export type LabelFieldData = Record<LabelField, string> &
+  Partial<Record<typeof LOT_NUMBER_LABEL_FIELD, string>>;
+
 /** Saved label jobs can predate the optional lot number. */
-export const labelFieldDataSchema = z.strictObject({
-  ...(Object.fromEntries(LABEL_FIELDS.map((field) => [field, z.string()])) as Record<
-    LabelField,
-    z.ZodString
-  >),
-  [LOT_NUMBER_LABEL_FIELD]: z.string().optional(),
-});
-export type LabelFieldData = z.infer<typeof labelFieldDataSchema>;
+export const labelFieldDataSchema = z
+  .strictObject({
+    ...(Object.fromEntries(LABEL_FIELDS.map((field) => [field, z.string()])) as Record<
+      LabelField,
+      z.ZodString
+    >),
+    [LOT_NUMBER_LABEL_FIELD]: z.string().optional(),
+  })
+  .transform(({ [LOT_NUMBER_LABEL_FIELD]: lotNumber, ...fields }): LabelFieldData =>
+    lotNumber === undefined ? fields : { ...fields, [LOT_NUMBER_LABEL_FIELD]: lotNumber },
+  );
 
 const alignSchema = z.enum(["left", "center", "right"]);
 
