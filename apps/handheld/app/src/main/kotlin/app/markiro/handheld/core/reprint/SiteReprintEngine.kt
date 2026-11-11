@@ -186,7 +186,10 @@ class SiteReprintEngine(
         if (!authorized(operatorId)) return SiteReprintResult.Failed("operator_changed", job.jobId)
         val printer = json.decodeFromString<ReprintPrinter>(job.printerJson).entity()
         val status = transport.statusRemembered(printer, db.printerDao(), db.recovery)
-        if (status is PrinterStatus.NotReady) return result(transition(job, "failed", status.reason.name.lowercase()))
+        if (status is PrinterStatus.NotReady) {
+            val reason = if (status.reason == NotReadyReason.PAPER_JAM) NotReadyReason.OTHER else status.reason
+            return result(transition(job, "failed", reason.name.lowercase()))
+        }
         if (!authorized(operatorId)) return SiteReprintResult.Failed("operator_changed", job.jobId)
         val sending = transition(job, "sending")
         val outcome = try { transport.sendRemembered(printer, Base64.getDecoder().decode(job.bytesBase64), db.printerDao(), db.recovery) }

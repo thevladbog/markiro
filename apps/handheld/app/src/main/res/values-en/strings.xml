@@ -386,6 +386,7 @@
     <string name="printer_unreachable_body">%1$s · no answer in %2$d s. Check that the printer is on, on the same Wi-Fi network, and that the address is right.</string>
     <string name="printer_no_paper">Out of paper</string>
     <string name="printer_head_open">The head is open</string>
+    <string name="printer_paper_jam">Paper jam</string>
     <string name="printer_not_ready">The printer is not ready</string>
     <string name="printer_bluetooth_title">Bluetooth printer</string>
     <string name="printer_bluetooth_hint">Turn the printer on and enable Bluetooth on it. Paired printers appear in the list.</string>

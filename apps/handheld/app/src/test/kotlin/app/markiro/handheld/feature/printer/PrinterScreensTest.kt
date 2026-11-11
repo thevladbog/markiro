@@ -131,6 +131,21 @@ class PrinterScreensTest {
     }
 
     @Test
+    fun aPaperJamIsShownOnTheTestPrintScreen() {
+        compose.setContent {
+            MarkiroTheme {
+                TestPrintScreen(
+                    TestPrintStep.Failed(NotReadyReason.PAPER_JAM),
+                    PrinterLanguage.TSPL,
+                    203,
+                    TestPrintCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("Замятие бумаги").assertIsDisplayed()
+    }
+
+    @Test
     fun anUnknownResultOffersConfirmationBeforeAnySecondSend() {
         var confirmed = false
         var retried = false

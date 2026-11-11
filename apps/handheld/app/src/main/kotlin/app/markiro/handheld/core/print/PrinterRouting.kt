@@ -79,7 +79,7 @@ class PrintDestinations(private val db: HandheldDatabase) {
         }
 }
 
-private val PRINTER_PROBLEMS = setOf("no_paper", "head_open", "unreachable", "other", "unknown")
+private val PRINTER_PROBLEMS = setOf("no_paper", "head_open", "paper_jam", "unreachable", "other", "unknown")
 
 private suspend fun rememberStatus(dao: PrinterDao, recovery: app.markiro.handheld.core.storage.DeviceRecovery,
     printer: PrinterEntity, status: String, at: Long) = recovery.commit {

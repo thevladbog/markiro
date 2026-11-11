@@ -63,7 +63,7 @@ class LabelRendererTest {
         val zpl = String(LabelRenderer(rasterizer).render(spec, emptyMap(), PrinterLanguage.ZPL, 300), Charsets.ISO_8859_1)
         assertTrue(zpl.startsWith("^XA\n^PW685\n^LL472\n"))
         val tspl = String(LabelRenderer(rasterizer).render(spec, emptyMap(), PrinterLanguage.TSPL, 203), Charsets.ISO_8859_1)
-        assertTrue(tspl.startsWith("SIZE 58 mm, 40 mm\n"))
+        assertTrue(tspl.startsWith("SIZE 58 mm, 40 mm\r\n"))
     }
 
     @Test

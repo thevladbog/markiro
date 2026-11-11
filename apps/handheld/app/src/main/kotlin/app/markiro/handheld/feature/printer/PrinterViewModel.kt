@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.core.label.LabelRenderer
 import app.markiro.handheld.core.label.PrinterLanguage
-import app.markiro.handheld.core.label.TestLabel
 import app.markiro.handheld.core.print.BluetoothPrinterConnector
 import app.markiro.handheld.core.print.DiscoveredPrinter
 import app.markiro.handheld.core.print.PrintPurpose
@@ -272,12 +271,11 @@ class PrinterViewModel(
                 _testStep.value = TestPrintStep.Failed(status.reason)
                 return@work
             }
-            val document = applyPrinterOutputMode(renderer.render(
-                TestLabel.spec(),
-                TestLabel.data(),
-                PrinterLanguage.fromWire(printer.language),
-                printer.dpi,
-            ), printer.language, printer.outputMode)
+            val document = applyPrinterOutputMode(
+                renderer.renderPrinterTest(PrinterLanguage.fromWire(printer.language), printer.dpi),
+                printer.language,
+                printer.outputMode,
+            )
             _testStep.value = recovery.printing { when (val outcome = transport.sendRemembered(printer, document, printers, recovery, clock())) {
                 is SendOutcome.Delivered -> TestPrintStep.Sent("${printer.name} · ${printer.address}")
                 is SendOutcome.Refused -> TestPrintStep.Failed(outcome.reason)
