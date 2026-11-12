@@ -5,6 +5,8 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   PALLET_EXPORT_FORMATS,
   SHIFT_EXPORT_FORMATS,
+  STANDALONE_SET_EXPORT_FORMATS,
+  STANDALONE_SHIFT_EXPORT_FORMATS,
   type ProductLabelEvent,
   type ReprintReason,
   type VerificationPolicy,
@@ -595,20 +597,26 @@ describe("protocol 4: the shift modes (plan РЕЖ)", () => {
     pallets: null,
   };
 
-  it("speaks protocol 4 and enters a shift naming what this station works", () => {
+  it("advertises the current protocol and the station’s supported shift capabilities", () => {
     // Protocol 4 brought the modes, 5 the duplicate print, 6 the handheld on the host, 7 several devices in one shift,
-    // 8 a handheld's disassembly of a warehouse pallet.
-    expect(PROTOCOL_VERSION).toBe(8);
+    // 8 warehouse-pallet disassembly, and 9 set assembly.
+    expect(PROTOCOL_VERSION).toBe(9);
     expect(SHIFT_SUPPORTS).toStrictEqual({
       validation: "validation-v1",
       validationDmDuplicate: "validation-dm-duplicate-v1",
       handheldHost: "handheld-host-v1",
       multiStation: "multi-station-v1",
       lotNumber: "lot-number",
+      setAssembly: "set-assembly-v1",
     });
     // The station works validation, prints its duplicate and, since plan 2b, joins a shift
     // another device works (`multi-station-v1`), and says so on every entry.
-    expect(STATION_SHIFT_ENTER).toStrictEqual(fixture("shift-enter-lot.json"));
+    expect(STATION_SHIFT_ENTER).toStrictEqual({
+      supports: [
+        ...(shiftEnterSchema.parse(fixture("shift-enter-lot.json")).supports ?? []),
+        "set-assembly-v1",
+      ],
+    });
     expect(shiftEnterSchema.parse(STATION_SHIFT_ENTER)).toStrictEqual(STATION_SHIFT_ENTER);
   });
 
@@ -1299,7 +1307,11 @@ describe("the record of an export, field by field (plan ЧЗ)", () => {
 describe("the formats of exports (plan ЧЗ)", () => {
   it("the host takes exactly the formats the domain advertises (export-formats.json)", () => {
     expect(fixture("export-formats.json")).toEqual({
-      shift: SHIFT_EXPORT_FORMATS.map(({ id, version }) => ({ id, version })),
+      shift: [
+        ...SHIFT_EXPORT_FORMATS,
+        ...STANDALONE_SHIFT_EXPORT_FORMATS,
+        ...STANDALONE_SET_EXPORT_FORMATS,
+      ].map(({ id, version }) => ({ id, version })),
       pallet: PALLET_EXPORT_FORMATS.map(({ id, version }) => ({ id, version })),
     });
   });
@@ -2892,6 +2904,11 @@ describe("unauthorized errors", () => {
 });
 
 describe("facts of the floor", () => {
+  it("keeps the exact codes and separators of the shared assembly fact", () => {
+    const sample = fixture("fact-set-assembled.json");
+    expect(factRecordSchema.parse(sample)).toEqual(sample);
+  });
+
   const RECORDS = factBatchSchema.parse(fixture("facts-request.json")).records;
   const NOT_UUID = ["42", "", null, 5, "8E1F2A3B-4C5D-4E6F-8A9B-0C1D2E3F4A5B ", true];
 
@@ -3544,7 +3561,7 @@ describe("protocol 5: the duplicate print (plan РЕЖ, part B)", () => {
   const frozen = entered.snapshot.validationPrint;
 
   it("speaks protocol 5 with the domain's names", () => {
-    expect(PROTOCOL_VERSION).toBe(8);
+    expect(PROTOCOL_VERSION).toBe(9);
     expect(LABEL_VERIFICATIONS).toStrictEqual(["none", "required"]);
     expect(REPRINT_REASONS).toStrictEqual(["not_printed", "damaged", "lost"]);
     expect(UNIT_LABEL_EVENTS).toStrictEqual([
@@ -3944,7 +3961,7 @@ describe("protocol 6: the handheld on the host (plan ТСД-П)", () => {
   type Row = Record<string, unknown>;
 
   it("is the version of the current hello fixtures, and the future one stays ahead", () => {
-    expect(PROTOCOL_VERSION).toBe(8);
+    expect(PROTOCOL_VERSION).toBe(9);
     for (const name of ["hello.json", "hello-restored.json", "hello-replaced.json"]) {
       expect((fixture(name) as Row).protocol, name).toBe(PROTOCOL_VERSION);
     }

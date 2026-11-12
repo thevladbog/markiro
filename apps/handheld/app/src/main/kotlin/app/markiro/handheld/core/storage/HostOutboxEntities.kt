@@ -48,6 +48,9 @@ interface HostOutboxDao {
     @Query("SELECT * FROM host_outbox WHERE target = :target AND state = 'queued' ORDER BY seq LIMIT :limit")
     suspend fun queuedFor(target: String, limit: Int): List<HostOutboxEntity>
 
+    @Query("SELECT LENGTH(CAST(body AS BLOB)) FROM host_outbox WHERE target = :target AND state = 'queued' ORDER BY seq LIMIT :limit")
+    suspend fun queuedBodySizes(target: String, limit: Int): List<Int>
+
     @Query("SELECT COUNT(*) FROM host_outbox WHERE state = 'queued'")
     suspend fun queuedCount(): Int
 

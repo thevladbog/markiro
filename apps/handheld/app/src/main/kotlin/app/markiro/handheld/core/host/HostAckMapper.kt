@@ -3,6 +3,7 @@ package app.markiro.handheld.core.host
 import app.markiro.handheld.core.network.host.FactReceiptDto
 import app.markiro.handheld.core.network.host.flag
 import app.markiro.handheld.core.network.host.text
+import app.markiro.handheld.core.sets.SET_ASSEMBLED
 import app.markiro.handheld.core.storage.ConflictEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.HostOutboxEntity
@@ -38,15 +39,16 @@ class HostAckMapper(private val db: HandheldDatabase, private val now: () -> Str
                         acknowledge(row)
                         noteCloseReceipt(row, receipt)
                     }
-                    "conflict" -> if (row.sourceKind == HostPalletEvents.ADDED) {
-                        // A box the host already holds on another pallet: the membership is refused, the queue goes on.
-                        refuseBox(row, "box_on_pallet", receipt)
-                    } else {
-                        recordConflict(row, receipt)
-                        acknowledge(row)
+                    "conflict" -> when (row.sourceKind) {
+                        HostPalletEvents.ADDED -> refuseBox(row, "box_on_pallet", receipt)
+                        SET_ASSEMBLED -> quarantine(row, receipt.code ?: "set_conflict")
+                        else -> {
+                            recordConflict(row, receipt)
+                            acknowledge(row)
+                        }
                     }
                     "rejected" -> reject(row, receipt)
-                    else -> db.hostOutboxDao().quarantine(row.recordId, "unknown_outcome")
+                    else -> quarantine(row, "unknown_outcome")
                 }
             }
             settled++
@@ -61,6 +63,7 @@ class HostAckMapper(private val db: HandheldDatabase, private val now: () -> Str
             "box" -> db.boxDao().markAcked(listOf(row.sourceKey), now())
             "pallet" -> db.palletDao().markAcked(listOf(row.sourceKey), now())
             "shift_close" -> db.shiftCloseDao().markAccepted(row.sourceKey, now())
+            SET_ASSEMBLED -> db.setAssemblyDao().settle(row.sourceKey, "accepted")
             HostPalletEvents.OPEN -> db.metaDao().put(MetaEntity(HostPalletEvents.openedKey(row.sourceKey), now()))
             // The receipt belongs to the add that was frozen (its `addedAt`): a box taken off and put on again is another row.
             HostPalletEvents.ADDED -> body(row)?.let { db.palletMembershipDao().markAcceptedAt(it.palletId, it.sscc, it.addedAt, now()) }
@@ -88,6 +91,11 @@ class HostAckMapper(private val db: HandheldDatabase, private val now: () -> Str
         db.metaDao().put(MetaEntity(ShiftParticipationStore.closeNoteKey(shiftId), note))
     }
 
+    private suspend fun quarantine(row: HostOutboxEntity, reason: String) {
+        db.hostOutboxDao().quarantine(row.recordId, reason)
+        if (row.sourceKind == SET_ASSEMBLED) db.setAssemblyDao().settle(row.sourceKey, "conflict")
+    }
+
     private suspend fun reject(row: HostOutboxEntity, receipt: FactReceiptDto) {
         val code = receipt.code ?: "rejected"
         when {
@@ -95,7 +103,7 @@ class HostAckMapper(private val db: HandheldDatabase, private val now: () -> Str
             // Taking off a box the host never had (the box was put and taken off before the host heard of either) leaves nothing to undo.
             row.sourceKind == HostPalletEvents.REMOVED && code in NOTHING_TO_REMOVE -> acknowledge(row)
             else -> {
-                db.hostOutboxDao().quarantine(row.recordId, code)
+                quarantine(row, code)
                 if (row.sourceKind == "shift_close") db.shiftCloseDao().markConflict(row.sourceKey, code, now())
             }
         }

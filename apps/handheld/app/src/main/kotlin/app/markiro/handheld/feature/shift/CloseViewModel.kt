@@ -32,6 +32,7 @@ sealed interface CloseStep {
         val pallets: Int? = null,
         /** The close was of this device's part of a shared shift. */
         val part: Boolean = false,
+        val assembly: Boolean = false,
     ) : CloseStep
 }
 
@@ -74,6 +75,7 @@ class CloseViewModel @Inject constructor(
 
     fun confirm() {
         val preview = (_step.value as? CloseStep.Confirm)?.preview ?: return
+        if (preview.pendingSetDraft) return
         if (preview.reasonRequired) _step.value = CloseStep.Reason(preview, null) else finish(preview, null)
     }
 
@@ -98,15 +100,20 @@ class CloseViewModel @Inject constructor(
                 grantDenial.show()
                 return@launch
             }
+            catch (_: PendingSetDraft) {
+                _step.value = CloseStep.Confirm(preview.copy(pendingSetDraft = true))
+                return@launch
+            }
             val watcher = launch { sync.state.collect { if (_step.value is CloseStep.Draining) _step.value = CloseStep.Draining(it.pending) } }
             sync.drainAll()
             watcher.cancel()
             val row = db.shiftCloseDao().forShift(shiftId)
             val outcome = outcomeOf(row?.state, ShiftParticipationStore(db).closeNote(shiftId))
-            val conflicts = db.conflictDao().count().first()
+            val sets = if (preview.assembly) db.setAssemblyDao().observeCounts(shiftId).first() else null
+            val conflicts = sets?.conflicts ?: db.conflictDao().count().first()
             _step.value = CloseStep.Summary(
-                preview.accepted, preview.errors, preview.duplicates, conflicts, outcome,
-                boxes = preview.closedBoxes, pallets = preview.closedPallets, part = preview.shared,
+                sets?.finished ?: preview.accepted, preview.errors, preview.duplicates, conflicts, outcome,
+                boxes = preview.closedBoxes, pallets = preview.closedPallets, part = preview.shared, assembly = preview.assembly,
             )
         }
     }

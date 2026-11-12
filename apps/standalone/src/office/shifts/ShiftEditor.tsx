@@ -341,7 +341,7 @@ function useShiftEditor({
   };
   // A product in use: active and not archived, by name, its GTIN beside it.
   const productOptions = activeFirstByName(products.data ?? [])
-    .filter((each) => !each.archived && each.status === "active")
+    .filter((each) => !each.archived && each.status === "active" && each.setItems === undefined)
     .map((each) => ({
       value: each.id,
       label: t("office.shifts.productOption", { name: shiftProductTitle(each), gtin: each.gtin14 }),

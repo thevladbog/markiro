@@ -24,12 +24,13 @@ pub mod registry;
 pub mod registry_touch;
 pub mod rules;
 pub mod scan;
+pub mod set_assembled;
 pub mod shift_closed;
 pub mod unit_label;
 
 use markiro_proto::{
-    receipt_codes, FactKind, FactOutcome, FactReceipt, FactRecord, ParticipantState, ShiftMode,
-    ShiftOrigin, ShiftStatus,
+    receipt_codes, FactKind, FactOutcome, FactReceipt, FactRecord, ParticipantState, SetItem,
+    ShiftMode, ShiftOrigin, ShiftStatus,
 };
 use serde_json::Value;
 use sqlx::SqliteConnection;
@@ -129,6 +130,7 @@ pub struct CloseShift {
 /// The shift a record names, as the device entered it.
 #[derive(Debug, Clone)]
 pub struct FactShift {
+    pub set_items: Vec<SetItem>,
     pub id: String,
     pub number: String,
     pub status: ShiftStatus,
@@ -363,7 +365,7 @@ async fn apply(
             Reject::new(receipt_codes::NOT_ENTERED),
         ));
     };
-    if !admits(shift.mode, record.kind) {
+    if !admits(shift.mode, !shift.set_items.is_empty(), record.kind) {
         return Ok(Applying {
             kind,
             shift_id: Some(shift.id.clone()),
@@ -379,6 +381,7 @@ async fn apply(
     };
     let answer = match record.kind {
         FactKind::Scan => scan::apply(conn, &context, &record.data).await,
+        FactKind::SetAssembled => set_assembled::apply(conn, &context, &record.data).await,
         FactKind::BoxClosed => box_closed::apply(conn, &context, &record.data).await,
         FactKind::BoxLabel => box_label::apply(conn, &context, &record.data).await,
         FactKind::BoxException => exception::apply(conn, &context, &record.data).await,
@@ -420,8 +423,12 @@ async fn apply(
 /// of it is read; its scans and its close are its own (`scan.rs`,
 /// `shift_closed.rs`), and so are its unit labels (part B; `unit_label.rs`
 /// refuses them in a validation shift that prints nothing).
-fn admits(mode: ShiftMode, kind: FactKind) -> bool {
+fn admits(mode: ShiftMode, is_set: bool, kind: FactKind) -> bool {
+    if is_set {
+        return matches!(kind, FactKind::SetAssembled | FactKind::ShiftClosed);
+    }
     match kind {
+        FactKind::SetAssembled => false,
         FactKind::Scan | FactKind::ShiftClosed => true,
         FactKind::BoxClosed
         | FactKind::BoxLabel
@@ -452,12 +459,14 @@ async fn entered_shift(
         bool,
         Option<u32>,
         Option<String>,
+        Option<String>,
     );
     let row: Option<ShiftRow> = sqlx::query_as(
         "SELECT s.status, s.mode, s.number_month_key, s.number_seq, s.number_origin AS created_from, \
          json_extract(s.snapshot, '$.product.gtin14'), json_extract(s.snapshot, '$.issuerPrefix'), \
          s.pallets_enabled, s.validation_print_mode = 'duplicate_dm', s.planned_qty, \
-         (SELECT p.state FROM shift_participants p WHERE p.shift_id = s.id AND p.device_id = ?) \
+         (SELECT p.state FROM shift_participants p WHERE p.shift_id = s.id AND p.device_id = ?), \
+         json_extract(s.snapshot, '$.product.setItems') \
          FROM shifts s WHERE s.id = ?",
     )
     .bind(device_id)
@@ -477,6 +486,7 @@ async fn entered_shift(
         prints_duplicate,
         planned_qty,
         participant,
+        set_items,
     )) = row
     else {
         return Ok(None);
@@ -488,6 +498,8 @@ async fn entered_shift(
     let origin: ShiftOrigin = created_from.parse().map_err(ApiError::internal)?;
     let snapshot = || ApiError::internal("an entered shift has no snapshot");
     Ok(Some(Some(FactShift {
+        set_items: crate::routes::products::parse_set_items(set_items.as_deref())?
+            .unwrap_or_default(),
         id: id.to_owned(),
         number: shifts::format_number(&month_key, seq, origin),
         status: status.parse().map_err(ApiError::internal)?,

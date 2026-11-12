@@ -107,7 +107,7 @@ fun CreateShiftScreen(state: CreateShiftUi, cb: CreateShiftCallbacks) {
     val title = when (page) {
         CreatePage.PRODUCT -> if (product == null) R.string.shift_create_title else R.string.shift_create_product
         CreatePage.MODE -> R.string.shift_create_mode
-        CreatePage.PLAN -> R.string.shift_create_plan
+        CreatePage.PLAN -> if (product?.setItems.isNullOrEmpty()) R.string.shift_create_plan else R.string.set_plan
         CreatePage.BOX -> R.string.shift_create_box_template
         CreatePage.PALLET -> R.string.shift_create_pallet_template
         CreatePage.SHEET -> R.string.shift_create_sheet
@@ -169,7 +169,8 @@ fun CreateShiftScreen(state: CreateShiftUi, cb: CreateShiftCallbacks) {
                     }
                 }
                 page == CreatePage.PLAN -> item {
-                    CreateField(stringResource(R.string.shift_create_plan), planInput, { planInput = it }, numeric = true,
+                    val planLabel = if (product?.setItems.isNullOrEmpty()) R.string.shift_create_plan else R.string.set_plan
+                    CreateField(stringResource(planLabel), planInput, { planInput = it }, numeric = true,
                         enabled = canEdit, error = planInput.isNotBlank() && count(planInput, MAX_SHIFT_PLAN) == null)
                     Text(stringResource(R.string.shift_create_plan_hint), style = type.caption, color = colors.fg2, modifier = Modifier.padding(vertical = 8.dp))
                     SecondaryButton(stringResource(R.string.shift_create_no_plan), {
@@ -215,7 +216,7 @@ fun CreateShiftScreen(state: CreateShiftUi, cb: CreateShiftCallbacks) {
                             pageOverride = CreatePage.PRODUCT
                         }
                     }
-                    item {
+                    if (product.setItems.isEmpty()) item {
                         ChoiceField(stringResource(R.string.shift_create_mode), stringResource(draft.mode.title()), enabled = canEdit) {
                             selectedMode = draft.mode
                             pageOverride = CreatePage.MODE
@@ -232,12 +233,24 @@ fun CreateShiftScreen(state: CreateShiftUi, cb: CreateShiftCallbacks) {
                         }
                     }
                     item {
-                        ChoiceField(stringResource(R.string.shift_create_plan), draft.plan.ifBlank { stringResource(R.string.shift_create_no_plan) }, enabled = canEdit) {
+                        val planLabel = if (product.setItems.isEmpty()) R.string.shift_create_plan else R.string.set_plan
+                        ChoiceField(stringResource(planLabel), draft.plan.ifBlank { stringResource(R.string.shift_create_no_plan) }, enabled = canEdit) {
                             planInput = draft.plan
                             pageOverride = CreatePage.PLAN
                         }
                     }
-                    if (draft.mode == CreateShiftMode.VALIDATION) {
+                    if (product.setItems.isNotEmpty()) {
+                        item {
+                            Text(stringResource(R.string.set_title), style = type.title, color = colors.fg1)
+                            Text(stringResource(R.string.set_contents), style = type.caption, color = colors.fg2, modifier = Modifier.padding(top = 8.dp))
+                        }
+                        items(product.setItems, key = { it.gtin14 }) { component ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
+                                Text(component.productName, Modifier.weight(1f), style = type.body, color = colors.fg1)
+                                Text(stringResource(R.string.set_quantity, component.quantity), style = type.body, color = colors.fg2)
+                            }
+                        }
+                    } else if (draft.mode == CreateShiftMode.VALIDATION) {
                         item { Text(stringResource(R.string.shift_create_validation_hint), style = type.body, color = colors.fg2) }
                         if (draft.template(options, "box") == null) item {
                             Text(stringResource(R.string.shift_create_no_template), style = type.caption, color = colors.warnFg)

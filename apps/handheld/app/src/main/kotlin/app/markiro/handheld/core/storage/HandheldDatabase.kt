@@ -58,6 +58,8 @@ import app.markiro.handheld.core.print.PrinterEntity
         PalletLabelTemplateEntity::class,
         OperatorBadgeEntity::class,
         HostOutboxEntity::class,
+        SetAssemblyEntity::class,
+        SetAssemblyClaimEntity::class,
     ],
     version = HANDHELD_DATABASE_VERSION,
     exportSchema = false,
@@ -113,6 +115,7 @@ abstract class HandheldDatabase : RoomDatabase() {
     abstract fun palletLabelTemplateDao(): PalletLabelTemplateDao
     abstract fun operatorBadgeDao(): OperatorBadgeDao
     abstract fun hostOutboxDao(): HostOutboxDao
+    abstract fun setAssemblyDao(): SetAssemblyDao
 }
 
-const val HANDHELD_DATABASE_VERSION = 26
+const val HANDHELD_DATABASE_VERSION = 27

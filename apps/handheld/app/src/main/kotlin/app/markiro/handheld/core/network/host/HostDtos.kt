@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.network.host
 
+import app.markiro.handheld.core.network.SetItemDto
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -110,6 +111,7 @@ data class DeviceShiftDto(
     val myState: String? = null,
     val totals: DeviceShiftTotalsDto? = null,
     val byDevice: List<DeviceTotalsDto>? = null,
+    val setItems: List<SetItemDto> = emptyList(),
 )
 
 @Serializable

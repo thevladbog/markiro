@@ -81,6 +81,8 @@ const realClock = () => performance.now();
  */
 function blockerText(blocker: CloseBlocker, waitingSscc: string | null, t: TFunction): string {
   switch (blocker.kind) {
+    case "open_set":
+      return t("floor.setAssembly.closeBlocked");
     case "open_box":
       return t("floor.close.blocked.open_box", { quantity: formatQuantity(blocker.items) });
     case "label":

@@ -11,9 +11,9 @@ import { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from "./pairing-code.js";
  * plan РЕЖ part A (the shift modes), 5 since its part B (the duplicate print),
  * 6 since plan ТСД (the handheld on the host: pallet events, the box registry,
  * `handheld-host-v1`), 7 since plan 2b (several devices in one shift), 8
- * since a handheld's disassembly of a warehouse pallet (a pallet event).
+ * since handheld warehouse-pallet disassembly, and 9 since marked set assembly.
  */
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 /** Mirrors `markiro_proto::DEFAULT_PORT`. */
 export const DEFAULT_HOST_PORT = 45710;
 /** The host on this computer, when the app runs next to the service. */
@@ -481,7 +481,16 @@ const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/u);
  * record. An archived product stays with `archived: true`; only the demo product
  * is ever deleted, and it leaves as a tombstone.
  */
+export const setItemSchema = z.object({
+  gtin14: z.string().regex(/^[0-9]{14}$/),
+  productName: z.string(),
+  quantity: z.number().int().positive(),
+});
+export type SetItem = z.infer<typeof setItemSchema>;
+export const setItemsSchema = z.array(setItemSchema).min(1);
+
 export const productRecordSchema = z.object({
+  setItems: setItemsSchema.optional(),
   gtin14: z.string().regex(/^[0-9]{14}$/),
   name: z.string(),
   printName: z.string().nullable(),
@@ -792,6 +801,7 @@ const base64Schema = z
  * come from `getProductPhoto`), each read as none from an older host.
  */
 export const officeProductSchema = z.object({
+  setItems: setItemsSchema.optional(),
   id: z.uuid(),
   gtin14: z.string(),
   name: z.string(),
@@ -1165,6 +1175,7 @@ export type DeviceShiftTotals = z.infer<typeof deviceShiftTotalsSchema>;
  * are set exactly when `palletsEnabled` (plan ПЛ-Х).
  */
 const officeShiftObject = z.object({
+  setItems: setItemsSchema.optional(),
   id: z.uuid(),
   number: z.string().min(1),
   status: shiftStatusSchema,
@@ -1421,6 +1432,7 @@ export type PalletReportRows = z.infer<typeof palletReportRowsSchema>;
  * shift, so it has a group.
  */
 export const shiftSnapshotProductSchema = z.object({
+  setItems: setItemsSchema.optional(),
   id: z.uuid(),
   gtin14: z.string(),
   name: z.string(),
@@ -1504,6 +1516,7 @@ export type ShiftSnapshot = z.infer<typeof shiftSnapshotSchema>;
  * the fields are absent, not `null`.
  */
 const deviceShiftObject = z.object({
+  setItems: setItemsSchema.optional(),
   id: z.uuid(),
   number: z.string().min(1),
   status: shiftStatusSchema,
@@ -1586,6 +1599,7 @@ export const SHIFT_SUPPORTS = {
   handheldHost: "handheld-host-v1",
   multiStation: "multi-station-v1",
   lotNumber: "lot-number",
+  setAssembly: "set-assembly-v1",
 } as const;
 
 /**
@@ -2046,6 +2060,7 @@ export type BadgeCreate = z.infer<typeof badgeCreateSchema>;
  */
 export const productCreateSchema = z
   .object({
+    setItems: setItemsSchema.optional(),
     gtin14: z.string(),
     name: z.string(),
     printName: z.string().nullable(),
@@ -2070,6 +2085,7 @@ export type ProductCreate = z.infer<typeof productCreateSchema>;
  */
 export const productUpdateSchema = z
   .object({
+    setItems: setItemsSchema.optional(),
     gtin14: z.string(),
     name: z.string(),
     printName: z.string().nullable(),
@@ -2163,7 +2179,7 @@ export const shiftCreateSchema = z
     /** The shift's own date; left out, the host takes the production date. */
     plannedDate: z.string().optional(),
     lotNumber: lotNumberInputSchema,
-    boxTemplateId: z.uuid(),
+    boxTemplateId: z.uuid().optional(),
     boxCapacity: z.number().int().positive().optional(),
     plannedQty: z.number().int().positive().nullable().optional(),
     counterpartyId: z.uuid().nullable().optional(),
@@ -2176,7 +2192,10 @@ export const shiftCreateSchema = z
     validationPrint: validationPrintSchema.optional(),
   })
   .strict()
-  .superRefine(printsOnlyInValidation(false));
+  .superRefine(printsOnlyInValidation(false))
+  .refine((shift) => shift.boxTemplateId !== undefined || shift.mode === "validation", {
+    path: ["boxTemplateId"],
+  });
 export type ShiftCreate = z.infer<typeof shiftCreateSchema>;
 
 /**
@@ -2277,7 +2296,7 @@ export const deviceShiftCreateSchema = z
   .object({
     requestId: z.uuid(),
     productId: z.uuid(),
-    boxTemplateId: z.uuid(),
+    boxTemplateId: z.uuid().optional(),
     productionDate: z.string(),
     /** The shift's own date, today in the organization's zone; left out, the host takes the production date. */
     plannedDate: z.string().optional(),
@@ -2295,7 +2314,10 @@ export const deviceShiftCreateSchema = z
     validationPrint: validationPrintSchema.optional(),
   })
   .strict()
-  .superRefine(printsOnlyInValidation(false));
+  .superRefine(printsOnlyInValidation(false))
+  .refine((shift) => shift.boxTemplateId !== undefined || shift.mode === "validation", {
+    path: ["boxTemplateId"],
+  });
 export type DeviceShiftCreate = z.infer<typeof deviceShiftCreateSchema>;
 
 /**
@@ -2330,6 +2352,24 @@ export const scannedCodeSchema = z
   .object({ codeHash: z.string(), gtin14: z.string(), serial: z.string(), canonical: z.string() })
   .strict();
 export type ScannedCode = z.infer<typeof scannedCodeSchema>;
+
+export const setAssembledFactSchema = z
+  .object({
+    assembledAt: z.iso.datetime(),
+    setCode: scannedCodeSchema,
+    items: z.array(scannedCodeSchema).min(1),
+  })
+  .strict();
+
+export const officeShiftSetsSchema = z.array(
+  setAssembledFactSchema.extend({
+    id: z.uuid(),
+    deviceId: z.uuid(),
+    operatorId: z.uuid().nullable(),
+    outcome: z.enum(["accepted", "conflict"]),
+  }),
+);
+export type OfficeShiftSets = z.infer<typeof officeShiftSetsSchema>;
 
 /**
  * `data` of a `scan` fact (`markiro_proto::ScanFact`). Every instant of a fact
@@ -2565,6 +2605,9 @@ export const factRecordSchema = z.discriminatedUnion("kind", [
     .object({ ...factHead, kind: z.literal("box_exception"), data: boxExceptionFactSchema })
     .strict(),
   z.object({ ...factHead, kind: z.literal("shift_closed"), data: shiftClosedFactSchema }).strict(),
+  z
+    .object({ ...factHead, kind: z.literal("set_assembled"), data: setAssembledFactSchema })
+    .strict(),
   z
     .object({ ...factHead, kind: z.literal("pallet_closed"), data: palletClosedFactSchema })
     .strict(),

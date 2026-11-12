@@ -29,10 +29,10 @@ use crate::server::AppState;
 use crate::shifts;
 use crate::validate;
 
-/// The shift formats `@markiro/domain` advertises (`SHIFT_EXPORT_FORMATS`),
+/// The shift formats `@markiro/domain` advertises for the standalone office,
 /// with their versions; `proto/fixtures/export-formats.json` holds the same
 /// list, and both suites check it against the fixture.
-pub const SHIFT_FORMATS: [(&str, u32); 11] = [
+pub const SHIFT_FORMATS: [(&str, u32); 16] = [
     ("shift_txt_flat", 1),
     ("shift_txt_boxes", 2),
     ("shift_txt_boxes_reversed", 1),
@@ -44,7 +44,24 @@ pub const SHIFT_FORMATS: [(&str, u32); 11] = [
     ("shift_xml_gismt_aggregation_pallets", 1),
     ("shift_txt_pallet_boxes", 1),
     ("shift_xml_gismt_pallet_boxes", 1),
+    ("shift_csv_unf_all", 1),
+    ("shift_csv_unf_box_codes", 1),
+    ("shift_csv_unf_pallet_boxes", 1),
+    ("shift_csv_unf_set_items", 1),
+    ("shift_xlsx_chz_set_registry", 1),
 ];
+
+/// These shift formats always contain one complete document.
+pub(super) fn standalone_export_extension(format_id: &str) -> Option<&'static str> {
+    match format_id {
+        "shift_csv_unf_all"
+        | "shift_csv_unf_box_codes"
+        | "shift_csv_unf_pallet_boxes"
+        | "shift_csv_unf_set_items" => Some("csv"),
+        "shift_xlsx_chz_set_registry" => Some("xlsx"),
+        _ => None,
+    }
+}
 
 /// The pallet formats (`PALLET_EXPORT_FORMATS`).
 pub const PALLET_FORMATS: [(&str, u32); 1] = [("pallet_xml_gismt_aggregation", 1)];
@@ -399,6 +416,7 @@ async fn record_export_in(
             "not a format the office exports",
         ));
     }
+    let one_part = of_pallet || standalone_export_extension(format.0).is_some();
     match (&record.pallet_id, of_pallet) {
         (Some(pallet), true) => validate::client_uuid("palletId", pallet)?,
         (None, false) => {}
@@ -410,18 +428,18 @@ async fn record_export_in(
         }
     }
     if let Some(lines) = record.max_lines {
-        if of_pallet || !(MIN_LINES..=MAX_LINES).contains(&lines) {
+        if one_part || !(MIN_LINES..=MAX_LINES).contains(&lines) {
             return Err(ApiError::validation(
                 "maxLines",
-                "2-1 000 000 lines a part, none for a pallet",
+                "2-1 000 000 lines a part for formats that can be split",
             ));
         }
     }
     validate::client_uuid("documentId", &record.document_id)?;
-    if record.part_count == 0 || (of_pallet && record.part_count != 1) {
+    if record.part_count == 0 || (one_part && record.part_count != 1) {
         return Err(ApiError::validation(
             "partCount",
-            "at least one part, exactly one for a pallet",
+            "exactly one part for a format that cannot be split",
         ));
     }
     let at = state.timestamp();

@@ -4,7 +4,12 @@ import { z } from "zod";
 import { shellActionFor } from "../../app/shell.js";
 import { HostError } from "../../host/client.js";
 import { licenseRefusalOf, type LicenseRefusal } from "../license.js";
-import type { DeviceShift, DeviceShiftCreate } from "../../host/protocol.js";
+import {
+  setItemsSchema,
+  type SetItem,
+  type DeviceShift,
+  type DeviceShiftCreate,
+} from "../../host/protocol.js";
 import { deviceShiftCreate, type DeviceShiftInput } from "../../host/requests.js";
 import type {
   BoxTemplateCandidate,
@@ -19,6 +24,7 @@ import { keepCreatedShift, type ShiftCopy } from "./shift-copies.js";
 
 /** A product a station may start a shift of: in use (`active`) and not archived. */
 export interface ShiftProduct {
+  setItems?: SetItem[];
   id: string;
   gtin14: string;
   name: string;
@@ -52,6 +58,7 @@ export interface NewShiftChoices {
 }
 
 const productRow = z.object({
+  set_items: z.string().nullable(),
   id: z.string(),
   gtin14: z.string(),
   name: z.string(),
@@ -97,7 +104,7 @@ export async function readNewShiftChoices(
   if (!(await copiesReady(local, pairing))) return null;
   const products = await local.query(
     "SELECT id, gtin14, name, print_name, chz_group_code, box_capacity, default_box_template_id, " +
-      "pallet_box_capacity, default_pallet_template_id " +
+      "pallet_box_capacity, default_pallet_template_id, set_items " +
       "FROM ref_products WHERE status = 'active' AND archived = 0 ORDER BY name, id",
     [],
     productRow,
@@ -120,6 +127,9 @@ export async function readNewShiftChoices(
   );
   return {
     products: products.map((row) => ({
+      ...(row.set_items === null
+        ? {}
+        : { setItems: setItemsSchema.parse(JSON.parse(row.set_items)) }),
       id: row.id,
       gtin14: row.gtin14,
       name: row.name,
@@ -351,7 +361,9 @@ export async function createStationShift(
 export function isShiftOfRequest(shift: DeviceShift, input: DeviceShiftInput): boolean {
   return (
     shift.productId === input.productId &&
-    shift.boxTemplateId === input.boxTemplateId &&
+    (input.boxTemplateId === undefined
+      ? shift.setItems !== undefined
+      : shift.boxTemplateId === input.boxTemplateId) &&
     shift.productionDate === input.productionDate &&
     // A host before beta 3 names no shift date, a body before it sent none: nothing to compare.
     (shift.plannedDate === undefined ||

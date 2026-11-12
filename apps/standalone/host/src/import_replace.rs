@@ -43,6 +43,8 @@ pub const BUSINESS_TABLES: &[&str] = &[
     "pallets",
     "shift_close_events",
     "shift_participants",
+    "set_codes",
+    "set_assemblies",
     "fact_receipts",
     "device_event_receipts",
     "demo_removed_shifts",

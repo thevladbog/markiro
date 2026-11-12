@@ -10,7 +10,12 @@
     { "id": "shift_csv_pallets", "version": 1 },
     { "id": "shift_xml_gismt_aggregation_pallets", "version": 1 },
     { "id": "shift_txt_pallet_boxes", "version": 1 },
-    { "id": "shift_xml_gismt_pallet_boxes", "version": 1 }
+    { "id": "shift_xml_gismt_pallet_boxes", "version": 1 },
+    { "id": "shift_csv_unf_all", "version": 1 },
+    { "id": "shift_csv_unf_box_codes", "version": 1 },
+    { "id": "shift_csv_unf_pallet_boxes", "version": 1 },
+    { "id": "shift_csv_unf_set_items", "version": 1 },
+    { "id": "shift_xlsx_chz_set_registry", "version": 1 }
   ],
   "pallet": [{ "id": "pallet_xml_gismt_aggregation", "version": 1 }]
 }

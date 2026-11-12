@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.shift
 
+import app.markiro.handheld.core.network.SetItemDto
 import app.markiro.handheld.core.network.host.ShiftCreateOptionsDto
 import app.markiro.handheld.core.network.host.ShiftCreateProductDto
 import app.markiro.handheld.core.network.host.ShiftCreateTemplateDto
@@ -48,6 +49,21 @@ class CreateShiftDraftTest {
         assertEquals(30, pallets.palletBoxCapacity)
         assertEquals("sheet", pallets.palletSheetTemplateId)
         assertNull(boxed.copy(mode = CreateShiftMode.PALLETS).request(options.copy(palletsAllowed = false), "request"))
+    }
+
+    @Test fun aSetSelectedByItsGtinCreatesAnAssemblyShiftWithoutPrintTemplates() {
+        val set = product.copy(id = "kit", gtin14 = "04607123456781", setItems = listOf(SetItemDto(product.gtin14, product.name, 2)))
+        val catalogue = options.copy(products = listOf(product, set), templates = emptyList(), palletsAllowed = false)
+        val fromEan = findCreateProduct("4607123456781", catalogue.products)
+        assertEquals(set, fromEan)
+        assertEquals(set, findCreateProduct("010460712345678121kit1", catalogue.products))
+        val request = draft.copy(mode = CreateShiftMode.PALLETS, plan = "20").withProduct(set).request(catalogue, "request")!!
+        assertEquals("validation", request.mode)
+        assertEquals(20, request.plannedQty)
+        assertNull(request.boxTemplateId)
+        assertNull(request.boxCapacity)
+        assertNull(request.palletTemplateId)
+        assertEquals(false, request.palletsEnabled)
     }
 
     @Test fun invalidNumbersAndCivilDatesCannotBeSubmitted() {

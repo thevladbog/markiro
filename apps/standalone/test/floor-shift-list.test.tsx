@@ -314,7 +314,13 @@ describe("the shifts of the station's line", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
     expect(handlers.enter).toHaveBeenCalledWith(PLANNED.id, {
-      supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1", "lot-number"],
+      supports: [
+        "validation-v1",
+        "validation-dm-duplicate-v1",
+        "multi-station-v1",
+        "lot-number",
+        "set-assembly-v1",
+      ],
     });
     const [shift] = handlers.onEntered.mock.calls[0] ?? [];
     expect(shift).toMatchObject({
@@ -1437,7 +1443,13 @@ describe("the shifts several devices work (plan 2b)", () => {
       ownerDeviceId: OTHER_STATION,
     });
   const MULTI_ENTRY = {
-    supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1", "lot-number"],
+    supports: [
+      "validation-v1",
+      "validation-dm-duplicate-v1",
+      "multi-station-v1",
+      "lot-number",
+      "set-assembly-v1",
+    ],
   };
 
   it("offers to join a shift another station works while a slot is free, and names who works it", async () => {

@@ -11,6 +11,8 @@ const units = new Intl.NumberFormat("ru");
 export function ShiftSummaryMetrics({ shift }: { shift: OfficeShift }) {
   const { t } = useTranslation();
   const { totals, plannedQty } = shift;
+  const setAssembly = shift.setItems !== undefined;
+  const tracksPackaging = shift.mode !== "validation" && !setAssembly;
   const percent =
     plannedQty !== null && plannedQty > 0
       ? Math.round((totals.acceptedUnits / plannedQty) * 100)
@@ -26,7 +28,11 @@ export function ShiftSummaryMetrics({ shift }: { shift: OfficeShift }) {
     <section className="shift-metrics" aria-label={t("office.shiftCard.dashboard.title")}>
       <div className="shift-metrics__numbers">
         <div className="shift-metrics__primary">
-          <span className="shift-metrics__label">{t("office.shiftCard.dashboard.output")}</span>
+          <span className="shift-metrics__label">
+            {t(
+              setAssembly ? "office.shiftCard.sets.assembled" : "office.shiftCard.dashboard.output",
+            )}
+          </span>
           <strong className="shift-metrics__value">
             {units.format(totals.acceptedUnits)}
             {plannedQty === null ? null : <span> / {units.format(plannedQty)}</span>}
@@ -39,7 +45,7 @@ export function ShiftSummaryMetrics({ shift }: { shift: OfficeShift }) {
               : t("office.shiftCard.dashboard.percent", { percent })}
           </span>
         </div>
-        {shift.mode !== "validation" && (
+        {tracksPackaging && (
           <>
             <div>
               <span className="shift-metrics__label">{t("office.shifts.totals.closedBoxes")}</span>
@@ -80,11 +86,11 @@ export function ShiftSummaryMetrics({ shift }: { shift: OfficeShift }) {
           <span style={{ width: `${Math.min(100, percent)}%` }} />
         </div>
       )}
-      {(shift.mode !== "validation" || participants.length > 0) && (
+      {(tracksPackaging || participants.length > 0) && (
         <div className="shift-metrics__completion">
           <h3>{t("office.shiftCard.dashboard.completion")}</h3>
           <div className="shift-metrics__checks">
-            {shift.mode !== "validation" && (
+            {tracksPackaging && (
               <Check
                 ok={packaging}
                 title={t(
@@ -145,6 +151,7 @@ export function ShiftDeviceContributions({ shift }: { shift: OfficeShift }) {
   });
   const parts = shift.byDevice ?? [];
   if (parts.length < 2) return null;
+  const tracksPackaging = shift.mode !== "validation" && shift.setItems === undefined;
   const reconciled =
     shift.totals.acceptedUnits > 0 &&
     parts.reduce((sum, part) => sum + part.accepted, 0) === shift.totals.acceptedUnits;
@@ -162,7 +169,7 @@ export function ShiftDeviceContributions({ shift }: { shift: OfficeShift }) {
             <tr>
               <th>{t("office.shiftCard.scans.station")}</th>
               <th>{t("office.shifts.totals.accepted")}</th>
-              {shift.mode !== "validation" && (
+              {tracksPackaging && (
                 <>
                   <th>{t("office.shiftCard.tabs.boxes")}</th>
                   {shift.palletsEnabled && <th>{t("office.shiftCard.tabs.pallets")}</th>}
@@ -194,7 +201,7 @@ export function ShiftDeviceContributions({ shift }: { shift: OfficeShift }) {
                     )}
                   </td>
                   <td>{units.format(part.accepted)}</td>
-                  {shift.mode !== "validation" && (
+                  {tracksPackaging && (
                     <>
                       <td>{units.format(part.boxesClosed)}</td>
                       {shift.palletsEnabled && <td>{units.format(part.pallets)}</td>}

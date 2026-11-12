@@ -68,6 +68,7 @@ import { applyPalletRegistryPage, readPalletRegistryState } from "./pallet-assem
 import { syncPalletBoxRegistry } from "./pallet-assembly/registry-sync.js";
 import { PALLET_EXTENSION } from "./pallets/pallets.js";
 import { createBlockSupply } from "./work/block-supply.js";
+import { SetWorkScreen } from "./work/SetWorkScreen.js";
 import { WorkScreen, type WorkScreenProps } from "./work/WorkScreen.js";
 
 /**
@@ -644,8 +645,10 @@ export function FloorApp({
     );
   }
   if (view.kind === "work") {
+    const Screen = view.shift.snapshot.product.setItems === undefined ? Work : SetWorkScreen;
     return (
-      <Work
+      <Screen
+        key={view.shift.copy.id}
         shift={view.shift}
         operator={operator}
         pairing={{ hostId, deviceId }}

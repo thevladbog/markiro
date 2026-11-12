@@ -1,3 +1,4 @@
+import { officeShiftSetsSchema, type OfficeShiftSets } from "./protocol.js";
 import {
   officeSearchRequestSchema,
   officeSearchResponseSchema,
@@ -555,6 +556,7 @@ export interface HostApi {
   listShiftExceptions: (token: string, id: string) => Promise<OfficeShiftExceptions>;
   /** The shift's records the host refused, newest first, up to 500 (plan КНФ); every office role. */
   /** The exports of the shift the office saved, newest first (the shift drawer's history). */
+  listShiftSets: (token: string, id: string) => Promise<OfficeShiftSets>;
   listShiftExports: (token: string, id: string) => Promise<OfficeShiftExports>;
   listShiftRejections: (token: string, id: string) => Promise<OfficeShiftRejections>;
   /**
@@ -1452,6 +1454,11 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("GET", `/v1/office/shifts/${id}/exceptions`, {
         officeToken: token,
         schema: officeShiftExceptionsSchema,
+      }),
+    listShiftSets: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}/sets`, {
+        officeToken: token,
+        schema: officeShiftSetsSchema,
       }),
     listShiftExports: (token, id) =>
       client.request("GET", `/v1/office/shifts/${id}/exports`, {

@@ -46,9 +46,12 @@ const SELECT: &str =
      validation_print_template_id, owner_device_id, \
      opened_at, closed_at, close_reason_code, \
      close_reason_text, late_data_at, close_reason_missing, created_at, rev, \
+     CASE WHEN snapshot IS NULL THEN (SELECT p.set_items FROM products p WHERE p.id = shifts.product_id) \
+          ELSE json_extract(snapshot, '$.product.setItems') END AS set_items, \
      CASE mode WHEN 'validation' \
       THEN (SELECT COUNT(*) FROM code_owners o WHERE o.shift_id = shifts.id \
-            AND o.box_id IS NULL) \
+            AND o.box_id IS NULL) + \
+           (SELECT COUNT(*) FROM set_assemblies a WHERE a.shift_id = shifts.id AND a.outcome = 'accepted') \
       ELSE (SELECT COUNT(*) FROM box_items i JOIN boxes b ON b.id = i.box_id \
             WHERE b.shift_id = shifts.id AND i.removed_at IS NULL AND i.displaced_at IS NULL) \
       END AS accepted_units, \
@@ -98,6 +101,7 @@ const SELECT: &str =
 
 #[derive(sqlx::FromRow)]
 struct ShiftRow {
+    set_items: Option<String>,
     id: String,
     number_month_key: String,
     number_seq: i64,
@@ -161,6 +165,7 @@ fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
         None
     };
     Ok(OfficeShift {
+        set_items: super::products::parse_set_items(row.set_items.as_deref())?,
         number: shifts::format_number(&row.number_month_key, row.number_seq, created_from),
         id: row.id,
         status: row.status.parse().map_err(ApiError::internal)?,
@@ -432,7 +437,13 @@ pub async fn create_shift(
     if let Some(counterparty_id) = &create.counterparty_id {
         shifts::check_counterparty(&mut tx, counterparty_id).await?;
     }
-    shifts::check_box_template(&mut tx, &create.box_template_id, product.group).await?;
+    let box_template_id = if product.is_set {
+        shifts::check_set_rules(create.mode, &validation_print, lot_number.as_deref())?;
+        shifts::SET_BOX_TEMPLATE_ID
+    } else {
+        shifts::check_box_template(&mut tx, &create.box_template_id, product.group).await?;
+        &create.box_template_id
+    };
     if let ValidationPrint::DuplicateDm { template_id, .. } = &validation_print {
         shifts::check_duplicate_template(&mut tx, template_id, product.group).await?;
     }
@@ -474,7 +485,7 @@ pub async fn create_shift(
             planned_date,
             planned_qty: create.planned_qty,
             box_capacity: create.box_capacity.unwrap_or(product.box_capacity),
-            box_template_id: &create.box_template_id,
+            box_template_id,
             pallets,
             validation_print: &validation_print,
         },
@@ -641,6 +652,15 @@ pub async fn update_shift(
     if current.status == ShiftStatus::Planned {
         check_mode_rules(mode, pallets_enabled)?;
         shifts::check_print_mode(mode, &validation_print)?;
+        if current.set_items.is_some() {
+            shifts::check_set_rules(mode, &validation_print, lot_number.as_deref())?;
+            if box_template_id != shifts::SET_BOX_TEMPLATE_ID {
+                return Err(ApiError::validation(
+                    "boxTemplateId",
+                    "set assembly does not use a box template",
+                ));
+            }
+        }
     }
     let pallet_request = if pallets_enabled {
         shifts::pallet_request(

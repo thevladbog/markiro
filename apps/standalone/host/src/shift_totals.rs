@@ -15,7 +15,8 @@ use crate::error::ApiError;
 /// The whole shift's accepted units, closed boxes and closed pallets.
 pub const SHIFT_TOTALS: &str = "SELECT \
      CASE s.mode WHEN 'validation' \
-      THEN (SELECT COUNT(*) FROM code_owners o WHERE o.shift_id = s.id AND o.box_id IS NULL) \
+      THEN (SELECT COUNT(*) FROM code_owners o WHERE o.shift_id = s.id AND o.box_id IS NULL) + \
+           (SELECT COUNT(*) FROM set_assemblies a WHERE a.shift_id = s.id AND a.outcome = 'accepted') \
       ELSE (SELECT COUNT(*) FROM box_items i JOIN boxes b ON b.id = i.box_id \
             WHERE b.shift_id = s.id AND i.removed_at IS NULL AND i.displaced_at IS NULL) \
       END AS accepted, \
@@ -29,7 +30,9 @@ pub const SHIFT_TOTALS: &str = "SELECT \
 pub const BY_DEVICE: &str = "SELECT p.device_id, \
      CASE s.mode WHEN 'validation' \
       THEN (SELECT COUNT(*) FROM code_owners o WHERE o.shift_id = p.shift_id \
-            AND o.box_id IS NULL AND o.device_id = p.device_id) \
+            AND o.box_id IS NULL AND o.device_id = p.device_id) + \
+           (SELECT COUNT(*) FROM set_assemblies a WHERE a.shift_id = p.shift_id \
+            AND a.device_id = p.device_id AND a.outcome = 'accepted') \
       ELSE (SELECT COUNT(*) FROM box_items i JOIN boxes b ON b.id = i.box_id \
             WHERE b.shift_id = p.shift_id AND b.device_id = p.device_id \
             AND i.removed_at IS NULL AND i.displaced_at IS NULL) \
@@ -135,6 +138,7 @@ mod tests {
                 "box_items_live",
                 "pallets_shift",
                 "code_owners_shift_unboxed",
+                "set_assemblies_accepted",
             ] {
                 assert!(
                     plan.iter().any(|line| line.contains(index)),

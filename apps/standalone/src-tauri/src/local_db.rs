@@ -106,6 +106,7 @@ pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
     ("floor_print_jobs", TableClass::DeviceData),
     ("floor_restore_epochs", TableClass::Disposable),
     ("floor_scans", TableClass::DeviceData),
+    ("floor_set_marks", TableClass::DeviceData),
     // A shared shift's participants and totals as the host's last read said them (plan 2b,
     // migration `0022`): a copy of the host's figures, emptied by a forget.
     ("floor_shift_participation", TableClass::Disposable),

@@ -1,10 +1,13 @@
 import {
   getPalletExportFormat,
   getShiftExportFormat,
+  getStandaloneExportFormat,
   renderPalletAggregationExport,
   renderShiftExport,
+  renderStandaloneSetExport,
+  renderStandaloneUnfExport,
   ShiftExportDomainError,
-  type ShiftExportPart,
+  type StandaloneExportPart,
 } from "@markiro/domain";
 
 import type { CloudPalletRows } from "../../host/cloud-history-read.js";
@@ -14,8 +17,11 @@ import {
   cloudPalletExportSnapshot,
   type PalletExportSnapshot,
   type SourceResult,
+  setExportSnapshot,
   shiftExportSnapshot,
   type ExportSourceRefusal,
+  type SetExportRow,
+  unfExportSnapshot,
 } from "./export-source.js";
 
 /**
@@ -52,7 +58,7 @@ export interface ExportRun {
 export type ExportResult =
   | {
       ok: true;
-      parts: ShiftExportPart[];
+      parts: StandaloneExportPart[];
       openPalletSuppressedBoxCount: number;
       disassembledPalletCount: number;
     }
@@ -93,8 +99,39 @@ function isFailure(code: string): code is Exclude<ExportFailure, "GENERATION_FAI
  * other failure — `EMPTY_SOURCE`, bad metadata, a malformed date — is
  * `GENERATION_FAILED`, where the cloud ends after its retries.
  */
-export function runExport(rows: ShiftExportRows, run: ExportRun): ExportResult {
+export function runExport(
+  rows: ShiftExportRows,
+  run: ExportRun,
+  sets?: readonly SetExportRow[],
+): ExportResult {
   try {
+    const standalone = getStandaloneExportFormat(run.formatId, run.formatVersion);
+    if (standalone !== undefined && run.palletId === null) {
+      if (run.maxLines !== null) return { ok: false, failure: "INVALID_LINE_LIMIT" };
+      if (
+        standalone.id === "shift_csv_unf_set_items" ||
+        standalone.id === "shift_xlsx_chz_set_registry"
+      ) {
+        const snapshot = setExportSnapshot(rows, sets ?? []);
+        if (!snapshot.ok) return { ok: false, failure: snapshot.refusal };
+        const part = renderStandaloneSetExport(standalone.id, rows.shift.number, snapshot.value);
+        return {
+          ok: true,
+          parts: [part],
+          openPalletSuppressedBoxCount: 0,
+          disassembledPalletCount: 0,
+        };
+      }
+      const snapshot = unfExportSnapshot(rows, standalone);
+      if (!snapshot.ok) return { ok: false, failure: snapshot.refusal };
+      const part = renderStandaloneUnfExport(standalone, rows.shift.number, snapshot.value.source);
+      return {
+        ok: true,
+        parts: [part],
+        openPalletSuppressedBoxCount: snapshot.value.openPalletSuppressedBoxCount,
+        disassembledPalletCount: 0,
+      };
+    }
     return run.palletId === null
       ? renderForShift(rows, run)
       : renderForPallet(rows, run, run.palletId);

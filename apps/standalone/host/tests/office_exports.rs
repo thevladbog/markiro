@@ -851,7 +851,7 @@ async fn every_format_is_recorded_at_its_own_version_and_at_no_other() {
     }
     let rows = support::app::audit_trail(&admin.app, "shift.export").await;
     assert_eq!(rows.len(), taken);
-    assert_eq!(taken, 12);
+    assert_eq!(taken, 17);
 }
 
 /// The reversed TXT boxes format (`shift_txt_boxes_reversed`, the cloud's

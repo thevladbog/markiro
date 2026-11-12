@@ -149,6 +149,7 @@ class HubViewModel(
     hostQuarantined: Flow<Int> = flowOf(0),
     /** What the host last said of a shift's participants and totals; absent (nothing known) in tests of the cloud's hub. */
     private val participation: (String) -> Flow<app.markiro.handheld.core.host.ShiftParticipation?> = { flowOf(null) },
+    private val assembledSets: (String) -> Flow<Int> = { flowOf(0) },
 ) : ViewModel() {
     @Inject
     constructor(
@@ -176,6 +177,7 @@ class HubViewModel(
         hostLink: app.markiro.handheld.core.host.HostLinkMonitor,
         hostOutbox: app.markiro.handheld.core.storage.HostOutboxDao,
         participation: app.markiro.handheld.core.host.ShiftParticipationStore,
+        sets: app.markiro.handheld.core.storage.SetAssemblyDao,
     ) : this(
         recovery,
         api,
@@ -203,6 +205,7 @@ class HubViewModel(
         hostLink = hostLink.state.map { app.markiro.handheld.core.host.HostLinkStatus.of(it) },
         hostQuarantined = hostOutbox.observeQuarantinedCount(),
         participation = participation::observe,
+        assembledSets = { id -> sets.observeCounts(id).map { it.finished } },
     )
 
     val grantDenial = app.markiro.handheld.core.grants.GrantDenialUi()
@@ -227,7 +230,10 @@ class HubViewModel(
                 }
                 // The same figures as the work screen's strip: a shared shift's total is the host's, corrected for the codes this device lost to
                 // another one (`lost`), never this device's own uncorrected count taken against the cloud summary.
-                combine(codes.observeCountForShift(id), summary, participation(id), codes.observeLostForShift(id)) { local, shared, figures, lost ->
+                val assembly = shift.setItemsJson != null
+                val localCount = if (assembly) assembledSets(id) else codes.observeCountForShift(id)
+                val lostCount = if (assembly) flowOf(0) else codes.observeLostForShift(id)
+                combine(localCount, summary, participation(id), lostCount) { local, shared, figures, lost ->
                     val strip = app.markiro.handheld.feature.shift.SharedShiftRules.strip(figures, local, shift.plannedQty, lost)
                     HubActiveShift(
                         shift = shift,

@@ -54,7 +54,7 @@ use crate::auth::OfficeContext;
 use crate::clock::{format_timestamp, parse_timestamp};
 use crate::db::begin_write;
 use crate::error::{ApiError, ApiJson, ApiPath, ApiQuery};
-use crate::routes::office_exports::{PALLET_FORMATS, SHIFT_FORMATS};
+use crate::routes::office_exports::{standalone_export_extension, PALLET_FORMATS, SHIFT_FORMATS};
 use crate::server::AppState;
 use crate::validate;
 
@@ -156,14 +156,21 @@ pub async fn files_of_batches(
 
 /// The media type of a file by its extension, and `None` for an extension the
 /// host does not store.
-fn media_type_of(file_name: &str, kind: ExportFileKind) -> Option<&'static str> {
+fn media_type_of(file_name: &str, kind: ExportFileKind, format_id: &str) -> Option<&'static str> {
     let extension = file_name.rsplit_once('.')?.1.to_ascii_lowercase();
+    let standalone = standalone_export_extension(format_id);
+    if standalone.is_some_and(|expected| expected != extension) {
+        return None;
+    }
     match (kind, extension.as_str()) {
         (ExportFileKind::Form, "html") => Some("text/html; charset=utf-8"),
         (ExportFileKind::Form, _) => None,
         (_, "txt") => Some("text/plain; charset=utf-8"),
         (_, "csv") => Some("text/csv; charset=utf-8"),
         (_, "xml") => Some("application/xml; charset=utf-8"),
+        (ExportFileKind::ShiftExport, "xlsx") if standalone == Some("xlsx") => {
+            Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        }
         _ => None,
     }
 }
@@ -265,7 +272,12 @@ fn validate_begin(begin: &ExportFileBegin) -> Result<(), ApiError> {
             "not a file the office generates",
         ));
     }
-    if !clean_file_name(&begin.file_name) || media_type_of(&begin.file_name, begin.kind).is_none() {
+    if standalone_export_extension(&begin.format_id).is_some() && begin.part_no != 1 {
+        return Err(ApiError::validation("partNo", "the format has one part"));
+    }
+    if !clean_file_name(&begin.file_name)
+        || media_type_of(&begin.file_name, begin.kind, &begin.format_id).is_none()
+    {
         return Err(ApiError::validation(
             "fileName",
             "a plain name ending in the extension of the format",
@@ -783,12 +795,13 @@ pub async fn begin(
     if stored >= EXPORT_STORE_MAX_BYTES {
         return Err(store_full(stored));
     }
-    let media_type = media_type_of(&begin.file_name, begin.kind).ok_or_else(|| {
-        ApiError::validation(
-            "fileName",
-            "a plain name ending in the extension of the format",
-        )
-    })?;
+    let media_type =
+        media_type_of(&begin.file_name, begin.kind, &begin.format_id).ok_or_else(|| {
+            ApiError::validation(
+                "fileName",
+                "a plain name ending in the extension of the format",
+            )
+        })?;
     sqlx::query(
         "INSERT INTO export_files (id, batch_id, part_no, kind, target_type, target_id, shift_id, \
          format_id, format_version, file_name, media_type, size_bytes, chunk_count, sha256, \

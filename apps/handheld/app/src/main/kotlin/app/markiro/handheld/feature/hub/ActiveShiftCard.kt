@@ -44,7 +44,11 @@ internal fun ActiveShiftCard(active: HubActiveShift, onContinue: () -> Unit) {
     val count = numbers.format(accepted) + (plan?.let { " / " + numbers.format(it) } ?: "")
     val product = shift.productPrintName?.takeIf { it.isNotBlank() }
         ?: shift.productName?.takeIf { it.isNotBlank() }
-    val mode = stringResource(if (shift.mode == "aggregation") R.string.hub_active_shift_aggregation else R.string.shifts_mode_validation)
+    val mode = stringResource(when {
+        shift.setItemsJson != null -> R.string.set_title
+        shift.mode == "aggregation" -> R.string.hub_active_shift_aggregation
+        else -> R.string.shifts_mode_validation
+    })
     val shape = RoundedCornerShape(MarkiroSizes.radiusCard)
     Column(
         Modifier.fillMaxWidth().clip(shape).background(c.surfaceCard).border(1.dp, c.line, shape).padding(MarkiroSizes.sp4),

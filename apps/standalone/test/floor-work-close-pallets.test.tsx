@@ -876,6 +876,10 @@ const SUMMARY: CloseSummary = {
 
 /** What each blocker says in the summary's blocked view; the type makes a new blocker fail here too. */
 const BLOCKED_WORDS: Record<CloseBlocker["kind"], { blocker: CloseBlocker; words: string }> = {
+  open_set: {
+    blocker: { kind: "open_set" },
+    words: "Завершите сборку набора или отмените сканы его позиций.",
+  },
   open_box: {
     blocker: { kind: "open_box", items: 3 },
     words: "В открытом коробе 3 шт. Сначала закройте его или очистите в «Исключениях».",

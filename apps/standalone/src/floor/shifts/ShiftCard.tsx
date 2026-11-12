@@ -212,7 +212,7 @@ export function ShiftCard({
                 size="floor"
                 tone={copy.mode === "aggregation" ? "violet" : "steel"}
               >
-                {t(`floor.shifts.mode.${copy.mode}`)}
+                {t(copy.setAssembly ? "floor.setAssembly.mode" : `floor.shifts.mode.${copy.mode}`)}
               </Badge>
               {copy.mode === "aggregation" && copy.palletsEnabled ? (
                 <Badge className="shift-card__pallets" size="floor" tone="teal">

@@ -90,7 +90,7 @@ fn error_fixtures_round_trip() {
 #[test]
 fn hello_ignores_fields_added_by_newer_hosts() {
     let hello: Hello = serde_json::from_value(fixture("hello-future.json")).unwrap();
-    assert_eq!(hello.protocol, 9);
+    assert_eq!(hello.protocol, 10);
     assert!(hello.initialized);
 }
 
@@ -110,7 +110,14 @@ fn envelope_decides_compatibility_before_the_rest() {
     assert_eq!(compatibility_for(7, &future), Compatibility::Compatible);
     assert_eq!(compatibility_for(8, &future), Compatibility::Compatible);
     assert_eq!(compatibility_for(9, &future), Compatibility::Compatible);
-    assert_eq!(compatibility_for(10, &future), Compatibility::HostTooOld);
+    assert_eq!(
+        compatibility_for(future.protocol, &future),
+        Compatibility::Compatible
+    );
+    assert_eq!(
+        compatibility_for(future.protocol + 1, &future),
+        Compatibility::HostTooOld
+    );
     // A host of a later protocol that still takes this build's.
     assert_eq!(compatibility(&future), Compatibility::Compatible);
     let current: HelloEnvelope = serde_json::from_value(fixture("hello.json")).unwrap();
@@ -1155,6 +1162,7 @@ fn an_entered_shift_carries_its_snapshot_and_the_list_never_does() {
     let list: DeviceShifts = serde_json::from_value(fixture("device-shifts.json")).unwrap();
     assert_eq!(
         DeviceShift {
+            set_items: None,
             snapshot: None,
             ..entered
         },
@@ -1427,6 +1435,17 @@ fn a_pallet_check_and_a_pallet_exception_have_exactly_their_fields() {
     }
 }
 
+#[test]
+fn set_assembly_fact_round_trips_with_the_full_marks_in_order() {
+    let record: markiro_proto::FactRecord = round_trip("fact-set-assembled.json");
+    let assembly: markiro_proto::SetAssembledFact = typed(&record.data);
+    assert_eq!(record.kind, FactKind::SetAssembled);
+    assert_eq!(assembly.items[0].serial, "UNIT002");
+    assert_eq!(assembly.items[1].serial, "UNIT001");
+    assert!(assembly.set_code.canonical.contains('\u{1d}'));
+    assert_eq!(serde_json::to_value(assembly).unwrap(), record.data);
+}
+
 /// A batch of facts and its receipts. The records' `data` stays JSON in the
 /// envelope (the host reads it by kind, record by record); each one reads
 /// as its kind's type and writes back unchanged.
@@ -1468,6 +1487,10 @@ fn fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
             }
             FactKind::PalletException => {
                 serde_json::to_value(typed::<PalletExceptionFact>(&record.data)).unwrap()
+            }
+            FactKind::SetAssembled => {
+                serde_json::to_value(typed::<markiro_proto::SetAssembledFact>(&record.data))
+                    .unwrap()
             }
             FactKind::UnitLabel => {
                 serde_json::to_value(typed::<UnitLabelFact>(&record.data)).unwrap()
@@ -1972,8 +1995,8 @@ fn the_usage_statistics_hold_counts_by_month_and_nothing_else() {
 }
 
 #[test]
-fn this_build_speaks_protocol_seven_and_the_current_hello_fixtures_say_so() {
-    assert_eq!(PROTOCOL_VERSION, 8);
+fn this_build_speaks_protocol_nine_and_the_current_hello_fixtures_say_so() {
+    assert_eq!(PROTOCOL_VERSION, 9);
     assert_eq!(MIN_PROTOCOL_VERSION, 1);
     for name in ["hello.json", "hello-restored.json", "hello-replaced.json"] {
         let hello: Hello = serde_json::from_value(fixture(name)).unwrap();

@@ -42,6 +42,7 @@
   },
   "dependencies": {
     "@noble/hashes": "2.3.0",
-    "bwip-js": "4.11.2"
+    "bwip-js": "4.11.2",
+    "fflate": "0.8.3"
   }
 }

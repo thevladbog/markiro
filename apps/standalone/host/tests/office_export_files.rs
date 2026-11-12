@@ -187,6 +187,47 @@ async fn planned_shift(admin: &Admin) -> String {
     shift["id"].as_str().unwrap().to_owned()
 }
 
+#[tokio::test]
+async fn a_set_registry_workbook_is_stored_in_one_part_and_downloaded_unchanged() {
+    let admin = admin().await;
+    let shift = planned_shift(&admin).await;
+    let bytes = b"PK\x05\x06\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+    let mut wrong = with_content(begin_of(FILE, 1, &shift, "Реестр.xlsx", bytes), bytes);
+    let (status, body) = admin
+        .call("POST", "/v1/office/export-files", Some(wrong.clone()))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["details"]["field"], "fileName");
+    wrong["formatId"] = json!("shift_xlsx_chz_set_registry");
+    wrong["partNo"] = json!(2);
+    let (status, body) = admin
+        .call("POST", "/v1/office/export-files", Some(wrong.clone()))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["details"]["field"], "partNo");
+    wrong["partNo"] = json!(1);
+    wrong["fileName"] = json!("Реестр.csv");
+    let (status, body) = admin
+        .call("POST", "/v1/office/export-files", Some(wrong.clone()))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["details"]["field"], "fileName");
+
+    wrong["fileName"] = json!("Реестр.xlsx");
+    let (status, body) = admin
+        .call("POST", "/v1/office/export-files", Some(wrong))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["ready"], true);
+    let (status, got, opened) = download(&admin, &admin.token, FILE).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(got, bytes);
+    assert_eq!(
+        opened["file"]["mediaType"],
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+}
+
 /// A part of one chunk is stored by one call, listed, and downloaded back
 /// byte for byte; the store and the download each write one audit row naming
 /// the file, never its bytes.

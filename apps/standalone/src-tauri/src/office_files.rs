@@ -75,7 +75,7 @@ pub const MAX_PATH_UNITS: usize = 240;
 /// a form's HTML and the license's activation request (`json`, plan ЛЦ-3).
 /// A file of another kind (a script, a shortcut, a program) is never
 /// written, whatever the webview asks.
-pub const FILE_EXTENSIONS: [&str; 5] = ["csv", "txt", "xml", "html", "json"];
+pub const FILE_EXTENSIONS: [&str; 6] = ["csv", "txt", "xml", "html", "json", "xlsx"];
 
 /// The most segments of one path, the root among them.
 pub const MAX_SEGMENTS: usize = 8;
@@ -1630,13 +1630,17 @@ mod tests {
     /// double extension counts by its last part, and a stem is needed.
     #[test]
     fn a_file_name_ends_in_an_extension_the_office_writes() {
-        assert_eq!(FILE_EXTENSIONS, ["csv", "txt", "xml", "html", "json"]);
+        assert_eq!(
+            FILE_EXTENSIONS,
+            ["csv", "txt", "xml", "html", "json", "xlsx"]
+        );
         for name in [
             "a.csv",
             "a.txt",
             "a.xml",
             "a.html",
             "a.json",
+            "a.xlsx",
             "A.TXT",
             "A.JSON",
             "a.Xml",

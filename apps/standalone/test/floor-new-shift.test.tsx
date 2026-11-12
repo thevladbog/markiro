@@ -58,7 +58,13 @@ const [, PLANNED] = deviceShiftsSchema.parse(fixture("device-shifts.json")).shif
 ];
 /** The body of every entry this station sends (`shift-enter.json`, plan РЕЖ). */
 const ENTRY = {
-  supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1", "lot-number"],
+  supports: [
+    "validation-v1",
+    "validation-dm-duplicate-v1",
+    "multi-station-v1",
+    "lot-number",
+    "set-assembly-v1",
+  ],
 };
 const ENTERED: EnteredShift = enteredShiftSchema.parse(fixture("device-shift-entered.json"));
 /**
@@ -200,6 +206,76 @@ const LOT_CATALOG = CATALOG.map((each) =>
     ? { ...each, data: { ...(each.data as object), useLotNumbers: true } }
     : each,
 );
+it("selects an assembly card by EAN and opens it without printing or a lot number", async () => {
+  const productId = "00000000-0000-4000-8000-000000000021";
+  const templateId = "00000000-0000-0000-0000-000000000000";
+  const gtin14 = "04607123456781";
+  const setItems = [{ gtin14: "04607123456804", productName: "Крем для рук", quantity: 2 }];
+  const local = await copiesOf([
+    ...LOT_CATALOG,
+    item("products", productId, 99, {
+      name: "Зимний набор",
+      gtin14,
+      setItems,
+      status: "active",
+      archived: false,
+      chzProductGroupCode: 35,
+      boxCapacity: 1,
+      palletBoxCapacity: 1,
+      shelfLifeDays: null,
+      printName: null,
+      defaultBoxTemplateId: null,
+      defaultPalletTemplateId: null,
+    }),
+  ]);
+  const setShift = {
+    ...MADE,
+    productId,
+    productName: "Зимний набор",
+    productGtin14: gtin14,
+    mode: "validation" as const,
+    setItems,
+    boxCapacity: 1,
+    boxTemplateId: templateId,
+  };
+  const { scanner, handlers } = renderNew(local, {
+    create: async () => setShift,
+    enter: async () => ({
+      ...OPENED,
+      ...setShift,
+      status: "active",
+      snapshot: {
+        ...OPENED.snapshot,
+        product: {
+          ...OPENED.snapshot.product,
+          id: productId,
+          gtin14,
+          name: setShift.productName,
+          chzProductGroupCode: 35,
+          setItems,
+        },
+        boxTemplate: { id: templateId, name: "", rev: 0, spec: {} },
+      },
+    }),
+  });
+  await waitFor(() => expect(scanner.listening()).toBe(true));
+  scanner.read(gtin14.slice(1));
+  expect(await screen.findByText("Крем для рук")).toBeTruthy();
+  expect(screen.queryByRole("switch", { name: "С паллетами" })).toBeNull();
+  expect(handlers.create).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Начать сборку" }));
+  await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
+  expect(handlers.create).toHaveBeenCalledWith({
+    requestId: REQUEST_ID,
+    productId,
+    productionDate: "2026-10-10",
+    plannedDate: "2026-10-10",
+    plannedQty: null,
+    counterpartyId: null,
+    mode: "validation",
+  });
+});
+
 const MILK_LOT_TEMPLATE = "b741e65f-7de7-43dc-9143-abcc1229e365";
 
 function milkLotTemplate(): ChangeItem {
@@ -2296,7 +2372,7 @@ describe("a request to create a shift", () => {
         create: async (body) => ({
           ...MADE,
           productId: body.productId,
-          boxTemplateId: body.boxTemplateId,
+          boxTemplateId: body.boxTemplateId ?? MADE.boxTemplateId,
         }),
         enter: async () => Promise.reject(busy),
       },
@@ -2332,7 +2408,10 @@ describe("a request to create a shift", () => {
     const create = vi
       .fn<(create: DeviceShiftCreate) => Promise<DeviceShift>>()
       .mockRejectedValueOnce(stale)
-      .mockImplementation(async (body) => ({ ...MADE, boxTemplateId: body.boxTemplateId }));
+      .mockImplementation(async (body) => ({
+        ...MADE,
+        boxTemplateId: body.boxTemplateId ?? MADE.boxTemplateId,
+      }));
     const { handlers } = renderNew(await copiesOf(CATALOG), { create });
     await chooseMilk();
     next();

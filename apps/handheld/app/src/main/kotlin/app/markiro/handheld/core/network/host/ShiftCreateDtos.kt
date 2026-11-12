@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.network.host
 
+import app.markiro.handheld.core.network.SetItemDto
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -27,6 +28,7 @@ data class ShiftCreateProductDto(
     val boxCategoryDefault: String? = null,
     val palletPreference: String? = null,
     val palletCategoryDefault: String? = null,
+    val setItems: List<SetItemDto> = emptyList(),
 )
 
 @Serializable
@@ -45,7 +47,7 @@ data class HostShiftCreateRequest(
     val mode: String,
     val productionDate: String,
     val plannedDate: String,
-    val boxTemplateId: String,
+    val boxTemplateId: String? = null,
     val plannedQty: Int? = null,
     val boxCapacity: Int? = null,
     val palletsEnabled: Boolean = false,

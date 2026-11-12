@@ -107,7 +107,7 @@ function DeviceBreakdown({
     shift.participants?.find((each) => each.deviceId === id)?.deviceName ||
     deviceLabel(id, devices, t);
   const value = (part: DeviceTotals) =>
-    shift.mode === "validation"
+    shift.mode === "validation" || shift.setItems !== undefined
       ? t("office.shifts.totals.byDeviceUnits", { units: UNITS.format(part.accepted) })
       : t("office.shifts.totals.byDeviceValue", {
           units: UNITS.format(part.accepted),
@@ -169,12 +169,16 @@ function ShiftFigures({
           },
           {
             id: "accepted",
-            term: t("office.shifts.totals.accepted"),
+            term: t(
+              shift.setItems === undefined
+                ? "office.shifts.totals.accepted"
+                : "office.shiftCard.sets.assembled",
+            ),
             description: UNITS.format(totals.acceptedUnits),
             mono: true,
           },
           // A validation shift puts its codes in no box (plan РЕЖ, Р11): no box figure is its.
-          ...(shift.mode === "validation"
+          ...(shift.mode === "validation" || shift.setItems !== undefined
             ? []
             : [
                 {

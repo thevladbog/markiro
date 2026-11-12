@@ -1688,6 +1688,9 @@ async fn an_entry_waiting_for_the_write_lock_sees_the_entry_that_held_it() {
     // transaction.
     let mut entry = Box::pin(enter_shift(
         State(admin.app.state.clone()),
+        axum::Extension(markiro_host::server::ClientProtocol(
+            markiro_proto::PROTOCOL_VERSION,
+        )),
         AuthDevice {
             dataset_guard: None,
             id: station,
@@ -1782,6 +1785,9 @@ async fn a_station_revoked_while_its_write_waited_neither_enters_nor_creates_a_s
             .unwrap();
     let enter_handler = enter_shift(
         State(admin.app.state.clone()),
+        axum::Extension(markiro_host::server::ClientProtocol(
+            markiro_proto::PROTOCOL_VERSION,
+        )),
         AuthDevice {
             dataset_guard: None,
             id: stations[0].clone(),
@@ -1794,6 +1800,9 @@ async fn a_station_revoked_while_its_write_waited_neither_enters_nor_creates_a_s
     let create: DeviceShiftCreate = serde_json::from_value(device_create(&setup, REQUEST)).unwrap();
     let create_handler = create_device_shift(
         State(admin.app.state.clone()),
+        axum::Extension(markiro_host::server::ClientProtocol(
+            markiro_proto::PROTOCOL_VERSION,
+        )),
         AuthDevice {
             dataset_guard: None,
             id: stations[1].clone(),

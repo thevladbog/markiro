@@ -93,6 +93,7 @@ pub fn format_number(month_key: &str, seq: i64, origin: ShiftOrigin) -> String {
 /// active product has both).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShiftProduct {
+    pub is_set: bool,
     pub group: u32,
     pub box_capacity: u32,
     pub pallet_box_capacity: u32,
@@ -121,16 +122,16 @@ pub async fn shift_product(
     conn: &mut SqliteConnection,
     id: &str,
 ) -> Result<ShiftProduct, ApiError> {
-    type ProductRow = (String, bool, Option<u32>, Option<u32>, Option<u32>);
+    type ProductRow = (String, bool, Option<u32>, Option<u32>, Option<u32>, bool);
     let row: Option<ProductRow> = sqlx::query_as(
-        "SELECT status, archived, chz_group_code, box_capacity, pallet_box_capacity \
+        "SELECT status, archived, chz_group_code, box_capacity, pallet_box_capacity, set_items IS NOT NULL \
          FROM products WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(conn)
     .await
     .map_err(ApiError::internal)?;
-    let (status, archived, group, box_capacity, pallet_box_capacity) =
+    let (status, archived, group, box_capacity, pallet_box_capacity, is_set) =
         row.ok_or_else(|| ApiError::validation("productId", "no such product"))?;
     match (
         status.parse::<ProductStatus>(),
@@ -146,12 +147,42 @@ pub async fn shift_product(
             Some(box_capacity),
             Some(pallet_box_capacity),
         ) => Ok(ShiftProduct {
+            is_set,
             group,
             box_capacity,
             pallet_box_capacity,
         }),
         _ => Err(product_inactive()),
     }
+}
+
+/// Keeps the legacy template-shaped response usable for every shift while sets print nothing.
+pub const SET_BOX_TEMPLATE_ID: &str = "00000000-0000-0000-0000-000000000000";
+
+pub fn check_set_rules(
+    mode: ShiftMode,
+    policy: &ValidationPrint,
+    lot_number: Option<&str>,
+) -> Result<(), ApiError> {
+    if mode != ShiftMode::Validation {
+        return Err(ApiError::validation(
+            "mode",
+            "set assembly requires validation mode",
+        ));
+    }
+    if !matches!(policy, ValidationPrint::None {}) {
+        return Err(ApiError::validation(
+            "validationPrint",
+            "set assembly does not print labels",
+        ));
+    }
+    if lot_number.is_some() {
+        return Err(ApiError::validation(
+            "lotNumber",
+            "set assembly does not use lot numbers",
+        ));
+    }
+    Ok(())
 }
 
 /// `validation_failed` on `counterpartyId` unless `id` names a counterparty
@@ -774,25 +805,51 @@ pub async fn snapshot(
         bool,
         Option<String>,
         bool,
+        Option<String>,
     );
     let product: Option<ProductRow> = sqlx::query_as(
         "SELECT gtin14, name, print_name, chz_group_code, shelf_life_days, status, archived, \
-         egais_code, demo FROM products WHERE id = ?",
+         egais_code, demo, set_items FROM products WHERE id = ?",
     )
     .bind(product_id)
     .fetch_optional(&mut *conn)
     .await
     .map_err(ApiError::internal)?;
-    let (gtin14, name, print_name, group, shelf_life_days, status, archived, egais_code, demo) =
-        product.ok_or_else(|| ApiError::internal("the shift's product vanished"))?;
+    let (
+        gtin14,
+        name,
+        print_name,
+        group,
+        shelf_life_days,
+        status,
+        archived,
+        egais_code,
+        demo,
+        set_items,
+    ) = product.ok_or_else(|| ApiError::internal("the shift's product vanished"))?;
     let group = match (status.parse::<ProductStatus>(), archived, group) {
         (Ok(ProductStatus::Active), false, Some(group)) => group,
         _ => return Err(product_inactive()),
     };
-    match templates::scope(conn, template_id).await? {
-        Some(scope) if templates::fits(&scope, TemplatePurpose::Box, Some(group)) => {}
-        _ => return Err(template_not_fit()),
-    }
+    let set_items = crate::routes::products::parse_set_items(set_items.as_deref())?;
+    let box_template = if let Some(items) = set_items.as_deref() {
+        let recipe =
+            crate::routes::products::resolve_set_items(conn, &gtin14, Some(group), items).await?;
+        let template = ShiftSnapshotTemplate {
+            id: SET_BOX_TEMPLATE_ID.to_owned(),
+            name: String::new(),
+            rev: 0,
+            spec: json!({}),
+        };
+        (template, Some(recipe))
+    } else {
+        match templates::scope(conn, template_id).await? {
+            Some(scope) if templates::fits(&scope, TemplatePurpose::Box, Some(group)) => {}
+            _ => return Err(template_not_fit()),
+        }
+        (frozen_template(conn, template_id).await?, None)
+    };
+    let (box_template, set_items) = box_template;
     if let Some(pallet_template_id) = pallet_template_id {
         match templates::scope(conn, pallet_template_id).await? {
             Some(scope) if templates::fits(&scope, TemplatePurpose::Pallet, Some(group)) => {}
@@ -806,7 +863,6 @@ pub async fn snapshot(
             _ => return Err(duplicate_template_not_fit()),
         }
     }
-    let box_template = frozen_template(&mut *conn, template_id).await?;
     let pallet_template = match pallet_template_id {
         Some(id) => Some(frozen_template(&mut *conn, id).await?),
         None => None,
@@ -869,6 +925,7 @@ pub async fn snapshot(
     Ok(ShiftSnapshot {
         lot_number: None,
         product: ShiftSnapshotProduct {
+            set_items,
             id: product_id.to_owned(),
             gtin14,
             name,
@@ -912,6 +969,7 @@ mod tests {
         ShiftSnapshot {
             lot_number: None,
             product: ShiftSnapshotProduct {
+                set_items: None,
                 id: "p".to_owned(),
                 gtin14: "04600682000013".to_owned(),
                 name: "Молоко".to_owned(),

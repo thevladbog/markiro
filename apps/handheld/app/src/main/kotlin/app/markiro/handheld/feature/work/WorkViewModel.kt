@@ -33,6 +33,8 @@ import app.markiro.handheld.core.network.ReachabilityTracker
 import app.markiro.handheld.core.scan.ScanEvents
 import app.markiro.handheld.core.scan.ScanOutcome
 import app.markiro.handheld.core.scan.ScanRecorder
+import app.markiro.handheld.core.sets.SetAssemblyStore
+import app.markiro.handheld.core.sets.SetScanStatus
 import app.markiro.handheld.core.signal.SignalKind
 import app.markiro.handheld.core.signal.Signaller
 import app.markiro.handheld.core.storage.HandheldDatabase
@@ -283,6 +285,11 @@ class WorkViewModel(
 
     val shiftId: String = checkNotNull(handle["shiftId"])
     val grantDenial = app.markiro.handheld.core.grants.GrantDenialUi()
+    private val assemblyStore = SetAssemblyStore(db)
+    private val assemblyFeedback = MutableStateFlow<SetScanStatus?>(null)
+    private val assemblyCounts = db.setAssemblyDao().observeCounts(shiftId)
+    val assembly = combine(assemblyStore.observeDraft(shiftId), assemblyCounts, assemblyFeedback, ::SetAssemblyUi)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, SetAssemblyUi())
 
     private val generation = db.recovery.token()
     private var boxSerialTopUp: BoxSerialTopUp? = null
@@ -401,9 +408,12 @@ class WorkViewModel(
         db.deviceConfigDao().observe(),
         participation,
         hostReachability,
+        assemblyCounts,
     ) { values ->
         val shift = values[0] as ShiftEntity?
-        val c = values[2] as Counters
+        val unitCounters = values[2] as Counters
+        val sets = values[18] as app.markiro.handheld.core.storage.SetAssemblyCounts
+        val c = if (shift?.setItemsJson == null) unitCounters else Counters(sets.finished, 0, 0, 0)
         val teamNow = values[6] as TeamState?
         val lastOk = values[5] as Long?
         val operator = (values[7] as SessionState).operator
@@ -500,6 +510,19 @@ class WorkViewModel(
         } }
     }
 
+    fun removeSetItem(index: Int, raw: String) {
+        viewModelScope.launch(grantDenial.handler) {
+            db.recovery.work(generation) {
+                scanActionMutex.withLock {
+                    if (!session.state.value.locked && session.state.value.operator != null) {
+                        assemblyStore.undo(shiftId, index, raw)
+                        assemblyFeedback.value = null
+                    }
+                }
+            }
+        }
+    }
+
     fun dismissPlanPrompt() {
         _planPrompt.value = false
     }
@@ -509,6 +532,21 @@ class WorkViewModel(
     private suspend fun handleScan(raw: String) {
         val shift = db.shiftDao().get(shiftId) ?: return
         if (shift.productGtin14 == null || shift.status == "closed") return
+        if (shift.setItemsJson != null) {
+            val operator = session.state.value
+            val operatorId = operator.operator?.operatorId ?: return
+            if (operator.locked) return
+            val result = assemblyStore.scan(shiftId, raw, operatorId) ?: return
+            assemblyFeedback.value = result.status
+            val signal = when (result.status) {
+                SetScanStatus.ITEM_ADDED -> SignalKind.OK
+                SetScanStatus.CLOSED -> SignalKind.BOX_DONE
+                else -> SignalKind.ERROR
+            }
+            signals.play(signal)
+            if (result.status == SetScanStatus.CLOSED) sync.nudge()
+            return
+        }
         // In a duplicate shift the open job decides what this scan IS, before
         // anything else looks at it. Getting this wrong means an operator scans
         // a sticker and the app counts it as a new unit.

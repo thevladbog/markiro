@@ -107,6 +107,8 @@ fun ShiftDto.toEntity(existing: ShiftEntity?, now: Long) = ShiftEntity(
     duplicateTemplate = existing?.duplicateTemplate,
     duplicateTemplateDigest = existing?.duplicateTemplateDigest,
     duplicatePolicyRevision = existing?.duplicatePolicyRevision,
+    setItemsJson = existing?.takeIf { it.bundleFetchedAt != null }?.setItemsJson
+        ?: setItems.takeIf { it.isNotEmpty() }?.let(Json::encodeToString),
     allowPreviouslyAcceptedCodes = existing?.takeIf { it.bundleFetchedAt != null }?.allowPreviouslyAcceptedCodes
         ?: validationPrint.allowPreviouslyAcceptedCodes,
 )

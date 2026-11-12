@@ -56,8 +56,8 @@ export function yieldToUi(): Promise<void> {
 }
 
 /** The steps of a plan: the counts, each format the shift is offered, the pallets. */
-export function planSteps(rows: ShiftExportRows, mode: ShiftMode): number {
-  return offeredFormats(rows, mode).length + 2;
+export function planSteps(rows: ShiftExportRows, mode: ShiftMode, includeUnf = false): number {
+  return offeredFormats(rows, mode, includeUnf).length + 2;
 }
 
 /**
@@ -71,9 +71,10 @@ export async function planExport(
   formedAt: string,
   turns: PlanTurns,
   mode: ShiftMode,
+  includeUnf = false,
 ): Promise<ExportPlan | null> {
-  const formats = offeredFormats(rows, mode);
-  const total = planSteps(rows, mode);
+  const formats = offeredFormats(rows, mode, includeUnf);
+  const total = formats.length + 2;
   let done = 0;
   async function step<T>(work: () => T): Promise<{ value: T } | null> {
     await turns.pause();
@@ -114,7 +115,11 @@ export type PlanState =
  * arrive. A new `rows` starts over; leaving ends the work at its next turn. A
  * failure is kept as its kind (`failureReason`), for the dialog to say.
  */
-export function useExportPlan(rows: ShiftExportRows | undefined, mode: ShiftMode): PlanState {
+export function useExportPlan(
+  rows: ShiftExportRows | undefined,
+  mode: ShiftMode,
+  includeUnf = false,
+): PlanState {
   const [job, setJob] = useState<{ rows: ShiftExportRows; state: PlanState } | null>(null);
   useEffect(() => {
     if (rows === undefined) return undefined;
@@ -128,6 +133,7 @@ export function useExportPlan(rows: ShiftExportRows | undefined, mode: ShiftMode
         progress: ({ done, total }) => setJob({ rows, state: { status: "working", done, total } }),
       },
       mode,
+      includeUnf,
     ).then(
       (plan) => {
         if (plan !== null && wanted) setJob({ rows, state: { status: "ready", plan } });
@@ -139,7 +145,11 @@ export function useExportPlan(rows: ShiftExportRows | undefined, mode: ShiftMode
     return () => {
       wanted = false;
     };
-  }, [rows, mode]);
+  }, [rows, mode, includeUnf]);
   if (job !== null && job.rows === rows) return job.state;
-  return { status: "working", done: 0, total: rows === undefined ? 0 : planSteps(rows, mode) };
+  return {
+    status: "working",
+    done: 0,
+    total: rows === undefined ? 0 : planSteps(rows, mode, includeUnf),
+  };
 }

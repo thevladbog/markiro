@@ -274,6 +274,7 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       items: [],
       total: 0,
     })),
+    listShiftSets: vi.fn<HostApi["listShiftSets"]>(() => unexpected("listShiftSets")),
     listShiftExports: vi.fn<HostApi["listShiftExports"]>(async () => ({ items: [] })),
     // The host's store of generated files (host migration 0029): by default it takes every
     // file whole and lists none, so a test about something else sees no warning.

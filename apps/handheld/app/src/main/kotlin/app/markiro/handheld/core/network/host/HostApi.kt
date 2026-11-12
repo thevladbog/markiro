@@ -192,7 +192,8 @@ class HostApi(private val transport: HostTransport, private val json: Json = Jso
 
         /** Several devices in one shift (protocol 7): named on every entry, so a free slot of the line takes this device; an older host ignores the name. */
         const val CAPABILITY_MULTI_STATION = "multi-station-v1"
-        internal val ENTER_SUPPORTS = listOf(CAPABILITY, CAPABILITY_VALIDATION, CAPABILITY_MULTI_STATION)
+        const val CAPABILITY_SET_ASSEMBLY = "set-assembly-v1"
+        internal val ENTER_SUPPORTS = listOf(CAPABILITY, CAPABILITY_VALIDATION, CAPABILITY_MULTI_STATION, CAPABILITY_SET_ASSEMBLY)
         const val KNOWN_BLOCKS_BATCH = 64
 
         /**

@@ -26,6 +26,7 @@ import { StateFilter } from "../list/StateFilter.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import { activeFirstByName, useStoreRecord } from "../records.js";
 import { ArchiveProductDialog } from "./ArchiveProductDialog.js";
+import { SetProductDrawer } from "./SetProductDrawer.js";
 import { ProductDrawer } from "./ProductDrawer.js";
 import { ProductThumb } from "./ProductThumb.js";
 import {
@@ -47,6 +48,7 @@ const FILTERS: readonly ProductFilter[] = ["all", "draft", "active", "archived"]
 
 type ProductsDialog =
   | { kind: "create" }
+  | { kind: "createSet" }
   | { kind: "edit"; product: OfficeProduct }
   | { kind: "archive"; product: OfficeProduct }
   | { kind: "restore"; product: OfficeProduct };
@@ -126,6 +128,9 @@ export function ProductsPage() {
           <span className="product-name">
             <span className="product-name__full">{product.name}</span>
             {product.demo === true && <DemoBadge />}
+            {product.setItems !== undefined && (
+              <StatusChip phase="active" label={t("office.products.sets.type")} />
+            )}
             {product.printName !== null && product.printName !== product.name && (
               <span className="product-name__print">
                 {t("office.products.printNameShort", { name: product.printName })}
@@ -153,7 +158,8 @@ export function ProductsPage() {
       title: t("office.products.table.boxCapacity"),
       mono: true,
       align: "right",
-      render: (product) => product.boxCapacity ?? t("office.common.none"),
+      render: (product) =>
+        (product.setItems === undefined ? product.boxCapacity : null) ?? t("office.common.none"),
     },
     {
       key: "state",
@@ -318,7 +324,12 @@ export function ProductsPage() {
         description={t("office.products.subtitle")}
         actions={
           canEdit ? (
-            <Button onClick={() => open({ kind: "create" })}>{t("office.products.add")}</Button>
+            <>
+              <Button variant="secondary" onClick={() => open({ kind: "createSet" })}>
+                {t("office.products.sets.add")}
+              </Button>
+              <Button onClick={() => open({ kind: "create" })}>{t("office.products.add")}</Button>
+            </>
           ) : null
         }
       />
@@ -359,31 +370,52 @@ export function ProductsPage() {
           }}
         />
       )}
-      {canEdit && (dialog?.kind === "create" || dialog?.kind === "edit") && (
-        <ProductDrawer
-          product={dialog.kind === "edit" ? dialog.product : null}
-          onClose={() => setDialog(null)}
-          onSaved={(product, photoFailed) => {
-            store(product);
-            setDialog(null);
-            setNotice(
-              photoFailed
-                ? { tone: "warn", text: t("office.products.photoFailed", { name: product.name }) }
-                : {
-                    tone: "ok",
-                    text:
-                      dialog.kind === "create"
-                        ? t("office.products.created", { name: product.name })
-                        : t("office.common.saved"),
-                  },
-            );
-          }}
-          onReload={() => {
-            setDialog(null);
-            void products.refetch();
-          }}
-        />
-      )}
+      {canEdit &&
+        (dialog?.kind === "createSet" ||
+          (dialog?.kind === "edit" && dialog.product.setItems !== undefined)) && (
+          <SetProductDrawer
+            key={dialog.kind === "edit" ? dialog.product.id : "create-set"}
+            product={dialog.kind === "edit" ? dialog.product : null}
+            products={products.data ?? []}
+            onClose={() => setDialog(null)}
+            onSaved={(product) => {
+              store(product);
+              setDialog(null);
+              setNotice({ tone: "ok", text: t("office.common.saved") });
+            }}
+            onReload={() => {
+              setDialog(null);
+              void products.refetch();
+            }}
+          />
+        )}
+      {canEdit &&
+        (dialog?.kind === "create" ||
+          (dialog?.kind === "edit" && dialog.product.setItems === undefined)) && (
+          <ProductDrawer
+            product={dialog.kind === "edit" ? dialog.product : null}
+            onClose={() => setDialog(null)}
+            onSaved={(product, photoFailed) => {
+              store(product);
+              setDialog(null);
+              setNotice(
+                photoFailed
+                  ? { tone: "warn", text: t("office.products.photoFailed", { name: product.name }) }
+                  : {
+                      tone: "ok",
+                      text:
+                        dialog.kind === "create"
+                          ? t("office.products.created", { name: product.name })
+                          : t("office.common.saved"),
+                    },
+              );
+            }}
+            onReload={() => {
+              setDialog(null);
+              void products.refetch();
+            }}
+          />
+        )}
     </>
   );
 }

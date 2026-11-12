@@ -579,3 +579,17 @@ export {
   PRINTER_OUTPUT_MODES,
   type PrinterOutputMode,
 } from "./labels/printer-output-mode.js";
+export {
+  STANDALONE_SHIFT_EXPORT_FORMATS,
+  STANDALONE_SET_EXPORT_FORMATS,
+  getStandaloneExportFormat,
+  renderStandaloneUnfExport,
+  renderStandaloneSetExport,
+} from "./standalone-exports.js";
+export type {
+  StandaloneShiftExportFormat,
+  StandaloneSetExportFormat,
+  StandaloneExportPart,
+  StandaloneUnfSource,
+  StandaloneExportSet,
+} from "./standalone-exports.js";

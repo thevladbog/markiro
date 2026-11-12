@@ -125,6 +125,7 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
             "floor_print_jobs",
             "floor_restore_epochs",
             "floor_scans",
+            "floor_set_marks",
             "floor_shift_participation",
             "floor_shifts",
             "floor_sign_in_failures",
@@ -1044,6 +1045,7 @@ fn without_0016(rows: Vec<Value>, before: &[Value]) -> Vec<Value> {
         .filter(|row| row["tbl_name"] != "ref_product_photos")
         .filter(|row| row["tbl_name"] != "installation_dataset_epochs")
         .filter(|row| row["tbl_name"] != "floor_shift_participation")
+        .filter(|row| row["tbl_name"] != "floor_set_marks")
         .map(|mut row| {
             // The historical migrations are compared against a database that has since taken 0025.
             let lot_column = match row["name"].as_str() {
@@ -1066,10 +1068,14 @@ fn without_0016(rows: Vec<Value>, before: &[Value]) -> Vec<Value> {
                     (old["sql"].as_str().unwrap(), row["sql"].as_str().unwrap());
                 const COLUMN: &str = ", photo_checksum TEXT";
                 const DEMO: &str = ", demo INTEGER NOT NULL DEFAULT 0 CHECK (demo IN (0, 1))";
+                const SET_ITEMS: &str = ", set_items TEXT\n  CHECK (set_items IS NULL OR (json_valid(set_items) AND json_type(set_items) = 'array'))";
                 assert_eq!(
-                    new_sql.replacen(COLUMN, "", 1).replacen(DEMO, "", 1),
+                    new_sql
+                        .replacen(COLUMN, "", 1)
+                        .replacen(DEMO, "", 1)
+                        .replacen(SET_ITEMS, "", 1),
                     old_sql,
-                    "0017 and 0021 only add their columns to ref_products"
+                    "0017, 0021 and 0026 only add their columns to ref_products"
                 );
                 row["sql"] = old["sql"].clone();
             }
@@ -3358,6 +3364,10 @@ async fn the_floors_repeating_reads_search_an_index() {
         (
             "DELETE FROM floor_boxes WHERE host_id = ? AND device_id = ? AND shift_id = ?",
             "floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?",
+        ),
+        (
+            "DELETE FROM floor_set_marks WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+            "floor_set_marks_shift (host_id=? AND device_id=? AND shift_id=?",
         ),
         (
             "DELETE FROM floor_pallets WHERE host_id = ? AND device_id = ? AND shift_id = ?",

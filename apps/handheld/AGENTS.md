@@ -90,14 +90,18 @@ Android tests must also verify its interpretation.
   one case: a closed warehouse pallet taken apart is frozen by `HostPalletEvents` as
   `warehouse_pallet_disassembled` once its close is acknowledged and the last `hello` (`MetaStore.HOST_PROTOCOL`,
   written by every heartbeat) said protocol 8 or more; an older host would refuse the kind for good, so the
-  record waits. The handheld still sends protocol header 6. Box exceptions, pallet reprints and the disassembly
+  record waits. Box exceptions, pallet reprints and the disassembly
   of a shift's pallet are still never sent to the host. Protocol fixtures are read from
   `apps/standalone/proto/fixtures` (test resources); never hand-edit expected values.
+- Marked set assembly requires protocol 9 and names `set-assembly-v1` at entry.
+  Room version 27 adds the frozen recipe and local set claims. The unfinished set stays in the shift draft.
+  Finishing the set freezes one `set_assembled` fact in the same transaction as the claims and draft removal.
+  Keep the scanned Data Matrix bytes, including GS, and batch within the host's 2 MiB body limit.
 - Manual app updates remain available in Settings → About device in both backend modes.
   `UpdateModule` uses the bare client for the public stable release channel, without device
   credentials or paired-origin rewriting. Preserve the pending-queue installation guard,
   installer size/SHA-256 validation and Android's explicit installation confirmation.
-- Several devices in one shift (plan 2b, host protocol 7; the handheld stays at protocol 6; Room is now 25 for site-wide reprint jobs/audit):
+- Several devices in one shift (plan 2b, introduced in host protocol 7):
   every entry names `multi-station-v1` (`HostApi.ENTER_SUPPORTS`; an older host ignores the name and still answers
   `shift_busy`, shown as «Смена занята»). A full line is `409 shift_line_full {maxStations, active}`
   (`EnterResult.LineFull`); `HostCalls` carries the two numbers to the loaders. The host's `maxStations`,

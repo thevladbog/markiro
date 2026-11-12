@@ -147,6 +147,48 @@ function lost(): HostError {
   return new HostError({ kind: "transport", code: "unreachable", message: "x" });
 }
 
+it("lists the assembled sets and their item codes in a set shift's card", async () => {
+  const shift: OfficeShift = {
+    ...ACTIVE,
+    mode: "validation",
+    setItems: [{ gtin14: "04607123456804", productName: "Крем для рук", quantity: 1 }],
+  };
+  const session = cardSession(shift);
+  const setCode = {
+    gtin14: "04607123456781",
+    serial: "SET1",
+    codeHash: "set-hash",
+    canonical: "010460712345678121SET1",
+  };
+  const item = {
+    gtin14: "04607123456804",
+    serial: "ITEM1",
+    codeHash: "item-hash",
+    canonical: "010460712345680421ITEM1",
+  };
+  session.api.listShiftSets.mockResolvedValue([
+    {
+      id: STATION,
+      deviceId: STATION,
+      operatorId: null,
+      assembledAt: "2026-10-08T06:05:12.031Z",
+      setCode,
+      items: [item],
+      outcome: "conflict",
+    },
+  ]);
+  await openCard(session, shift.number, "Наборы");
+  expect(screen.queryByRole("tab", { name: "Короба" })).toBeNull();
+  expect(screen.queryByRole("tab", { name: "Сканирования" })).toBeNull();
+  const sets = section("Наборы");
+  const row = await within(sets).findByRole("row", { name: /010460712345678121SET1/ });
+  expect(within(row).getByText("Конфликт кодов")).toBeTruthy();
+  fireEvent.click(within(row).getByText("Вложений: 1"));
+  expect(within(row).getByText("010460712345680421ITEM1").closest("details")?.open).toBe(true);
+  expect(session.api.listShiftSets).toHaveBeenCalledWith(expect.any(String), shift.id);
+  expect(session.api.listShiftBoxes).not.toHaveBeenCalled();
+});
+
 /** A closed box with an SSCC of its own; `n` even ends it with 0, odd with 1. */
 function parity(n: number): OfficeBox {
   return box(n, { sscc: `0460068200000${String(n).padStart(4, "0")}${n % 2}` });

@@ -1,0 +1,29 @@
+{
+  "id": "b92e2d52-79b8-4c2a-96c1-126c84dbed28",
+  "kind": "set_assembled",
+  "shiftId": "c283d01b-aed5-4eb8-bc9a-543ad536a1f4",
+  "operatorId": null,
+  "data": {
+    "assembledAt": "2026-10-08T06:03:00.000Z",
+    "setCode": {
+      "gtin14": "04607123456781",
+      "serial": "SET0001",
+      "canonical": "010460712345678121SET0001\u001d93dAbc",
+      "codeHash": "ec02c26466031da8b0614f07547fec1826eed7ffb0dbe9aae6631d8bc2fd245b"
+    },
+    "items": [
+      {
+        "gtin14": "04607123456804",
+        "serial": "UNIT002",
+        "canonical": "010460712345680421UNIT002\u001d93dAbc",
+        "codeHash": "0bd0565c0640e768d462cf420530b2cb251727667a9988855e532af477656774"
+      },
+      {
+        "gtin14": "04607123456804",
+        "serial": "UNIT001",
+        "canonical": "010460712345680421UNIT001\u001d93dAbc",
+        "codeHash": "57dfde2df8a5cf8febf9762eb54a3dfd94d89e6ca8742b742b7f11da6afe811d"
+      }
+    ]
+  }
+}
