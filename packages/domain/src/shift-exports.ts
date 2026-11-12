@@ -398,13 +398,12 @@ export function renderShiftExport(input: RenderShiftExportInput): ShiftExportPar
 }
 
 export function sanitizeShiftExportFilenameSegment(value: string): string {
-  const sanitized = value
-    .normalize("NFC")
-    .replace(/[^\p{L}\p{N}-]+/gu, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_+|_+$/g, "");
+  // Each run of disallowed characters becomes exactly one underscore.
+  const segment = value.normalize("NFC").replace(/[^\p{L}\p{N}-]+/gu, "_");
+  const start = segment.startsWith("_") ? 1 : 0;
+  const end = segment.endsWith("_") ? -1 : undefined;
 
-  return sanitized || "продукция";
+  return segment.slice(start, end) || "продукция";
 }
 
 function validateLineLimit(maxLines: number | null): void {
