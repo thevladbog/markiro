@@ -1,12 +1,9 @@
 import {
-  buildDefaultLabelTemplates,
-  buildDuplicateLabelTemplates,
-  buildPalletLabelTemplates,
+  buildAutonomStockLabelTemplates,
   DEFAULT_BOX_LABEL_TEMPLATE_NAME,
   isValidInn,
   PALLET_LABEL_TEMPLATE_NAME,
   ssccSerialCapacity,
-  type LabelTemplateSpec,
 } from "@markiro/domain";
 import { z } from "zod";
 
@@ -205,32 +202,20 @@ export function validateStep(step: WizardStep, values: WizardValues): FieldIssue
 /** The most stock templates the host takes (`bootstrap::MAX_STOCK_TEMPLATES`). */
 export const MAX_STOCK_TEMPLATES = 32;
 
-/** One family of the domain's stock templates with its purpose. */
-function family(
-  purpose: TemplatePurpose,
-  built: readonly { name: string; spec: LabelTemplateSpec }[],
-  defaultName: string | null,
-): StockTemplate[] {
-  return built.map(({ name, spec }) =>
-    name === defaultName ? { name, purpose, spec, orgDefault: true } : { name, purpose, spec },
-  );
-}
-
 /**
- * The stock label templates the wizard sends: the domain's box,
- * product-duplicate and pallet sets, in the order the cloud seeds a new
- * tenant (`tenant-provisioning.service.ts`). The dated box 58×40
+ * The stock label templates the wizard sends. The dated box 58×40
  * (`DEFAULT_BOX_LABEL_TEMPLATE_NAME`) and the pallet 100×150
  * (`PALLET_LABEL_TEMPLATE_NAME`) become the organization's defaults; a
  * duplicate gets none, as in the cloud. Every other template leaves
  * `orgDefault` out, which the host reads as `false`.
  */
 export function stockTemplates(): StockTemplate[] {
-  return [
-    ...family("box", buildDefaultLabelTemplates(), DEFAULT_BOX_LABEL_TEMPLATE_NAME),
-    ...family("product_duplicate", buildDuplicateLabelTemplates(), null),
-    ...family("pallet", buildPalletLabelTemplates(), PALLET_LABEL_TEMPLATE_NAME),
-  ];
+  return buildAutonomStockLabelTemplates().map((template) =>
+    template.name === DEFAULT_BOX_LABEL_TEMPLATE_NAME ||
+    template.name === PALLET_LABEL_TEMPLATE_NAME
+      ? { ...template, orgDefault: true }
+      : template,
+  );
 }
 
 /**

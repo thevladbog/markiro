@@ -106,9 +106,11 @@ describe("the stock templates the wizard seeds", () => {
     spec: labelTemplateSpecStrictSchema.parse(template.spec),
   }));
 
-  it("are the 21 the host's cap of 32 takes", () => {
-    // 16 box, 2 product duplicate and 3 pallet templates; a change is a deliberate edit.
-    expect(stock).toHaveLength(21);
+  it("are the 23 the host's cap of 32 takes", () => {
+    expect(stock).toHaveLength(23);
+    expect(stock.filter(({ purpose }) => purpose === "box")).toHaveLength(16);
+    expect(stock.filter(({ purpose }) => purpose === "pallet")).toHaveLength(3);
+    expect(stock.filter(({ purpose }) => purpose === "product_duplicate")).toHaveLength(4);
     expect(stock.length).toBeLessThanOrEqual(MAX_STOCK_TEMPLATES);
     expect(MAX_STOCK_TEMPLATES).toBe(32);
     const host = readFileSync(new URL("../host/src/routes/bootstrap.rs", testModuleUrl), "utf8");
@@ -136,7 +138,7 @@ describe("the stock templates the wizard seeds", () => {
         rendered += 1;
       }
     }
-    expect(rendered).toBe(21 * 4);
+    expect(rendered).toBe(stock.length * PRINTERS.length);
   });
 
   it("print the same bytes with the logo element as without it: its area stays empty", async () => {
@@ -157,13 +159,13 @@ describe("the stock templates the wizard seeds", () => {
   it("shrink a quantity that is too wide at its size, down to its minimum, rather than cut it", async () => {
     const template = stock.find((candidate) => candidate.name === "Коробка 75×120");
     if (template === undefined) throw new Error("no 75×120 box template");
-    const data = longData("box");
+    const data = { ...longData("box"), qty: "9".repeat(16) };
     await renderLabel(template.spec, data, { language: "zpl", dpi: 203 }, rasterizeText);
     const quantity = labelFieldDisplayValue("qty", data);
     const sizes = drawn.filter((d) => d.text === quantity).map((d) => d.font);
-    // 17 pt is 48 px at 203 dpi: "9999 шт." is 230 dots wide there, the box 216.
-    // The next size that fits, at 0.6 em a glyph, is 45 px.
-    expect(sizes).toEqual(["700 45px IBM Plex Sans, sans-serif"]);
+    // A 20-character quantity is 372 dots at 11 pt (31 dots), exceeding the
+    // 43 mm column (344 dots). The largest fitting size at 0.6 em is 28 dots.
+    expect(sizes).toEqual(["400 28px IBM Plex Sans, sans-serif"]);
   });
 
   it("refuse, rather than cut, a quantity that does not fit even at the minimum", async () => {

@@ -1,4 +1,5 @@
 import {
+  buildAutonomStockLabelTemplates,
   buildDatedBoxLabelTemplates,
   buildDefaultLabelTemplates,
   buildPalletLabelTemplates,
@@ -119,6 +120,25 @@ describe("a box label's dates", () => {
 });
 
 describe("a label's bytes", () => {
+  it.each([203, 300] as const)(
+    "asks the TSPL printer to centre each 75×120 box SSCC at %i dpi",
+    async (dpi) => {
+      const boxes = buildAutonomStockLabelTemplates().filter(
+        ({ purpose, spec }) => purpose === "box" && spec.widthMm === 75 && spec.heightMm === 120,
+      );
+      expect(boxes).toHaveLength(4);
+      const fields = { ...sampleLabelData(), sscc: SSCC };
+      const x = mmToDots(75 / 2, dpi);
+      const module = dpi === 203 ? 3 : 4;
+      for (const { spec } of boxes) {
+        const tspl = decode(await renderLabel(spec, fields, { language: "tspl", dpi }, fakeRaster));
+        expect(tspl).toMatch(
+          new RegExp(`BARCODE ${x},\\d+,"EAN128",\\d+,0,0,${module},${module},2,"00${SSCC}"`),
+        );
+      }
+    },
+  );
+
   it("are the domain's document for the printer's language and resolution: the model the office previews", async () => {
     const { executor } = openLocalDb();
     const shift = await enteredShift(executor);

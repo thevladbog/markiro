@@ -134,8 +134,12 @@ export {
   PALLET_LABEL_58X40_TEMPLATE_NAME,
   PALLET_LABEL_TEMPLATE_NAME,
 } from "./labels/pallet-defaults.js";
-export { buildStockLotNumberLabelVariants } from "./labels/stock-lot-number.js";
+export {
+  buildAutonomStockLabelTemplates,
+  buildStockLotNumberLabelVariants,
+} from "./labels/stock-lot-number.js";
 export type { StockLotNumberLabelVariant } from "./labels/stock-lot-number.js";
+export { withAutonomPrinterDpi } from "./labels/autonom-thermal-75x120.js";
 export type {
   LabelBarcodeElement,
   LabelBoxElement,

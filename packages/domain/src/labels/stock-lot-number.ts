@@ -1,4 +1,8 @@
 import type { LabelTemplatePurpose } from "../product-labels/contracts.js";
+import {
+  buildAutonomAggregation75x120,
+  buildAutonomDuplicate75x120,
+} from "./autonom-thermal-75x120.js";
 import { buildDefaultLabelTemplates } from "./defaults.js";
 import { buildDuplicateLabelTemplates } from "./duplicate.js";
 import { LOT_NUMBER_LABEL_FIELD, type LabelElement, type LabelTemplateSpec } from "./model.js";
@@ -8,6 +12,9 @@ export interface StockLotNumberLabelVariant {
   purpose: LabelTemplatePurpose;
   sourceName: string;
   sourceSpec: LabelTemplateSpec;
+  updatedSourceSpec?: LabelTemplateSpec;
+  previousSpec?: LabelTemplateSpec;
+  addSource?: true;
   name: string;
   spec: LabelTemplateSpec;
 }
@@ -143,16 +150,43 @@ export function buildStockLotNumberLabelVariants(): StockLotNumberLabelVariant[]
     ["pallet", buildPalletLabelTemplates()],
     ["product_duplicate", buildDuplicateLabelTemplates()],
   ] as const;
-  return sources.flatMap(([purpose, templates]) =>
-    templates.map(({ name, spec }) => ({
-      purpose,
+  const variants: StockLotNumberLabelVariant[] = sources.flatMap(([purpose, templates]) =>
+    templates.map(({ name, spec }) => {
+      const base = { purpose, sourceName: name, sourceSpec: spec, name: `${name} · номер партии` };
+      if (purpose === "product_duplicate") return { ...base, spec: duplicateVariant(spec) };
+      const previous = aggregationVariant(spec, purpose);
+      if (spec.widthMm !== 75 || spec.heightMm !== 120) return { ...base, spec: previous };
+      return {
+        ...base,
+        updatedSourceSpec: buildAutonomAggregation75x120(spec, purpose, false),
+        previousSpec: previous,
+        spec: buildAutonomAggregation75x120(spec, purpose, true),
+      };
+    }),
+  );
+  for (const [nameField, variant] of [
+    ["product.name", "Полное наименование"],
+    ["product.printName", "Краткое наименование"],
+  ] as const) {
+    const name = `Дубликат Data Matrix 75×120 [${variant}]`;
+    variants.push({
+      purpose: "product_duplicate",
       sourceName: name,
-      sourceSpec: spec,
+      sourceSpec: buildAutonomDuplicate75x120(nameField, false),
       name: `${name} · номер партии`,
-      spec:
-        purpose === "product_duplicate"
-          ? duplicateVariant(spec)
-          : aggregationVariant(spec, purpose),
-    })),
+      spec: buildAutonomDuplicate75x120(nameField, true),
+      addSource: true,
+    });
+  }
+  return variants;
+}
+
+export function buildAutonomStockLabelTemplates() {
+  return buildStockLotNumberLabelVariants().map(
+    ({ purpose, sourceName, sourceSpec, updatedSourceSpec }) => ({
+      purpose,
+      name: sourceName,
+      spec: updatedSourceSpec ?? sourceSpec,
+    }),
   );
 }

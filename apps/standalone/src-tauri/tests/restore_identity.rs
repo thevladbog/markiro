@@ -476,9 +476,37 @@ async fn a_station_keeps_its_pairing_with_its_host_restored_on_a_new_computer() 
     );
     assert_eq!(
         revision(&before.station).await,
-        before.copy_revision + 1,
+        report.revision,
         "the revision goes on from the copy, never back"
     );
+    let feed = ok(
+        &before.station,
+        "GET",
+        &format!("/v1/changes?since={}", before.copy_revision),
+        None,
+        None,
+    )
+    .await;
+    let templates: Vec<_> = feed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["entity"] == "label_templates")
+        .collect();
+    assert_eq!(
+        templates.len(),
+        4,
+        "both 75×120 duplicates and their lot variants"
+    );
+    for item in templates {
+        assert_eq!(
+            item["rev"], report.revision,
+            "publish at the restore revision"
+        );
+        assert_eq!(item["data"]["purpose"], "product_duplicate");
+        assert_eq!(item["data"]["spec"]["widthMm"], 75);
+        assert_eq!(item["data"]["spec"]["heightMm"], 120);
+    }
 
     // The restore holds the stations' facts until an administrator resumes
     // them.

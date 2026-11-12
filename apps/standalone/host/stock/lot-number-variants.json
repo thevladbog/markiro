@@ -510,7 +510,177 @@
         "gs1Constraint": "sscc_x_below_distribution_minimum"
       },
       "name": "Коробка 75×120 · номер партии",
-      "spec": {
+      "updatedSourceSpec": {
+        "widthMm": 75,
+        "heightMm": 120,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "organization_logo",
+            "id": "organization-logo",
+            "source": "organization",
+            "fallback": "markiro",
+            "xMm": 4,
+            "yMm": 3.5,
+            "widthMm": 30,
+            "heightMm": 6.857143
+          },
+          {
+            "kind": "text",
+            "id": "cap-title",
+            "text": "КОРОБКА",
+            "xMm": 36,
+            "yMm": 4,
+            "maxWidthMm": 35,
+            "fontSizePt": 11,
+            "bold": true,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-name",
+            "field": "product.name",
+            "xMm": 4,
+            "yMm": 14,
+            "maxWidthMm": 67,
+            "maxLines": 3,
+            "fontSizePt": 17,
+            "bold": true,
+            "lineHeight": 1
+          },
+          {
+            "kind": "line",
+            "id": "sep1",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 34,
+            "y2Mm": 34,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-qty",
+            "text": "Единиц в коробке",
+            "xMm": 4,
+            "yMm": 36,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-qty",
+            "field": "qty",
+            "xMm": 28,
+            "yMm": 36,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9
+          },
+          {
+            "kind": "text",
+            "id": "cap-date",
+            "text": "Дата производства",
+            "xMm": 4,
+            "yMm": 42,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-date",
+            "field": "date",
+            "xMm": 28,
+            "yMm": 42,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-expiry",
+            "text": "Годен до",
+            "xMm": 4,
+            "yMm": 48,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-expiry",
+            "field": "expiry",
+            "xMm": 28,
+            "yMm": 48,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-egais",
+            "text": "Код ЕГАИС",
+            "xMm": 4,
+            "yMm": 54,
+            "fontSizePt": 11,
+            "maxWidthMm": 23,
+            "lineHeight": 1,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-egais",
+            "field": "product.egais",
+            "xMm": 28,
+            "yMm": 54,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "barcode",
+            "id": "bc-sscc",
+            "data": "sscc",
+            "format": "code128",
+            "xMm": 8.221182266009858,
+            "yMm": 80,
+            "sizeMm": 32,
+            "moduleWidthMm": 0.37536945812807876
+          },
+          {
+            "kind": "field",
+            "id": "val-sscc",
+            "field": "sscc",
+            "xMm": 4,
+            "yMm": 113,
+            "maxWidthMm": 67,
+            "fontSizePt": 10,
+            "bold": false,
+            "align": "center",
+            "lineHeight": 1,
+            "fontFamily": "sans-serif",
+            "textFormat": "sscc_spaced"
+          }
+        ],
+        "gs1Constraint": "sscc_x_below_distribution_minimum"
+      },
+      "previousSpec": {
         "widthMm": 75,
         "heightMm": 120,
         "dpi": 203,
@@ -722,6 +892,213 @@
             "fontSizePt": 10,
             "minFontSizePt": 8,
             "lineHeight": 1.15
+          }
+        ],
+        "gs1Constraint": "sscc_x_below_distribution_minimum"
+      },
+      "spec": {
+        "widthMm": 75,
+        "heightMm": 120,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "organization_logo",
+            "id": "organization-logo",
+            "source": "organization",
+            "fallback": "markiro",
+            "xMm": 4,
+            "yMm": 3.5,
+            "widthMm": 30,
+            "heightMm": 6.857143
+          },
+          {
+            "kind": "text",
+            "id": "cap-title",
+            "text": "КОРОБКА",
+            "xMm": 36,
+            "yMm": 4,
+            "maxWidthMm": 35,
+            "fontSizePt": 11,
+            "bold": true,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-name",
+            "field": "product.name",
+            "xMm": 4,
+            "yMm": 14,
+            "maxWidthMm": 67,
+            "maxLines": 3,
+            "fontSizePt": 17,
+            "bold": true,
+            "lineHeight": 1
+          },
+          {
+            "kind": "line",
+            "id": "sep1",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 34,
+            "y2Mm": 34,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-qty",
+            "text": "Единиц в коробке",
+            "xMm": 4,
+            "yMm": 36,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-qty",
+            "field": "qty",
+            "xMm": 28,
+            "yMm": 36,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9
+          },
+          {
+            "kind": "text",
+            "id": "cap-date",
+            "text": "Дата производства",
+            "xMm": 4,
+            "yMm": 42,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-date",
+            "field": "date",
+            "xMm": 28,
+            "yMm": 42,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-expiry",
+            "text": "Годен до",
+            "xMm": 4,
+            "yMm": 48,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-expiry",
+            "field": "expiry",
+            "xMm": 28,
+            "yMm": 48,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-egais",
+            "text": "Код ЕГАИС",
+            "xMm": 4,
+            "yMm": 54,
+            "fontSizePt": 11,
+            "maxWidthMm": 23,
+            "lineHeight": 1,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-egais",
+            "field": "product.egais",
+            "xMm": 28,
+            "yMm": 54,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "line",
+            "id": "sep-lot",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 63.8,
+            "y2Mm": 63.8,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-lot-number",
+            "text": "Номер партии",
+            "xMm": 4,
+            "yMm": 65,
+            "fontSizePt": 10,
+            "maxWidthMm": 26,
+            "lineHeight": 1,
+            "when": {
+              "field": "shift.lotNumber",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-lot-number",
+            "field": "shift.lotNumber",
+            "xMm": 28,
+            "yMm": 65,
+            "maxWidthMm": 43,
+            "maxLines": 2,
+            "fontFamily": "sans-serif",
+            "fontSizePt": 10,
+            "minFontSizePt": 7,
+            "lineHeight": 1.05,
+            "align": "right"
+          },
+          {
+            "kind": "barcode",
+            "id": "bc-sscc",
+            "data": "sscc",
+            "format": "code128",
+            "xMm": 8.221182266009858,
+            "yMm": 80,
+            "sizeMm": 32,
+            "moduleWidthMm": 0.37536945812807876
+          },
+          {
+            "kind": "field",
+            "id": "val-sscc",
+            "field": "sscc",
+            "xMm": 4,
+            "yMm": 113,
+            "maxWidthMm": 67,
+            "fontSizePt": 10,
+            "bold": false,
+            "align": "center",
+            "lineHeight": 1,
+            "fontFamily": "sans-serif",
+            "textFormat": "sscc_spaced"
           }
         ],
         "gs1Constraint": "sscc_x_below_distribution_minimum"
@@ -1915,7 +2292,135 @@
         "gs1Constraint": "sscc_x_below_distribution_minimum"
       },
       "name": "Коробка 75×120 без дат · номер партии",
-      "spec": {
+      "updatedSourceSpec": {
+        "widthMm": 75,
+        "heightMm": 120,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "organization_logo",
+            "id": "organization-logo",
+            "source": "organization",
+            "fallback": "markiro",
+            "xMm": 4,
+            "yMm": 3.5,
+            "widthMm": 30,
+            "heightMm": 6.857143
+          },
+          {
+            "kind": "text",
+            "id": "cap-title",
+            "text": "КОРОБКА",
+            "xMm": 36,
+            "yMm": 4,
+            "maxWidthMm": 35,
+            "fontSizePt": 11,
+            "bold": true,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-name",
+            "field": "product.name",
+            "xMm": 4,
+            "yMm": 14,
+            "maxWidthMm": 67,
+            "maxLines": 3,
+            "fontSizePt": 17,
+            "bold": true,
+            "lineHeight": 1
+          },
+          {
+            "kind": "line",
+            "id": "sep1",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 34,
+            "y2Mm": 34,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-qty",
+            "text": "Единиц в коробке",
+            "xMm": 4,
+            "yMm": 36,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-qty",
+            "field": "qty",
+            "xMm": 28,
+            "yMm": 36,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9
+          },
+          {
+            "kind": "text",
+            "id": "cap-egais",
+            "text": "Код ЕГАИС",
+            "xMm": 4,
+            "yMm": 42,
+            "fontSizePt": 11,
+            "maxWidthMm": 23,
+            "lineHeight": 1,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-egais",
+            "field": "product.egais",
+            "xMm": 28,
+            "yMm": 42,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "barcode",
+            "id": "bc-sscc",
+            "data": "sscc",
+            "format": "code128",
+            "xMm": 8.221182266009858,
+            "yMm": 69,
+            "sizeMm": 43,
+            "moduleWidthMm": 0.37536945812807876
+          },
+          {
+            "kind": "field",
+            "id": "val-sscc",
+            "field": "sscc",
+            "xMm": 4,
+            "yMm": 113,
+            "maxWidthMm": 67,
+            "fontSizePt": 10,
+            "bold": false,
+            "align": "center",
+            "lineHeight": 1,
+            "fontFamily": "sans-serif",
+            "textFormat": "sscc_spaced"
+          }
+        ],
+        "gs1Constraint": "sscc_x_below_distribution_minimum"
+      },
+      "previousSpec": {
         "widthMm": 75,
         "heightMm": 120,
         "dpi": 203,
@@ -2079,6 +2584,171 @@
             "fontSizePt": 10,
             "minFontSizePt": 8,
             "lineHeight": 1.15
+          }
+        ],
+        "gs1Constraint": "sscc_x_below_distribution_minimum"
+      },
+      "spec": {
+        "widthMm": 75,
+        "heightMm": 120,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "organization_logo",
+            "id": "organization-logo",
+            "source": "organization",
+            "fallback": "markiro",
+            "xMm": 4,
+            "yMm": 3.5,
+            "widthMm": 30,
+            "heightMm": 6.857143
+          },
+          {
+            "kind": "text",
+            "id": "cap-title",
+            "text": "КОРОБКА",
+            "xMm": 36,
+            "yMm": 4,
+            "maxWidthMm": 35,
+            "fontSizePt": 11,
+            "bold": true,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-name",
+            "field": "product.name",
+            "xMm": 4,
+            "yMm": 14,
+            "maxWidthMm": 67,
+            "maxLines": 3,
+            "fontSizePt": 17,
+            "bold": true,
+            "lineHeight": 1
+          },
+          {
+            "kind": "line",
+            "id": "sep1",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 34,
+            "y2Mm": 34,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-qty",
+            "text": "Единиц в коробке",
+            "xMm": 4,
+            "yMm": 36,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-qty",
+            "field": "qty",
+            "xMm": 28,
+            "yMm": 36,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9
+          },
+          {
+            "kind": "text",
+            "id": "cap-egais",
+            "text": "Код ЕГАИС",
+            "xMm": 4,
+            "yMm": 42,
+            "fontSizePt": 11,
+            "maxWidthMm": 23,
+            "lineHeight": 1,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-egais",
+            "field": "product.egais",
+            "xMm": 28,
+            "yMm": 42,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "line",
+            "id": "sep-lot",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 53.8,
+            "y2Mm": 53.8,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-lot-number",
+            "text": "Номер партии",
+            "xMm": 4,
+            "yMm": 55,
+            "fontSizePt": 10,
+            "maxWidthMm": 26,
+            "lineHeight": 1,
+            "when": {
+              "field": "shift.lotNumber",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-lot-number",
+            "field": "shift.lotNumber",
+            "xMm": 28,
+            "yMm": 55,
+            "maxWidthMm": 43,
+            "maxLines": 2,
+            "fontFamily": "sans-serif",
+            "fontSizePt": 10,
+            "minFontSizePt": 7,
+            "lineHeight": 1.05,
+            "align": "right"
+          },
+          {
+            "kind": "barcode",
+            "id": "bc-sscc",
+            "data": "sscc",
+            "format": "code128",
+            "xMm": 8.221182266009858,
+            "yMm": 69,
+            "sizeMm": 43,
+            "moduleWidthMm": 0.37536945812807876
+          },
+          {
+            "kind": "field",
+            "id": "val-sscc",
+            "field": "sscc",
+            "xMm": 4,
+            "yMm": 113,
+            "maxWidthMm": 67,
+            "fontSizePt": 10,
+            "bold": false,
+            "align": "center",
+            "lineHeight": 1,
+            "fontFamily": "sans-serif",
+            "textFormat": "sscc_spaced"
           }
         ],
         "gs1Constraint": "sscc_x_below_distribution_minimum"
@@ -3204,7 +3874,177 @@
         "gs1Constraint": "sscc_x_below_distribution_minimum"
       },
       "name": "Коробка 75×120 [Назв. для печати] · номер партии",
-      "spec": {
+      "updatedSourceSpec": {
+        "widthMm": 75,
+        "heightMm": 120,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "organization_logo",
+            "id": "organization-logo",
+            "source": "organization",
+            "fallback": "markiro",
+            "xMm": 4,
+            "yMm": 3.5,
+            "widthMm": 30,
+            "heightMm": 6.857143
+          },
+          {
+            "kind": "text",
+            "id": "cap-title",
+            "text": "КОРОБКА",
+            "xMm": 36,
+            "yMm": 4,
+            "maxWidthMm": 35,
+            "fontSizePt": 11,
+            "bold": true,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-name",
+            "field": "product.printName",
+            "xMm": 4,
+            "yMm": 14,
+            "maxWidthMm": 67,
+            "maxLines": 3,
+            "fontSizePt": 17,
+            "bold": true,
+            "lineHeight": 1
+          },
+          {
+            "kind": "line",
+            "id": "sep1",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 34,
+            "y2Mm": 34,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-qty",
+            "text": "Единиц в коробке",
+            "xMm": 4,
+            "yMm": 36,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-qty",
+            "field": "qty",
+            "xMm": 28,
+            "yMm": 36,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9
+          },
+          {
+            "kind": "text",
+            "id": "cap-date",
+            "text": "Дата производства",
+            "xMm": 4,
+            "yMm": 42,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-date",
+            "field": "date",
+            "xMm": 28,
+            "yMm": 42,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-expiry",
+            "text": "Годен до",
+            "xMm": 4,
+            "yMm": 48,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-expiry",
+            "field": "expiry",
+            "xMm": 28,
+            "yMm": 48,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-egais",
+            "text": "Код ЕГАИС",
+            "xMm": 4,
+            "yMm": 54,
+            "fontSizePt": 11,
+            "maxWidthMm": 23,
+            "lineHeight": 1,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-egais",
+            "field": "product.egais",
+            "xMm": 28,
+            "yMm": 54,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "barcode",
+            "id": "bc-sscc",
+            "data": "sscc",
+            "format": "code128",
+            "xMm": 8.221182266009858,
+            "yMm": 80,
+            "sizeMm": 32,
+            "moduleWidthMm": 0.37536945812807876
+          },
+          {
+            "kind": "field",
+            "id": "val-sscc",
+            "field": "sscc",
+            "xMm": 4,
+            "yMm": 113,
+            "maxWidthMm": 67,
+            "fontSizePt": 10,
+            "bold": false,
+            "align": "center",
+            "lineHeight": 1,
+            "fontFamily": "sans-serif",
+            "textFormat": "sscc_spaced"
+          }
+        ],
+        "gs1Constraint": "sscc_x_below_distribution_minimum"
+      },
+      "previousSpec": {
         "widthMm": 75,
         "heightMm": 120,
         "dpi": 203,
@@ -3416,6 +4256,213 @@
             "fontSizePt": 10,
             "minFontSizePt": 8,
             "lineHeight": 1.15
+          }
+        ],
+        "gs1Constraint": "sscc_x_below_distribution_minimum"
+      },
+      "spec": {
+        "widthMm": 75,
+        "heightMm": 120,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "organization_logo",
+            "id": "organization-logo",
+            "source": "organization",
+            "fallback": "markiro",
+            "xMm": 4,
+            "yMm": 3.5,
+            "widthMm": 30,
+            "heightMm": 6.857143
+          },
+          {
+            "kind": "text",
+            "id": "cap-title",
+            "text": "КОРОБКА",
+            "xMm": 36,
+            "yMm": 4,
+            "maxWidthMm": 35,
+            "fontSizePt": 11,
+            "bold": true,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-name",
+            "field": "product.printName",
+            "xMm": 4,
+            "yMm": 14,
+            "maxWidthMm": 67,
+            "maxLines": 3,
+            "fontSizePt": 17,
+            "bold": true,
+            "lineHeight": 1
+          },
+          {
+            "kind": "line",
+            "id": "sep1",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 34,
+            "y2Mm": 34,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-qty",
+            "text": "Единиц в коробке",
+            "xMm": 4,
+            "yMm": 36,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-qty",
+            "field": "qty",
+            "xMm": 28,
+            "yMm": 36,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9
+          },
+          {
+            "kind": "text",
+            "id": "cap-date",
+            "text": "Дата производства",
+            "xMm": 4,
+            "yMm": 42,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-date",
+            "field": "date",
+            "xMm": 28,
+            "yMm": 42,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-expiry",
+            "text": "Годен до",
+            "xMm": 4,
+            "yMm": 48,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-expiry",
+            "field": "expiry",
+            "xMm": 28,
+            "yMm": 48,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-egais",
+            "text": "Код ЕГАИС",
+            "xMm": 4,
+            "yMm": 54,
+            "fontSizePt": 11,
+            "maxWidthMm": 23,
+            "lineHeight": 1,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-egais",
+            "field": "product.egais",
+            "xMm": 28,
+            "yMm": 54,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "line",
+            "id": "sep-lot",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 63.8,
+            "y2Mm": 63.8,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-lot-number",
+            "text": "Номер партии",
+            "xMm": 4,
+            "yMm": 65,
+            "fontSizePt": 10,
+            "maxWidthMm": 26,
+            "lineHeight": 1,
+            "when": {
+              "field": "shift.lotNumber",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-lot-number",
+            "field": "shift.lotNumber",
+            "xMm": 28,
+            "yMm": 65,
+            "maxWidthMm": 43,
+            "maxLines": 2,
+            "fontFamily": "sans-serif",
+            "fontSizePt": 10,
+            "minFontSizePt": 7,
+            "lineHeight": 1.05,
+            "align": "right"
+          },
+          {
+            "kind": "barcode",
+            "id": "bc-sscc",
+            "data": "sscc",
+            "format": "code128",
+            "xMm": 8.221182266009858,
+            "yMm": 80,
+            "sizeMm": 32,
+            "moduleWidthMm": 0.37536945812807876
+          },
+          {
+            "kind": "field",
+            "id": "val-sscc",
+            "field": "sscc",
+            "xMm": 4,
+            "yMm": 113,
+            "maxWidthMm": 67,
+            "fontSizePt": 10,
+            "bold": false,
+            "align": "center",
+            "lineHeight": 1,
+            "fontFamily": "sans-serif",
+            "textFormat": "sscc_spaced"
           }
         ],
         "gs1Constraint": "sscc_x_below_distribution_minimum"
@@ -4609,7 +5656,135 @@
         "gs1Constraint": "sscc_x_below_distribution_minimum"
       },
       "name": "Коробка 75×120 без дат [Назв. для печати] · номер партии",
-      "spec": {
+      "updatedSourceSpec": {
+        "widthMm": 75,
+        "heightMm": 120,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "organization_logo",
+            "id": "organization-logo",
+            "source": "organization",
+            "fallback": "markiro",
+            "xMm": 4,
+            "yMm": 3.5,
+            "widthMm": 30,
+            "heightMm": 6.857143
+          },
+          {
+            "kind": "text",
+            "id": "cap-title",
+            "text": "КОРОБКА",
+            "xMm": 36,
+            "yMm": 4,
+            "maxWidthMm": 35,
+            "fontSizePt": 11,
+            "bold": true,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-name",
+            "field": "product.printName",
+            "xMm": 4,
+            "yMm": 14,
+            "maxWidthMm": 67,
+            "maxLines": 3,
+            "fontSizePt": 17,
+            "bold": true,
+            "lineHeight": 1
+          },
+          {
+            "kind": "line",
+            "id": "sep1",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 34,
+            "y2Mm": 34,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-qty",
+            "text": "Единиц в коробке",
+            "xMm": 4,
+            "yMm": 36,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-qty",
+            "field": "qty",
+            "xMm": 28,
+            "yMm": 36,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9
+          },
+          {
+            "kind": "text",
+            "id": "cap-egais",
+            "text": "Код ЕГАИС",
+            "xMm": 4,
+            "yMm": 42,
+            "fontSizePt": 11,
+            "maxWidthMm": 23,
+            "lineHeight": 1,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-egais",
+            "field": "product.egais",
+            "xMm": 28,
+            "yMm": 42,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "barcode",
+            "id": "bc-sscc",
+            "data": "sscc",
+            "format": "code128",
+            "xMm": 8.221182266009858,
+            "yMm": 69,
+            "sizeMm": 43,
+            "moduleWidthMm": 0.37536945812807876
+          },
+          {
+            "kind": "field",
+            "id": "val-sscc",
+            "field": "sscc",
+            "xMm": 4,
+            "yMm": 113,
+            "maxWidthMm": 67,
+            "fontSizePt": 10,
+            "bold": false,
+            "align": "center",
+            "lineHeight": 1,
+            "fontFamily": "sans-serif",
+            "textFormat": "sscc_spaced"
+          }
+        ],
+        "gs1Constraint": "sscc_x_below_distribution_minimum"
+      },
+      "previousSpec": {
         "widthMm": 75,
         "heightMm": 120,
         "dpi": 203,
@@ -4773,6 +5948,171 @@
             "fontSizePt": 10,
             "minFontSizePt": 8,
             "lineHeight": 1.15
+          }
+        ],
+        "gs1Constraint": "sscc_x_below_distribution_minimum"
+      },
+      "spec": {
+        "widthMm": 75,
+        "heightMm": 120,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "organization_logo",
+            "id": "organization-logo",
+            "source": "organization",
+            "fallback": "markiro",
+            "xMm": 4,
+            "yMm": 3.5,
+            "widthMm": 30,
+            "heightMm": 6.857143
+          },
+          {
+            "kind": "text",
+            "id": "cap-title",
+            "text": "КОРОБКА",
+            "xMm": 36,
+            "yMm": 4,
+            "maxWidthMm": 35,
+            "fontSizePt": 11,
+            "bold": true,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-name",
+            "field": "product.printName",
+            "xMm": 4,
+            "yMm": 14,
+            "maxWidthMm": 67,
+            "maxLines": 3,
+            "fontSizePt": 17,
+            "bold": true,
+            "lineHeight": 1
+          },
+          {
+            "kind": "line",
+            "id": "sep1",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 34,
+            "y2Mm": 34,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-qty",
+            "text": "Единиц в коробке",
+            "xMm": 4,
+            "yMm": 36,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-qty",
+            "field": "qty",
+            "xMm": 28,
+            "yMm": 36,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9
+          },
+          {
+            "kind": "text",
+            "id": "cap-egais",
+            "text": "Код ЕГАИС",
+            "xMm": 4,
+            "yMm": 42,
+            "fontSizePt": 11,
+            "maxWidthMm": 23,
+            "lineHeight": 1,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-egais",
+            "field": "product.egais",
+            "xMm": 28,
+            "yMm": 42,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "line",
+            "id": "sep-lot",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 53.8,
+            "y2Mm": 53.8,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-lot-number",
+            "text": "Номер партии",
+            "xMm": 4,
+            "yMm": 55,
+            "fontSizePt": 10,
+            "maxWidthMm": 26,
+            "lineHeight": 1,
+            "when": {
+              "field": "shift.lotNumber",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-lot-number",
+            "field": "shift.lotNumber",
+            "xMm": 28,
+            "yMm": 55,
+            "maxWidthMm": 43,
+            "maxLines": 2,
+            "fontFamily": "sans-serif",
+            "fontSizePt": 10,
+            "minFontSizePt": 7,
+            "lineHeight": 1.05,
+            "align": "right"
+          },
+          {
+            "kind": "barcode",
+            "id": "bc-sscc",
+            "data": "sscc",
+            "format": "code128",
+            "xMm": 8.221182266009858,
+            "yMm": 69,
+            "sizeMm": 43,
+            "moduleWidthMm": 0.37536945812807876
+          },
+          {
+            "kind": "field",
+            "id": "val-sscc",
+            "field": "sscc",
+            "xMm": 4,
+            "yMm": 113,
+            "maxWidthMm": 67,
+            "fontSizePt": 10,
+            "bold": false,
+            "align": "center",
+            "lineHeight": 1,
+            "fontFamily": "sans-serif",
+            "textFormat": "sscc_spaced"
           }
         ],
         "gs1Constraint": "sscc_x_below_distribution_minimum"
@@ -6398,7 +7738,190 @@
         "gs1Constraint": "sscc_x_below_distribution_minimum"
       },
       "name": "Палета 75×120 · номер партии",
-      "spec": {
+      "updatedSourceSpec": {
+        "widthMm": 75,
+        "heightMm": 120,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "organization_logo",
+            "id": "organization-logo",
+            "source": "organization",
+            "fallback": "markiro",
+            "xMm": 4,
+            "yMm": 3.5,
+            "widthMm": 30,
+            "heightMm": 6.857143
+          },
+          {
+            "kind": "text",
+            "id": "cap-title",
+            "text": "ПАЛЕТА",
+            "xMm": 36,
+            "yMm": 4,
+            "maxWidthMm": 35,
+            "fontSizePt": 11,
+            "bold": true,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-name",
+            "field": "product.name",
+            "xMm": 4,
+            "yMm": 14,
+            "maxWidthMm": 67,
+            "maxLines": 3,
+            "fontSizePt": 17,
+            "bold": true,
+            "lineHeight": 1
+          },
+          {
+            "kind": "line",
+            "id": "sep1",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 34,
+            "y2Mm": 34,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-boxes",
+            "text": "Коробов",
+            "xMm": 4,
+            "yMm": 36,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-boxes",
+            "field": "qty.boxes",
+            "xMm": 28,
+            "yMm": 36,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9
+          },
+          {
+            "kind": "text",
+            "id": "cap-units",
+            "text": "Единиц",
+            "xMm": 4,
+            "yMm": 41.5,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-units",
+            "field": "qty",
+            "xMm": 28,
+            "yMm": 41.5,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9
+          },
+          {
+            "kind": "text",
+            "id": "cap-date",
+            "text": "Дата производства",
+            "xMm": 4,
+            "yMm": 47,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-date",
+            "field": "date",
+            "xMm": 28,
+            "yMm": 47,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-expiry",
+            "text": "Годен до",
+            "xMm": 4,
+            "yMm": 52.5,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-expiry",
+            "field": "expiry",
+            "xMm": 28,
+            "yMm": 52.5,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-gtin",
+            "text": "GTIN",
+            "xMm": 4,
+            "yMm": 58,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-gtin",
+            "field": "product.gtin",
+            "xMm": 28,
+            "yMm": 58,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "barcode",
+            "id": "bc-sscc",
+            "data": "sscc",
+            "format": "code128",
+            "xMm": 8.221182266009858,
+            "yMm": 80,
+            "sizeMm": 32,
+            "moduleWidthMm": 0.37536945812807876
+          },
+          {
+            "kind": "field",
+            "id": "val-sscc",
+            "field": "sscc",
+            "xMm": 4,
+            "yMm": 113,
+            "maxWidthMm": 67,
+            "fontSizePt": 10,
+            "bold": false,
+            "align": "center",
+            "lineHeight": 1,
+            "fontFamily": "sans-serif",
+            "textFormat": "sscc_spaced"
+          }
+        ],
+        "gs1Constraint": "sscc_x_below_distribution_minimum"
+      },
+      "previousSpec": {
         "widthMm": 75,
         "heightMm": 120,
         "dpi": 203,
@@ -6658,6 +8181,256 @@
             "fontSizePt": 10,
             "minFontSizePt": 8,
             "lineHeight": 1.15
+          }
+        ],
+        "gs1Constraint": "sscc_x_below_distribution_minimum"
+      },
+      "spec": {
+        "widthMm": 75,
+        "heightMm": 120,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "organization_logo",
+            "id": "organization-logo",
+            "source": "organization",
+            "fallback": "markiro",
+            "xMm": 4,
+            "yMm": 3.5,
+            "widthMm": 30,
+            "heightMm": 6.857143
+          },
+          {
+            "kind": "text",
+            "id": "cap-title",
+            "text": "ПАЛЕТА",
+            "xMm": 36,
+            "yMm": 4,
+            "maxWidthMm": 35,
+            "fontSizePt": 11,
+            "bold": true,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-name",
+            "field": "product.name",
+            "xMm": 4,
+            "yMm": 14,
+            "maxWidthMm": 67,
+            "maxLines": 3,
+            "fontSizePt": 17,
+            "bold": true,
+            "lineHeight": 1
+          },
+          {
+            "kind": "line",
+            "id": "sep1",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 34,
+            "y2Mm": 34,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-boxes",
+            "text": "Коробов",
+            "xMm": 4,
+            "yMm": 36,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-boxes",
+            "field": "qty.boxes",
+            "xMm": 28,
+            "yMm": 36,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9
+          },
+          {
+            "kind": "text",
+            "id": "cap-units",
+            "text": "Единиц",
+            "xMm": 4,
+            "yMm": 41.5,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-units",
+            "field": "qty",
+            "xMm": 28,
+            "yMm": 41.5,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9
+          },
+          {
+            "kind": "text",
+            "id": "cap-date",
+            "text": "Дата производства",
+            "xMm": 4,
+            "yMm": 47,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-date",
+            "field": "date",
+            "xMm": 28,
+            "yMm": 47,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-expiry",
+            "text": "Годен до",
+            "xMm": 4,
+            "yMm": 52.5,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-expiry",
+            "field": "expiry",
+            "xMm": 28,
+            "yMm": 52.5,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-gtin",
+            "text": "GTIN",
+            "xMm": 4,
+            "yMm": 58,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-gtin",
+            "field": "product.gtin",
+            "xMm": 28,
+            "yMm": 58,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-egais",
+            "text": "Код ЕГАИС",
+            "xMm": 4,
+            "yMm": 62.5,
+            "fontSizePt": 11,
+            "maxWidthMm": 23,
+            "lineHeight": 1,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-egais",
+            "field": "product.egais",
+            "xMm": 28,
+            "yMm": 62.5,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "line",
+            "id": "sep-lot",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 67.3,
+            "y2Mm": 67.3,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-lot-number",
+            "text": "Номер партии",
+            "xMm": 4,
+            "yMm": 68.5,
+            "fontSizePt": 10,
+            "maxWidthMm": 26,
+            "lineHeight": 1,
+            "when": {
+              "field": "shift.lotNumber",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-lot-number",
+            "field": "shift.lotNumber",
+            "xMm": 28,
+            "yMm": 68.5,
+            "maxWidthMm": 43,
+            "maxLines": 2,
+            "fontFamily": "sans-serif",
+            "fontSizePt": 10,
+            "minFontSizePt": 7,
+            "lineHeight": 1.05,
+            "align": "right"
+          },
+          {
+            "kind": "barcode",
+            "id": "bc-sscc",
+            "data": "sscc",
+            "format": "code128",
+            "xMm": 8.221182266009858,
+            "yMm": 80,
+            "sizeMm": 32,
+            "moduleWidthMm": 0.37536945812807876
+          },
+          {
+            "kind": "field",
+            "id": "val-sscc",
+            "field": "sscc",
+            "xMm": 4,
+            "yMm": 113,
+            "maxWidthMm": 67,
+            "fontSizePt": 10,
+            "bold": false,
+            "align": "center",
+            "lineHeight": 1,
+            "fontFamily": "sans-serif",
+            "textFormat": "sscc_spaced"
           }
         ],
         "gs1Constraint": "sscc_x_below_distribution_minimum"
@@ -7272,6 +9045,716 @@
           }
         ]
       }
+    },
+    {
+      "purpose": "product_duplicate",
+      "sourceName": "Дубликат Data Matrix 75×120 [Полное наименование]",
+      "sourceSpec": {
+        "widthMm": 75,
+        "heightMm": 120,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "organization_logo",
+            "id": "organization-logo",
+            "source": "organization",
+            "fallback": "markiro",
+            "xMm": 4,
+            "yMm": 3.5,
+            "widthMm": 30,
+            "heightMm": 6.857143
+          },
+          {
+            "kind": "text",
+            "id": "cap-title",
+            "text": "ДУБЛЬ КОДА",
+            "xMm": 36,
+            "yMm": 4,
+            "maxWidthMm": 35,
+            "fontSizePt": 11,
+            "bold": true,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "product",
+            "field": "product.name",
+            "xMm": 4,
+            "yMm": 14,
+            "maxWidthMm": 67,
+            "maxLines": 3,
+            "fontSizePt": 17,
+            "bold": true,
+            "lineHeight": 1
+          },
+          {
+            "kind": "line",
+            "id": "sep1",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 34,
+            "y2Mm": 34,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-date",
+            "text": "Дата производства",
+            "xMm": 4,
+            "yMm": 36,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-date",
+            "field": "date",
+            "xMm": 28,
+            "yMm": 36,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-expiry",
+            "text": "Годен до",
+            "xMm": 4,
+            "yMm": 42,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-expiry",
+            "field": "expiry",
+            "xMm": 28,
+            "yMm": 42,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-egais",
+            "text": "Код ЕГАИС",
+            "xMm": 4,
+            "yMm": 48,
+            "fontSizePt": 11,
+            "maxWidthMm": 23,
+            "lineHeight": 1,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-egais",
+            "field": "product.egais",
+            "xMm": 28,
+            "yMm": 48,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "barcode",
+            "id": "km",
+            "xMm": 22.5,
+            "yMm": 77,
+            "sizeMm": 30,
+            "format": "datamatrix",
+            "data": "km.code"
+          },
+          {
+            "kind": "text",
+            "id": "cap-marking",
+            "text": "Код маркировки",
+            "xMm": 4,
+            "yMm": 108.5,
+            "maxWidthMm": 67,
+            "fontSizePt": 9,
+            "align": "center",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "marking",
+            "field": "km.code",
+            "textFormat": "km_without_crypto",
+            "xMm": 4,
+            "yMm": 112.5,
+            "maxWidthMm": 67,
+            "maxLines": 2,
+            "fontSizePt": 9,
+            "align": "center",
+            "lineHeight": 1
+          }
+        ]
+      },
+      "name": "Дубликат Data Matrix 75×120 [Полное наименование] · номер партии",
+      "spec": {
+        "widthMm": 75,
+        "heightMm": 120,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "organization_logo",
+            "id": "organization-logo",
+            "source": "organization",
+            "fallback": "markiro",
+            "xMm": 4,
+            "yMm": 3.5,
+            "widthMm": 30,
+            "heightMm": 6.857143
+          },
+          {
+            "kind": "text",
+            "id": "cap-title",
+            "text": "ДУБЛЬ КОДА",
+            "xMm": 36,
+            "yMm": 4,
+            "maxWidthMm": 35,
+            "fontSizePt": 11,
+            "bold": true,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "product",
+            "field": "product.name",
+            "xMm": 4,
+            "yMm": 14,
+            "maxWidthMm": 67,
+            "maxLines": 3,
+            "fontSizePt": 17,
+            "bold": true,
+            "lineHeight": 1
+          },
+          {
+            "kind": "line",
+            "id": "sep1",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 34,
+            "y2Mm": 34,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-date",
+            "text": "Дата производства",
+            "xMm": 4,
+            "yMm": 36,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-date",
+            "field": "date",
+            "xMm": 28,
+            "yMm": 36,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-expiry",
+            "text": "Годен до",
+            "xMm": 4,
+            "yMm": 42,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-expiry",
+            "field": "expiry",
+            "xMm": 28,
+            "yMm": 42,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-egais",
+            "text": "Код ЕГАИС",
+            "xMm": 4,
+            "yMm": 48,
+            "fontSizePt": 11,
+            "maxWidthMm": 23,
+            "lineHeight": 1,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-egais",
+            "field": "product.egais",
+            "xMm": 28,
+            "yMm": 48,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "line",
+            "id": "sep-lot",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 57.8,
+            "y2Mm": 57.8,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-lot-number",
+            "text": "Номер партии",
+            "xMm": 4,
+            "yMm": 59,
+            "fontSizePt": 10,
+            "maxWidthMm": 26,
+            "lineHeight": 1,
+            "when": {
+              "field": "shift.lotNumber",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-lot-number",
+            "field": "shift.lotNumber",
+            "xMm": 28,
+            "yMm": 59,
+            "maxWidthMm": 43,
+            "maxLines": 2,
+            "fontFamily": "sans-serif",
+            "fontSizePt": 10,
+            "minFontSizePt": 7,
+            "lineHeight": 1.05,
+            "align": "right"
+          },
+          {
+            "kind": "barcode",
+            "id": "km",
+            "xMm": 22.5,
+            "yMm": 77,
+            "sizeMm": 30,
+            "format": "datamatrix",
+            "data": "km.code"
+          },
+          {
+            "kind": "text",
+            "id": "cap-marking",
+            "text": "Код маркировки",
+            "xMm": 4,
+            "yMm": 108.5,
+            "maxWidthMm": 67,
+            "fontSizePt": 9,
+            "align": "center",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "marking",
+            "field": "km.code",
+            "textFormat": "km_without_crypto",
+            "xMm": 4,
+            "yMm": 112.5,
+            "maxWidthMm": 67,
+            "maxLines": 2,
+            "fontSizePt": 9,
+            "align": "center",
+            "lineHeight": 1
+          }
+        ]
+      },
+      "addSource": true
+    },
+    {
+      "purpose": "product_duplicate",
+      "sourceName": "Дубликат Data Matrix 75×120 [Краткое наименование]",
+      "sourceSpec": {
+        "widthMm": 75,
+        "heightMm": 120,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "organization_logo",
+            "id": "organization-logo",
+            "source": "organization",
+            "fallback": "markiro",
+            "xMm": 4,
+            "yMm": 3.5,
+            "widthMm": 30,
+            "heightMm": 6.857143
+          },
+          {
+            "kind": "text",
+            "id": "cap-title",
+            "text": "ДУБЛЬ КОДА",
+            "xMm": 36,
+            "yMm": 4,
+            "maxWidthMm": 35,
+            "fontSizePt": 11,
+            "bold": true,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "product",
+            "field": "product.printName",
+            "xMm": 4,
+            "yMm": 14,
+            "maxWidthMm": 67,
+            "maxLines": 3,
+            "fontSizePt": 17,
+            "bold": true,
+            "lineHeight": 1
+          },
+          {
+            "kind": "line",
+            "id": "sep1",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 34,
+            "y2Mm": 34,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-date",
+            "text": "Дата производства",
+            "xMm": 4,
+            "yMm": 36,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-date",
+            "field": "date",
+            "xMm": 28,
+            "yMm": 36,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-expiry",
+            "text": "Годен до",
+            "xMm": 4,
+            "yMm": 42,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-expiry",
+            "field": "expiry",
+            "xMm": 28,
+            "yMm": 42,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-egais",
+            "text": "Код ЕГАИС",
+            "xMm": 4,
+            "yMm": 48,
+            "fontSizePt": 11,
+            "maxWidthMm": 23,
+            "lineHeight": 1,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-egais",
+            "field": "product.egais",
+            "xMm": 28,
+            "yMm": 48,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "barcode",
+            "id": "km",
+            "xMm": 22.5,
+            "yMm": 77,
+            "sizeMm": 30,
+            "format": "datamatrix",
+            "data": "km.code"
+          },
+          {
+            "kind": "text",
+            "id": "cap-marking",
+            "text": "Код маркировки",
+            "xMm": 4,
+            "yMm": 108.5,
+            "maxWidthMm": 67,
+            "fontSizePt": 9,
+            "align": "center",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "marking",
+            "field": "km.code",
+            "textFormat": "km_without_crypto",
+            "xMm": 4,
+            "yMm": 112.5,
+            "maxWidthMm": 67,
+            "maxLines": 2,
+            "fontSizePt": 9,
+            "align": "center",
+            "lineHeight": 1
+          }
+        ]
+      },
+      "name": "Дубликат Data Matrix 75×120 [Краткое наименование] · номер партии",
+      "spec": {
+        "widthMm": 75,
+        "heightMm": 120,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "organization_logo",
+            "id": "organization-logo",
+            "source": "organization",
+            "fallback": "markiro",
+            "xMm": 4,
+            "yMm": 3.5,
+            "widthMm": 30,
+            "heightMm": 6.857143
+          },
+          {
+            "kind": "text",
+            "id": "cap-title",
+            "text": "ДУБЛЬ КОДА",
+            "xMm": 36,
+            "yMm": 4,
+            "maxWidthMm": 35,
+            "fontSizePt": 11,
+            "bold": true,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "product",
+            "field": "product.printName",
+            "xMm": 4,
+            "yMm": 14,
+            "maxWidthMm": 67,
+            "maxLines": 3,
+            "fontSizePt": 17,
+            "bold": true,
+            "lineHeight": 1
+          },
+          {
+            "kind": "line",
+            "id": "sep1",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 34,
+            "y2Mm": 34,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-date",
+            "text": "Дата производства",
+            "xMm": 4,
+            "yMm": 36,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-date",
+            "field": "date",
+            "xMm": 28,
+            "yMm": 36,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-expiry",
+            "text": "Годен до",
+            "xMm": 4,
+            "yMm": 42,
+            "fontSizePt": 11,
+            "maxWidthMm": 38,
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "val-expiry",
+            "field": "expiry",
+            "xMm": 28,
+            "yMm": 42,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1
+          },
+          {
+            "kind": "text",
+            "id": "cap-egais",
+            "text": "Код ЕГАИС",
+            "xMm": 4,
+            "yMm": 48,
+            "fontSizePt": 11,
+            "maxWidthMm": 23,
+            "lineHeight": 1,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-egais",
+            "field": "product.egais",
+            "xMm": 28,
+            "yMm": 48,
+            "maxWidthMm": 43,
+            "fontSizePt": 11,
+            "align": "right",
+            "lineHeight": 1,
+            "minFontSizePt": 9,
+            "when": {
+              "field": "product.egais",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "line",
+            "id": "sep-lot",
+            "xMm": 4,
+            "x2Mm": 71,
+            "yMm": 57.8,
+            "y2Mm": 57.8,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "text",
+            "id": "cap-lot-number",
+            "text": "Номер партии",
+            "xMm": 4,
+            "yMm": 59,
+            "fontSizePt": 10,
+            "maxWidthMm": 26,
+            "lineHeight": 1,
+            "when": {
+              "field": "shift.lotNumber",
+              "op": "present"
+            }
+          },
+          {
+            "kind": "field",
+            "id": "val-lot-number",
+            "field": "shift.lotNumber",
+            "xMm": 28,
+            "yMm": 59,
+            "maxWidthMm": 43,
+            "maxLines": 2,
+            "fontFamily": "sans-serif",
+            "fontSizePt": 10,
+            "minFontSizePt": 7,
+            "lineHeight": 1.05,
+            "align": "right"
+          },
+          {
+            "kind": "barcode",
+            "id": "km",
+            "xMm": 22.5,
+            "yMm": 77,
+            "sizeMm": 30,
+            "format": "datamatrix",
+            "data": "km.code"
+          },
+          {
+            "kind": "text",
+            "id": "cap-marking",
+            "text": "Код маркировки",
+            "xMm": 4,
+            "yMm": 108.5,
+            "maxWidthMm": 67,
+            "fontSizePt": 9,
+            "align": "center",
+            "lineHeight": 1
+          },
+          {
+            "kind": "field",
+            "id": "marking",
+            "field": "km.code",
+            "textFormat": "km_without_crypto",
+            "xMm": 4,
+            "yMm": 112.5,
+            "maxWidthMm": 67,
+            "maxLines": 2,
+            "fontSizePt": 9,
+            "align": "center",
+            "lineHeight": 1
+          }
+        ]
+      },
+      "addSource": true
     }
   ],
   "sheets": [

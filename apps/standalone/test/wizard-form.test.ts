@@ -207,8 +207,14 @@ describe("the wizard's stock templates", () => {
     expect(stockTemplateCounts(templates)).toStrictEqual({
       box: buildDefaultLabelTemplates().length,
       pallet: buildPalletLabelTemplates().length,
-      duplicate: buildDuplicateLabelTemplates().length,
+      duplicate: buildDuplicateLabelTemplates().length + 2,
     });
+    expect(
+      templates.filter(
+        ({ purpose, spec }) =>
+          purpose === "product_duplicate" && spec.widthMm === 75 && spec.heightMm === 120,
+      ),
+    ).toHaveLength(2);
     expect(MAX_STOCK_TEMPLATES).toBe(32);
     expect(templates.length).toBeLessThanOrEqual(MAX_STOCK_TEMPLATES);
   });

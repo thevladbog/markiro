@@ -47,6 +47,7 @@ import type { MonoBitmap } from "./mono-compose.js";
  */
 
 import { DomainError } from "../errors.js";
+import { code128ModuleCount } from "./code128.js";
 import {
   labelFieldDisplayValue,
   mmToDots,
@@ -78,6 +79,8 @@ export interface GenerateTsplDeps {
   logo?: MonoBitmap | null;
   /** Product-duplicate layouts use sizeMm as the complete symbol square, including quiet zone. */
   kmDataMatrix?: "native" | "raster";
+  /** Use the printer's centre anchor for an SSCC already centred on the label. */
+  centerSscc?: boolean;
 }
 
 /**
@@ -328,7 +331,7 @@ function resolveBarcodeSource(
  * `code128`/`ean13` use `BARCODE x,y,"<type>",<height>,0,0,<n>,<n>,"<data>"` —
  * human-readable interpretation line OFF (`0`), no rotation, and narrow/wide
  * bar widths from the element's `moduleWidthMm` (falling back to the
- * historical fixed 2 dots when it declares none — see `barWidthParams`).
+ * historical fixed 2 dots when it declares none — see `barWidthDots`).
  *
  * HRI IS OFF ON PURPOSE, and this parameter used to be `1`. A
  * `LabelTemplateSpec` is language-neutral: the SAME template is emitted as
@@ -402,18 +405,17 @@ function resolveBarcodeSource(
  */
 const TSPL_DEFAULT_NARROW_DOTS = 2;
 
-function barWidthParams(element: LabelBarcodeElement, dpi: LabelTemplateSpec["dpi"]): string {
-  const narrow =
-    element.moduleWidthMm === undefined
-      ? TSPL_DEFAULT_NARROW_DOTS
-      : Math.max(1, mmToDots(element.moduleWidthMm, dpi));
-  return `${narrow},${narrow}`;
+function barWidthDots(element: LabelBarcodeElement, dpi: LabelTemplateSpec["dpi"]): number {
+  return element.moduleWidthMm === undefined
+    ? TSPL_DEFAULT_NARROW_DOTS
+    : Math.max(1, mmToDots(element.moduleWidthMm, dpi));
 }
 
 export function renderTsplBarcodeElement(
   element: LabelBarcodeElement,
   data: Record<LabelField, string>,
   dpi: LabelTemplateSpec["dpi"],
+  labelCenterDots?: number,
 ): string {
   const x = mmToDots(element.xMm, dpi);
   const y = mmToDots(element.yMm, dpi);
@@ -427,13 +429,22 @@ export function renderTsplBarcodeElement(
       // storage and transport continue to carry the bare 18 digits.
       const barcodeType = field === "sscc" ? "EAN128" : "128";
       const payload = field === "sscc" ? `00${value}` : value;
-      const bars = barWidthParams(element, dpi);
-      return `BARCODE ${x},${y},"${barcodeType}",${heightDots},0,0,${bars},"${escapeTsplString(payload)}"`;
+      const narrow = barWidthDots(element, dpi);
+      // TSPL BARCODE alignment 2 anchors the symbol itself, including the
+      // printer's encoding choices. A deliberately offset barcode keeps its x.
+      const centered =
+        labelCenterDots !== undefined &&
+        field === "sscc" &&
+        /^\d{18}$/.test(value) &&
+        Math.abs(2 * (x - labelCenterDots) + code128ModuleCount(payload, true) * narrow) <= 1;
+      const anchor = centered ? labelCenterDots : x;
+      const alignment = centered ? "2," : "";
+      return `BARCODE ${anchor},${y},"${barcodeType}",${heightDots},0,0,${narrow},${narrow},${alignment}"${escapeTsplString(payload)}"`;
     }
     case "ean13": {
       const heightDots = mmToDots(element.sizeMm, dpi);
-      const bars = barWidthParams(element, dpi);
-      return `BARCODE ${x},${y},"EAN13",${heightDots},0,0,${bars},"${escapeTsplString(value)}"`;
+      const narrow = barWidthDots(element, dpi);
+      return `BARCODE ${x},${y},"EAN13",${heightDots},0,0,${narrow},${narrow},"${escapeTsplString(value)}"`;
     }
     case "datamatrix": {
       const sideDots = mmToDots(element.sizeMm, dpi);
@@ -547,7 +558,10 @@ export async function generateTspl(
             ),
           );
         } else {
-          lines.push(renderTsplBarcodeElement(element, data, spec.dpi));
+          const labelCenterDots = deps.centerSscc
+            ? mmToDots(spec.widthMm / 2, spec.dpi)
+            : undefined;
+          lines.push(renderTsplBarcodeElement(element, data, spec.dpi, labelCenterDots));
         }
         break;
       case "line":
