@@ -3,7 +3,7 @@ import { CATALOG_ROOT } from "../catalog-config.mjs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
-import { connection, ensure, hash, keys, plain, runtime } from "../backup/schemas.mjs";
+import { connection, digest, ensure, hash, keys, plain, runtime } from "../backup/schemas.mjs";
 import {
   readPrivateAbsolute,
   withRecoveryBackupRuntime,
@@ -18,6 +18,7 @@ import { fingerprintHostConfiguration } from "./config.mjs";
 import {
   createHostObservers,
   createAcceptedRecoveryObservers,
+  createDockerCommand,
   createUpgradeHostObservers,
   validateObservationPolicy,
 } from "./observe.mjs";
@@ -280,19 +281,24 @@ async function produceTargetBackup(
         // This selection is assembled only by the held forward factory below.
         // Actual source IDs remain independently checked by inspect(); original
         // recipe IDs classify the replaced API and still-retained legacy edge.
-        const observers = upgradeSource?.candidateOperation
-          ? createUpgradeHostObservers(
-              sourceOperation,
-              upgradeSource.operation,
-              upgradeSource.recipePredecessorIds,
-              policy,
-              observerOptions,
-            )
-          : (upgradeSource ? createAcceptedRecoveryObservers : createHostObservers)(
-              sourceOperation,
-              policy,
-              observerOptions,
-            );
+        const observers = upgradeSource?.observeSource
+          ? {
+              inventory: upgradeSource.observeSource,
+              command: createDockerCommand(op, run, options.signal),
+            }
+          : upgradeSource?.candidateOperation
+            ? createUpgradeHostObservers(
+                sourceOperation,
+                upgradeSource.operation,
+                upgradeSource.recipePredecessorIds,
+                policy,
+                observerOptions,
+              )
+            : (upgradeSource ? createAcceptedRecoveryObservers : createHostObservers)(
+                sourceOperation,
+                policy,
+                observerOptions,
+              );
 
         const context = {
           ...sourceOperation,
@@ -328,7 +334,20 @@ async function produceTargetBackup(
               ensure(
                 rows.length === 1 && rows[0].container.Id === upgradeSource.containers[service],
               );
-              if (service !== "postgres") ensure(!rows[0].active);
+              if (service !== "postgres") {
+                ensure(!rows[0].active);
+                if (upgradeSource.observeSource) {
+                  const { State } = rows[0].container;
+                  ensure(
+                    rows[0].active === false &&
+                      State.Status === "exited" &&
+                      State.Running === false &&
+                      State.Restarting === false &&
+                      State.Paused === false &&
+                      State.Dead === false,
+                  );
+                }
+              }
             }
           }
           const pg = state.owned.find((v) => v.service === "postgres").container;
@@ -348,9 +367,16 @@ async function produceTargetBackup(
               images[0].Os === "linux" &&
               images[0].Architecture === "amd64",
           );
-          await observePostgresAdmin({ context: c, state, command: observers.command, hbaSha256 });
+          const admin = await observePostgresAdmin({
+            context: c,
+            state,
+            command: observers.command,
+            hbaSha256,
+          });
+          if (upgradeSource?.observeSource) ensure(admin.sessions.length === 0);
           if (upgradeSource?.verify) await upgradeSource.verify();
           ensure(terminated && !uncertain);
+          return pg.Id;
         };
         stage = "entry-observation";
         await inspect("entry");
@@ -364,6 +390,22 @@ async function produceTargetBackup(
             hbaSha256,
           }),
         };
+        const observeFence = async ({ boundary }) => {
+          await inspect(boundary);
+          return {
+            version: 1,
+            kind: "platform-writer-fence",
+            operationId: op.identity.operationId,
+            target: op.identity.target,
+            ...fence,
+            boundary,
+            observedAt: new Date().toISOString(),
+            held: true,
+          };
+        };
+        const migrationJournal = upgradeSource?.observeSource
+          ? await observeHealthyBackupLedger(await inspect("before-backup"), observers.command)
+          : null;
         producerInFlight = true;
         stage = "archive-production";
         const backup = await createDatabaseBackup({
@@ -375,21 +417,7 @@ async function produceTargetBackup(
           run,
           recoveryRuntime,
           beforeFailureCleanup: options.beforeFailureCleanup,
-          writerFence: {
-            observe: async ({ boundary }) => {
-              await inspect(boundary);
-              return {
-                version: 1,
-                kind: "platform-writer-fence",
-                operationId: op.identity.operationId,
-                target: op.identity.target,
-                ...fence,
-                boundary,
-                observedAt: new Date().toISOString(),
-                held: true,
-              };
-            },
-          },
+          writerFence: { observe: observeFence },
         });
         stage = "isolated-restore";
         const restoreEvidence = await verifyDatabaseRestore({
@@ -405,6 +433,21 @@ async function produceTargetBackup(
         producerInFlight = false;
         stage = "post-restore-observation";
         await inspect("after-restore");
+        if (migrationJournal) {
+          const { verifyHealthyForwardBackup } = await import("./healthy-forward-backup.mjs");
+          const backupProof = await verifyHealthyForwardBackup(
+            {
+              root: op.root,
+              identity: op.identity,
+              backup,
+              restoreEvidence,
+              migrationJournal,
+              roleMapping: mapping,
+            },
+            { observeFence },
+          );
+          return { backup, restoreEvidence, fence, backupProofSha256: digest(backupProof) };
+        }
         return { backup, restoreEvidence, fence };
       } catch (error) {
         // A producer can lose its cleanup error when persisting failure evidence
@@ -417,6 +460,81 @@ async function produceTargetBackup(
   } catch (error) {
     throw targetBackupError(error, terminated, stage);
   }
+}
+
+// Match backup/inventory.mjs' row hash stream. The full migration check separately
+// binds the ordered ledger to SQL in the candidate image.
+async function observeHealthyBackupLedger(postgresId, command) {
+  const query = `SELECT jsonb_build_object(
+    'count', count(*)::text,
+    'sha256', encode(sha256(convert_to(coalesce(string_agg(row_sha || chr(10), '' ORDER BY row_sha COLLATE "C"), ''), 'UTF8')), 'hex')
+  ) FROM (
+    SELECT encode(sha256(convert_to(row_to_json(m)::text, 'UTF8')), 'hex') AS row_sha
+    FROM ONLY drizzle.__drizzle_migrations m
+  ) AS ledger`;
+  const result = await command([
+    "exec",
+    "--user",
+    "70:70",
+    "--env",
+    "PGOPTIONS=-c default_transaction_read_only=on -c statement_timeout=10000 -c lock_timeout=3000",
+    "--env",
+    "PGCONNECT_TIMEOUT=10",
+    postgresId,
+    "psql",
+    "-X",
+    "--no-password",
+    "--username",
+    "postgres",
+    "--dbname",
+    "markiro",
+    "--tuples-only",
+    "--no-align",
+    "--command",
+    query,
+  ]);
+  const value = JSON.parse(result.stdout);
+  keys(value, ["count", "sha256"]);
+  ensure(
+    typeof value.count === "string" && /^[1-9][0-9]*$/u.test(value.count) && hash(value.sha256),
+  );
+  return value;
+}
+
+export async function createHeldHealthyForwardBackup(input, capability, options = {}) {
+  const { withHealthyForwardBackupRuntime } = await import("../backup/local-runtime.mjs");
+  return withHealthyForwardBackupRuntime(capability, async (held, recoveryRuntime) => {
+    const { operation } = input;
+    ensure(
+      operation.root === held.operation.root &&
+        operation.identity.operationId === held.operation.operationId &&
+        operation.identity.executorSha === held.operation.executorSha &&
+        options.sourceContainers?.postgres === held.operation.postgresId &&
+        typeof options.observeSource === "function" &&
+        typeof input.verifySources === "function",
+    );
+    keys(options.sourceContainers, ["postgres", "api", "edge"]);
+    ensure(Object.values(options.sourceContainers).every(hash));
+    const verify = async () => {
+      await held.verify();
+      await input.verifySources();
+    };
+    return produceTargetBackup(
+      { ...input, recoveryRuntime, verifySources: verify },
+      options,
+      async (root, action) => {
+        ensure(root === held.operation.root);
+        await verify();
+        return action({ current: null });
+      },
+      {
+        operation,
+        containers: options.sourceContainers,
+        observeSource: options.observeSource,
+        verify,
+      },
+    );
+  });
 }
 
 export async function createHeldForwardBackup(input, capability, admission, options = {}) {

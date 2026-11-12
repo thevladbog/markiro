@@ -151,4 +151,9 @@ test("phase registry rejects forged or inherited names and never maps forward ph
     assert.equal(spec.kind, "platform-forward-recovery-host-operation");
   }
   assert.equal(upgradePhase("return-old").kind, "platform-upgrade-host-operation");
+  assert.deepEqual(upgradePhase("healthy-forward-rollout"), {
+    kind: "platform-healthy-forward-rollout-host-operation",
+    status: "healthy",
+    sshPhase: "activate",
+  });
 });
