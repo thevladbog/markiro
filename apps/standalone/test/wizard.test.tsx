@@ -54,13 +54,12 @@ describe("BootstrapWizard", () => {
     await reachReview();
     const box = buildDefaultLabelTemplates().length;
     const pallet = buildPalletLabelTemplates().length;
-    const duplicate = buildDuplicateLabelTemplates().length;
+    const duplicate = buildDuplicateLabelTemplates().length + 2;
     expect(
       screen.getByText(
         `Мастер создаст типовые шаблоны этикеток: для коробов — ${box}, для паллет — ${pallet}, для дубликатов товара — ${duplicate}.`,
       ),
     ).toBeTruthy();
-    // The domain builds as many pallet templates as duplicates: distinct counts pin each place.
     expect(i18n.t("wizard.review.templates", { box: 3, pallet: 1, duplicate: 2 })).toBe(
       "Мастер создаст типовые шаблоны этикеток: для коробов — 3, для паллет — 1, для дубликатов товара — 2.",
     );

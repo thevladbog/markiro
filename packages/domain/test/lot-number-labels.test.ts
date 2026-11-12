@@ -137,7 +137,7 @@ describe("conditional thermal lot number", () => {
 
 it("links same-size stock variants without changing the legacy sources", () => {
   const variants = domain.buildStockLotNumberLabelVariants();
-  expect(variants).toHaveLength(21);
+  expect(variants).toHaveLength(23);
   for (const { sourceSpec, spec: variant } of variants) {
     expect(variant).toMatchObject({
       widthMm: sourceSpec.widthMm,
@@ -159,6 +159,140 @@ it("links same-size stock variants without changing the legacy sources", () => {
     }
   }
 });
+
+it("keeps both name fields in the dated and date-free 75×120 box layouts", () => {
+  const boxes = domain
+    .buildStockLotNumberLabelVariants()
+    .filter(
+      ({ purpose, spec }) => purpose === "box" && spec.widthMm === 75 && spec.heightMm === 120,
+    );
+  const names = boxes.map(({ sourceName, updatedSourceSpec, spec }) => {
+    const field = spec.elements.find(({ id }) => id === "val-name");
+    expect(updatedSourceSpec?.elements.find(({ id }) => id === "val-name")).toEqual(field);
+    return [sourceName, field?.kind === "field" ? field.field : null];
+  });
+  expect(names).toEqual([
+    ["Коробка 75×120", "product.name"],
+    ["Коробка 75×120 без дат", "product.name"],
+    ["Коробка 75×120 [Назв. для печати]", "product.printName"],
+    ["Коробка 75×120 без дат [Назв. для печати]", "product.printName"],
+  ]);
+});
+
+it("offers both 75×120 duplicate layouts with one complete marking code", () => {
+  const wide = domain
+    .buildStockLotNumberLabelVariants()
+    .filter(({ purpose, spec }) => purpose === "product_duplicate" && spec.widthMm === 75);
+  expect(wide.map(({ spec }) => spec.elements.find(({ id }) => id === "product"))).toEqual([
+    expect.objectContaining({ field: "product.name", fontSizePt: 17, bold: true, maxLines: 3 }),
+    expect.objectContaining({
+      field: "product.printName",
+      fontSizePt: 17,
+      bold: true,
+      maxLines: 3,
+    }),
+  ]);
+  for (const { sourceSpec, spec: variant } of wide) {
+    for (const layout of [sourceSpec, variant]) {
+      expect(domain.labelTemplateSpecStrictSchema.parse(layout).heightMm).toBe(120);
+      expect(() => domain.assertDuplicateTemplate(layout)).not.toThrow();
+      expect(layout.elements.filter((element) => element.kind === "barcode")).toEqual([
+        expect.objectContaining({ format: "datamatrix", data: "km.code", sizeMm: 30 }),
+      ]);
+    }
+  }
+});
+
+it("keeps the geometry when converting cloud pallet label resolution", () => {
+  const pallet = domain.buildPalletLabelTemplates().find(({ spec }) => spec.widthMm === 75);
+  if (!pallet) throw new Error("Missing 75×120 pallet");
+  expect(domain.withPrinterDpi(pallet.spec, 300).elements).toBe(pallet.spec.elements);
+});
+
+it("renders the pallet lot in both printer languages only when a lot is assigned", async () => {
+  const pallet = domain
+    .buildStockLotNumberLabelVariants()
+    .find(({ purpose, spec }) => purpose === "pallet" && spec.widthMm === 75);
+  if (!pallet?.updatedSourceSpec) throw new Error("Missing 75×120 pallet");
+  for (const layout of [pallet.spec, pallet.updatedSourceSpec]) {
+    const title = layout.elements.find(({ id }) => id === "val-name");
+    if (title?.kind !== "field") throw new Error("Missing product title");
+    const otherText = layout.elements.filter(
+      (element) => element !== title && (element.kind === "field" || element.kind === "text"),
+    );
+    expect(
+      otherText.every(
+        (element) => !("fontFamily" in element) || element.fontFamily !== "monospace",
+      ),
+    ).toBe(true);
+    expect(
+      otherText.every(
+        (element) => !("fontSizePt" in element) || element.fontSizePt < title.fontSizePt,
+      ),
+    ).toBe(true);
+  }
+  for (const emit of [domain.generateZpl, domain.generateTspl]) {
+    for (const hasLot of [true, false]) {
+      const { rasterizeText, printed } = recordingRaster();
+      await emit(pallet.spec, hasLot ? data : domain.sampleLabelData(), { rasterizeText });
+      expect(printed.some(({ text }) => text === "Номер партии")).toBe(hasLot);
+      expect(printed.some(({ text }) => text === data["shift.lotNumber"])).toBe(hasLot);
+      expect(printed.map(({ text }) => text)).toEqual(
+        expect.arrayContaining(["12 кор.", "20 шт."]),
+      );
+    }
+  }
+});
+
+it.each([203, 300] as const)("centres the SSCC of a 75×120 pallet at %i dpi", async (dpi) => {
+  const pallet = domain
+    .buildAutonomStockLabelTemplates()
+    .find(({ purpose, spec }) => purpose === "pallet" && spec.widthMm === 75);
+  if (!pallet) throw new Error("Missing 75×120 pallet");
+  const { rasterizeText } = recordingRaster();
+  const spec = domain.withAutonomPrinterDpi(pallet.spec, dpi);
+  for (const language of ["zpl", "tspl"] as const) {
+    const plan = await domain.createLabelRenderPlan(spec, domain.sampleLabelData(), {
+      language,
+      dpi,
+      rasterizeText,
+    });
+    const symbol = plan.elements.find(({ id }) => id === "bc-sscc");
+    expect(symbol?.kind).toBe("barcode");
+    if (symbol?.kind !== "barcode") throw new Error("Missing SSCC");
+    const labelWidth = domain.mmToDots(spec.widthMm, dpi);
+    expect(Math.abs(2 * symbol.xDots + symbol.widthDots - labelWidth)).toBeLessThanOrEqual(1);
+  }
+});
+
+it.each([203, 300] as const)(
+  "aligns quantities and the lot in the 75×120 pallet at %i dpi",
+  async (dpi) => {
+    const pallet = domain
+      .buildStockLotNumberLabelVariants()
+      .find(({ purpose, spec }) => purpose === "pallet" && spec.widthMm === 75);
+    if (!pallet) throw new Error("Missing 75×120 pallet");
+    const { rasterizeText, printed } = recordingRaster();
+    const plan = await domain.createLabelRenderPlan(domain.withPrinterDpi(pallet.spec, dpi), data, {
+      language: "zpl",
+      dpi,
+      rasterizeText,
+    });
+    const values = ["val-boxes", "val-units", "val-date", "val-lot-number"].map((id) => {
+      const element = plan.elements.find((candidate) => candidate.id === id);
+      if (element?.kind !== "raster") throw new Error(`Missing raster ${id}`);
+      return element;
+    });
+    const right = values.map(({ xDots, raster }) => xDots + raster.width);
+    expect(new Set(right).size).toBe(1);
+    expect(values.at(-1)?.yDots).toBe(
+      plan.elements.find(({ id }) => id === "cap-lot-number")?.yDots,
+    );
+    expect(printed.find(({ text }) => text === data["shift.lotNumber"])?.lines).toEqual([
+      data["shift.lotNumber"],
+    ]);
+  },
+);
 
 it("keeps the host stock fixture synchronized with the stock variant builders", () => {
   const fixtureUrl = new URL(

@@ -20,6 +20,10 @@ struct LabelVariant {
     purpose: String,
     source_name: String,
     source_spec: Value,
+    updated_source_spec: Option<Value>,
+    previous_spec: Option<Value>,
+    #[serde(default)]
+    add_source: bool,
     spec: Value,
 }
 
@@ -71,7 +75,8 @@ pub(crate) async fn add_label_variants(
         let Some(variant) = variants.iter().find(|variant| {
             variant.source_name == source.name
                 && variant.purpose == source.purpose
-                && variant.source_spec == spec
+                && (variant.source_spec == spec
+                    || variant.updated_source_spec.as_ref() == Some(&spec))
         }) else {
             continue;
         };
@@ -144,9 +149,89 @@ pub(crate) async fn add_sheet_variants(conn: &mut SqliteConnection, at: &str) ->
     Ok(())
 }
 
+/// Upgrade only exact stock specs. A planned shift still refers to live templates.
+/// Active and closed shifts and previously prepared print jobs have their own snapshots.
+async fn update_stock_labels(conn: &mut SqliteConnection) -> Result<(), Error> {
+    let initialized: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM org_profile)")
+        .fetch_one(&mut *conn)
+        .await?;
+    if !initialized {
+        return Ok(());
+    }
+    let variants = variants()?.labels;
+    let existing: Vec<(String, String, String, String, bool, bool)> = sqlx::query_as(
+        "SELECT t.id, t.name, t.purpose, t.spec, t.lot_number_source_id IS NOT NULL, \
+            t.stock = 1 AND NOT EXISTS(SELECT 1 FROM shifts s WHERE s.status = 'planned' AND \
+              (s.box_template_id = t.id OR s.pallet_template_id = t.id OR s.validation_print_template_id = t.id)) \
+         FROM label_templates t",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut updates = Vec::new();
+    for (id, name, purpose, spec, is_lot, can_update) in &existing {
+        if !can_update {
+            continue;
+        }
+        let current: Value =
+            serde_json::from_str(spec).map_err(|error| Error::Decode(Box::new(error)))?;
+        for variant in &variants {
+            if variant.purpose != *purpose {
+                continue;
+            }
+            if !is_lot && variant.source_name == *name && variant.source_spec == current {
+                if let Some(updated) = &variant.updated_source_spec {
+                    updates.push((id, updated));
+                }
+                break;
+            }
+            if *is_lot && variant.name == *name && variant.previous_spec.as_ref() == Some(&current)
+            {
+                updates.push((id, &variant.spec));
+                break;
+            }
+        }
+    }
+    let additions = variants
+        .iter()
+        .filter(|variant| {
+            variant.add_source
+                && !existing.iter().any(|(_, name, purpose, _, _, _)| {
+                    *name == variant.source_name && *purpose == variant.purpose
+                })
+        })
+        .collect::<Vec<_>>();
+    if updates.is_empty() && additions.is_empty() {
+        return Ok(());
+    }
+    let rev = next_revision(conn).await?;
+    for (id, spec) in updates {
+        sqlx::query("UPDATE label_templates SET spec = ?, rev = ? WHERE id = ?")
+            .bind(spec.to_string())
+            .bind(rev)
+            .bind(id)
+            .execute(&mut *conn)
+            .await?;
+    }
+    for variant in additions {
+        sqlx::query(
+            "INSERT INTO label_templates (id, name, purpose, enabled, spec, stock, rev) \
+             VALUES (?, ?, ?, 1, ?, 1, ?)",
+        )
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(&variant.source_name)
+        .bind(&variant.purpose)
+        .bind(variant.source_spec.to_string())
+        .bind(rev)
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(())
+}
+
 /// Called before the host starts serving, including after a restored database is opened.
 pub(crate) async fn register(pool: &SqlitePool, at: &str) -> Result<(), Error> {
     let mut tx = begin_write(pool).await?;
+    update_stock_labels(&mut tx).await?;
     add_label_variants(&mut tx, None).await?;
     add_sheet_variants(&mut tx, at).await?;
     tx.commit().await
@@ -155,6 +240,75 @@ pub(crate) async fn register(pool: &SqlitePool, at: &str) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn existing_site_receives_wide_duplicates_and_updated_stock_pallet_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let pool = crate::db::open(&directory.path().join("host.db"))
+            .await
+            .unwrap();
+        let at = "2026-11-12T10:00:00Z";
+        sqlx::query(
+            "INSERT INTO org_profile (id, name, gln, gs1_prefixes, time_zone, rev) \
+             VALUES (1, 'Маркиро', '4600682000013', '[\"4600682\"]', 'UTC', 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let fixture = variants().unwrap();
+        let pallet = fixture
+            .labels
+            .iter()
+            .find(|variant| variant.source_name == "Палета 75×120")
+            .unwrap();
+        for (id, stock) in [("pallet", true), ("custom", false)] {
+            sqlx::query(
+                "INSERT INTO label_templates (id, name, purpose, enabled, category_codes, spec, stock, rev) \
+                 VALUES (?, ?, 'pallet', 1, '[1]', ?, ?, 0)",
+            )
+            .bind(id)
+            .bind(&pallet.source_name)
+            .bind(pallet.source_spec.to_string())
+            .bind(stock)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        register(&pool, at).await.unwrap();
+        let rev: i64 = sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        register(&pool, at).await.unwrap();
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM label_templates WHERE purpose = 'product_duplicate' AND json_extract(spec, '$.widthMm') = 75",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 4);
+        let specs: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT id, spec, category_codes FROM label_templates WHERE id IN ('custom', 'pallet') ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            specs[0],
+            (
+                "custom".into(),
+                pallet.source_spec.to_string(),
+                "[1]".into()
+            )
+        );
+        assert_ne!(specs[1].1, pallet.source_spec.to_string());
+        assert_eq!(specs[1].2, "[1]");
+        let repeated: i64 = sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(repeated, rev);
+    }
 
     #[tokio::test]
     async fn compatible_stock_templates_are_linked_without_touching_existing_specs() {

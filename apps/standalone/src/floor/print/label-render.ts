@@ -3,7 +3,7 @@ import {
   boxLabelFields,
   type PrinterOutputMode,
   palletLabelFields,
-  withPrinterDpi,
+  withAutonomPrinterDpi,
   type LabelFieldData,
   type LabelTemplateSpec,
   type MonoBitmap,
@@ -132,7 +132,7 @@ export async function renderLabel(
   options: { kmDataMatrix?: "native" | "raster" } = {},
 ): Promise<Uint8Array> {
   const emitters = await import("./label-emitters.js");
-  const printSpec = withPrinterDpi(spec, printer.dpi);
+  const printSpec = withAutonomPrinterDpi(spec, printer.dpi);
   if (printer.mode === "windows_driver") {
     // The template drawn to the dot at the printer's resolution; the driver
     // prints it 1:1 (plan ДРВ). Text only from the bundled face.
@@ -147,7 +147,10 @@ export async function renderLabel(
   const deps = { rasterizeText: rasterize ?? rasterizeText, logo, ...options };
   const text =
     printer.language === "tspl"
-      ? await emitters.generateTspl(printSpec, fields, deps)
+      ? await emitters.generateTspl(printSpec, fields, {
+          ...deps,
+          centerSscc: printSpec.widthMm === 75 && printSpec.heightMm === 120,
+        })
       : await emitters.generateZpl(printSpec, fields, deps);
   return applyPrinterOutputMode(latin1ToBytes(text), printer.language, printer.outputMode);
 }
