@@ -114,6 +114,7 @@ test("the stable workflow isolates the key and OIDC from the product checkout", 
   assert.deepEqual(Object.keys(inputs), ["mode", "bump"]);
   assert.equal(inputs.mode.default, "publish");
   assert.deepEqual(inputs.mode.options, ["publish", "verify"]);
+  assert.equal(workflow["cache-mode"], "none");
   assert.equal(workflow.concurrency.group, "handheld-release");
   assert.equal(workflow.concurrency["cancel-in-progress"], false);
   const { authorize, build, publish, verify } = workflow.jobs;
@@ -126,7 +127,16 @@ test("the stable workflow isolates the key and OIDC from the product checkout", 
   assert.equal(build.environment, undefined);
   assert.equal(build.permissions["id-token"], undefined);
   assert.doesNotMatch(JSON.stringify(build), /secrets\./);
-  assert.equal(build.steps[0].with.ref, "${{ needs.authorize.outputs.source_sha }}");
+  assert.deepEqual(build.steps[0].with, {
+    ref: "refs/heads/main",
+    "persist-credentials": false,
+  });
+  assert.equal(build.steps[1].env.SOURCE_SHA, "${{ needs.authorize.outputs.source_sha }}");
+  assert.match(build.steps[1].run, /test "\$\(git rev-parse HEAD\)" = "\$SOURCE_SHA"/u);
+  const setupGradle = build.steps.find((step) =>
+    step.uses?.startsWith("gradle/actions/setup-gradle@"),
+  );
+  assert.deepEqual(setupGradle.with, { "cache-disabled": true });
   assert.ok(
     build.steps.some((step) =>
       step.run?.includes("testDebugUnitTest lintDebug assembleDebug assembleRelease"),

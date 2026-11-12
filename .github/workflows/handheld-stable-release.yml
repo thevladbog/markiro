@@ -17,6 +17,7 @@ on:
         options: [patch, minor, major]
 
 permissions: {}
+cache-mode: none
 
 # Share the lock with the older workflow while it can still publish.
 concurrency:
@@ -66,25 +67,32 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ needs.authorize.outputs.source_sha }}
+          ref: refs/heads/main
           persist-credentials: false
+      - name: Require the approved main commit before running product code
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ needs.authorize.outputs.source_sha }}
+        run: |
+          if ! test "$(git rev-parse HEAD)" = "$SOURCE_SHA"; then
+            echo "main changed after release authorization. Start a new release after its CI passes." >&2
+            exit 1
+          fi
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
         with:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
         with:
-          cache-read-only: true
+          cache-disabled: true
       - name: Test and build the exact source without signing credentials
         shell: bash
         working-directory: apps/handheld
         env:
-          SOURCE_SHA: ${{ needs.authorize.outputs.source_sha }}
           VERSION_NAME: ${{ needs.authorize.outputs.version_name }}
           VERSION_CODE: ${{ needs.authorize.outputs.version_code }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease \
             "-Pmarkiro.versionName=$VERSION_NAME" "-Pmarkiro.versionCode=$VERSION_CODE"
           test ! -e app/build/outputs/apk/release/app-release.apk
