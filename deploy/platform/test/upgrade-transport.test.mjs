@@ -1,14 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   upgradeSshArguments,
   upgradeOutcome,
   receiveUpgradeBundle,
+  runTransport,
   validateBundle,
 } from "../upgrade-transport.mjs";
 import { upgradeCommandFixture } from "./upgrade-command-fixture.mjs";
+import { privateFixture } from "./host-fixtures.mjs";
 const id = "11111111-1111-4111-8111-111111111111",
   sha = "a".repeat(40),
   dispatch = { toolingSha: sha, runId: "12", runAttempt: "1" };
@@ -25,6 +27,7 @@ for (const phase of [
   "return-old",
   "post-migration-prepare",
   "post-migration-activate",
+  "healthy-forward-rollout",
 ])
   test(`upgrade ${phase} uses only fixed receiver and exact outcome`, () => {
     const args = upgradeSshArguments(target, "execute", id, phase, sha, dispatch);
@@ -42,6 +45,7 @@ for (const phase of [
       "return-old": "returned-old",
       "post-migration-prepare": "backup-verified",
       "post-migration-activate": "healthy",
+      "healthy-forward-rollout": "healthy",
     }[phase];
     const result = {
       exitCode: 0,
@@ -68,6 +72,54 @@ test("fixed SSH denies injection, stale attempt, wrong tooling or historical rec
     assert.throws(() =>
       upgradeSshArguments(target, "execute", id, "prepare", sha, { ...dispatch, ...patch }),
     );
+});
+test("healthy forward delivery requires protected dispatch verification before SSH", async (t) => {
+  const { root } = await privateFixture(t);
+  const identityFile = join(root, "identity");
+  const knownHostsFile = join(root, "known-hosts");
+  const algorithm = Buffer.from("ssh-ed25519");
+  const algorithmLength = Buffer.alloc(4);
+  algorithmLength.writeUInt32BE(algorithm.length);
+  const key = Buffer.concat([algorithmLength, algorithm, Buffer.alloc(32)]).toString("base64");
+  await writeFile(identityFile, "fixture-key", { mode: 0o600 });
+  await writeFile(knownHostsFile, `${target.host} ssh-ed25519 ${key}\n`, { mode: 0o600 });
+  let requests = 0;
+  let processes = 0;
+  await assert.rejects(
+    runTransport(
+      {
+        selection: {
+          executorSha: sha,
+          executorCiRunId: "11",
+          executorCiRunAttempt: "1",
+          sourceSha: sha,
+          workflowRunId: "13",
+          workflowRunAttempt: "1",
+          artifactId: "14",
+          operationId: id,
+        },
+        target: { ...target, identityFile, knownHostsFile },
+        token: "fixture-token",
+        githubActor: "publisher",
+        phase: "healthy-forward-rollout",
+        dispatch,
+        checkoutRoot: root,
+        workDirectory: root,
+      },
+      {
+        request: async () => {
+          requests++;
+          throw new Error("Unapproved GitHub request");
+        },
+        runProcess: async () => {
+          processes++;
+          throw new Error("Unapproved process");
+        },
+      },
+    ),
+    { code: "ERR_UPGRADE_TRANSPORT" },
+  );
+  assert.deepEqual([requests, processes], [1, 0]);
 });
 async function bundle(f) {
   const original = f.input.identity.admission;
@@ -289,7 +341,11 @@ test("forward phases remain in the existing protected workflow with no rerun or 
     new URL("../../../.github/workflows/upgrade-platform.yml", import.meta.url),
     "utf8",
   );
-  for (const phase of ["post-migration-prepare", "post-migration-activate"])
+  for (const phase of [
+    "post-migration-prepare",
+    "post-migration-activate",
+    "healthy-forward-rollout",
+  ])
     assert.ok(workflow.includes(phase));
   assert.match(workflow, /environment: production-deploy/u);
   assert.match(workflow, /group: timeweb-platform-production/u);
@@ -299,8 +355,13 @@ test("forward phases remain in the existing protected workflow with no rerun or 
   assert.match(workflow, /upgrade-transport.mjs run/u);
 });
 
-for (const kind of ["node", "ssh"])
-  test(`protected forward ${kind} coordinator accepts its resource budget beyond one hour`, async (t) => {
+for (const [kind, phase] of [
+  ["node", "post-migration-activate"],
+  ["ssh", "post-migration-activate"],
+  ["node", "healthy-forward-rollout"],
+  ["ssh", "healthy-forward-rollout"],
+])
+  test(`protected ${phase} ${kind} coordinator accepts its resource budget beyond one hour`, async (t) => {
     const { privateFixture } = await import("./host-fixtures.mjs");
     const { runHostProcess } = await import("../host/process.mjs");
     const transport = await import("../upgrade-transport.mjs");
@@ -308,7 +369,6 @@ for (const kind of ["node", "ssh"])
     const f = await privateFixture(t);
     const controller = new AbortController();
     controller.abort();
-    const phase = "post-migration-activate";
     const request = {
       executable: kind === "node" ? "/usr/bin/node" : "/usr/bin/ssh",
       args:

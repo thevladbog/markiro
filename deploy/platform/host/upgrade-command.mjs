@@ -7,6 +7,7 @@ import { readFile, lstat } from "node:fs/promises";
 import { canonical, digest, ensure, keys } from "../backup/schemas.mjs";
 import { canonicalId } from "../release-admission.mjs";
 import {
+  HEALTHY_FORWARD_ROLLOUT_PHASE,
   upgradePhase,
   validateUpgradeDispatch,
   validateUpgradeAuthorization,
@@ -43,6 +44,62 @@ export const UPGRADE_BUNDLE_FILES = Object.freeze([
   "deploy/platform/host/forward-ledger.mjs",
   "deploy/platform/host/forward-index-handoff.py",
 ]);
+// This one-phase successor has its own exact closure. Preserve the file set
+// and receipts used by the original upgrade and forward-recovery phases.
+const HEALTHY_FORWARD_BUNDLE_FILES = Object.freeze([
+  ...RECOVERY_BUNDLE_FILES,
+  "deploy/platform/upgrade-dispatch.mjs",
+  "deploy/platform/upgrade-transport.mjs",
+  "deploy/platform/host/upgrade-command.mjs",
+  "deploy/platform/host/upgrade-schema.mjs",
+  "deploy/platform/host/configuration-plan.mjs",
+  "deploy/platform/host/container-recipe.mjs",
+  "deploy/platform/host/forward-activation-reconciliation.mjs",
+  "deploy/platform/host/forward-activation-successor-admission.mjs",
+  "deploy/platform/host/forward-admission.mjs",
+  "deploy/platform/host/forward-edge-successor-admission.mjs",
+  "deploy/platform/host/forward-history.mjs",
+  "deploy/platform/host/forward-index-handoff.py",
+  "deploy/platform/host/forward-ledger.mjs",
+  "deploy/platform/host/forward-product.mjs",
+  "deploy/platform/host/forward-retained.mjs",
+  "deploy/platform/host/forward-state.mjs",
+  "deploy/platform/host/forward-successor-admission.mjs",
+  "deploy/platform/host/healthy-forward-backup.mjs",
+  "deploy/platform/host/healthy-forward-candidate.mjs",
+  "deploy/platform/host/healthy-forward-preflight.mjs",
+  "deploy/platform/host/healthy-forward-publisher-policy.mjs",
+  "deploy/platform/host/healthy-forward-rollout-runtime.mjs",
+  "deploy/platform/host/healthy-forward-rollout-state.mjs",
+  "deploy/platform/host/healthy-forward-workloads.mjs",
+  "deploy/platform/host/retained-catalog-workers.mjs",
+]);
+export function upgradeBundleFiles(phase) {
+  if (phase === undefined) return UPGRADE_BUNDLE_FILES;
+  upgradePhase(phase);
+  return phase === HEALTHY_FORWARD_ROLLOUT_PHASE
+    ? HEALTHY_FORWARD_BUNDLE_FILES
+    : UPGRADE_BUNDLE_FILES;
+}
+
+const runtimes = Object.freeze({
+  "platform-upgrade-host-operation": ["upgrade-command-runtime", "Upgrade"],
+  "platform-forward-recovery-host-operation": ["forward-command-runtime", "Forward"],
+  "platform-healthy-forward-rollout-host-operation": [
+    "healthy-forward-rollout-runtime",
+    "HealthyForwardRollout",
+  ],
+});
+async function operationRuntime(record) {
+  const [filename, operation] = runtimes[record.kind];
+  const module = await import(
+    pathToFileURL(join(record.installedRoot, `deploy/platform/host/${filename}.mjs`)).href
+  );
+  const validate = module[`validate${operation}Operation`];
+  const execute = module[`execute${operation}Operation`];
+  ensure(typeof validate === "function" && typeof execute === "function");
+  return { validate, execute };
+}
 const same = (a, b) => ensure(canonical(a) === canonical(b));
 const freeze = (value) => {
   if (value && typeof value === "object") {
@@ -80,15 +137,19 @@ export async function loadUpgradeOperation(directory, options = {}) {
     const op = record.operation;
     const preparation = record.phase === "prepare" || record.phase === "post-migration-prepare";
     const activation = record.phase === "activate" || record.phase === "post-migration-activate";
-    keys(op, [
-      "root",
-      "dockerConfig",
-      "admission",
-      "configuration",
-      "predecessorContainers",
-      ...(preparation ? ["connectionFile", "roleMapping"] : ["decision"]),
-      ...(activation ? ["preparedTarget", "preparedPolicy"] : []),
-    ]);
+    const healthy = record.phase === HEALTHY_FORWARD_ROLLOUT_PHASE;
+    // The selected healthy runtime validates the complete phase-specific input.
+    // This loader binds only the identity shared with the protected transport.
+    if (!healthy)
+      keys(op, [
+        "root",
+        "dockerConfig",
+        "admission",
+        "configuration",
+        "predecessorContainers",
+        ...(preparation ? ["connectionFile", "roleMapping"] : ["decision"]),
+        ...(activation ? ["preparedTarget", "preparedPolicy"] : []),
+      ]);
     const identity = op.admission.identity;
     ensure(
       typeof identity.executorSha === "string" && /^[a-f0-9]{40}$/u.test(identity.executorSha),
@@ -105,7 +166,8 @@ export async function loadUpgradeOperation(directory, options = {}) {
     ensure(record.installedRoot === join(hostRoot, "upgrade-bootstrap", identity.executorSha));
     for (const path of [record.installedRoot, op.root, op.dockerConfig])
       assertPrivateRootSync(path);
-    same(record.dispatch, preparation ? op.admission.dispatch : op.decision.dispatch);
+    same(record.dispatch, preparation || healthy ? op.admission.dispatch : op.decision.dispatch);
+    ensure(record.dispatch.toolingSha === identity.executorSha);
     const receiptName = `upgrade-installed-executor-${identity.operationId}.json`;
     const receiptBytes = await readPrivateFile(op.root, receiptName);
     const receipt = JSON.parse(receiptBytes);
@@ -129,14 +191,15 @@ export async function loadUpgradeOperation(directory, options = {}) {
     same(receipt.ci, op.admission.executorCi);
     validateUpgradeDispatch(receipt.installationDispatch);
     same(receipt.installationDispatch, op.admission.dispatch);
-    keys(receipt.files, UPGRADE_BUNDLE_FILES);
+    const files = upgradeBundleFiles(record.phase);
+    keys(receipt.files, files);
     ensure(
       Object.values(receipt.files).every((v) => typeof v === "string" && /^[a-f0-9]{64}$/u.test(v)),
     );
     const verifyBytes = async () => {
       ensure((await readPrivateFile(directory, "operation.json")).equals(operationBytes));
       ensure((await readPrivateFile(op.root, receiptName)).equals(receiptBytes));
-      for (const path of UPGRADE_BUNDLE_FILES) {
+      for (const path of files) {
         let bytes;
         if (path.endsWith("/pg_hba.conf")) {
           const file = join(record.installedRoot, path);
@@ -150,14 +213,7 @@ export async function loadUpgradeOperation(directory, options = {}) {
       }
     };
     await verifyBytes();
-    const runtime = await import(
-      pathToFileURL(
-        join(
-          record.installedRoot,
-          `deploy/platform/host/${forward ? "forward" : "upgrade"}-command-runtime.mjs`,
-        ),
-      ).href
-    );
+    const runtime = await operationRuntime(record);
     let verifyAuthority;
     const loaded = {
       operationDirectory: directory,
@@ -170,9 +226,7 @@ export async function loadUpgradeOperation(directory, options = {}) {
         await verifyBytes();
       },
     };
-    verifyAuthority = await runtime[
-      forward ? "validateForwardOperation" : "validateUpgradeOperation"
-    ](loaded, options);
+    verifyAuthority = await runtime.validate(loaded, options);
     ensure(typeof verifyAuthority === "function");
     await loaded.verifySources();
     return Object.freeze(loaded);
@@ -192,16 +246,8 @@ export async function runUpgradeHostCommand(args, options = {}) {
     const loaded = await loadUpgradeOperation(args[1], options);
     ensure(loaded.record.phase === args[0]);
     await loaded.verifySources();
-    const forward = loaded.record.kind === "platform-forward-recovery-host-operation";
-    const runtime = await import(
-      pathToFileURL(
-        join(
-          loaded.record.installedRoot,
-          `deploy/platform/host/${forward ? "forward" : "upgrade"}-command-runtime.mjs`,
-        ),
-      ).href
-    );
-    await runtime[forward ? "executeForwardOperation" : "executeUpgradeOperation"](loaded, options);
+    const runtime = await operationRuntime(loaded.record);
+    await runtime.execute(loaded, options);
     return Object.freeze({
       version: 1,
       kind: "platform-upgrade-host-outcome",

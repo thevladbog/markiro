@@ -14,6 +14,7 @@ test("upgrade phases are independently protected, serialized and stdin-only", ()
     "return-old",
     "post-migration-prepare",
     "post-migration-activate",
+    "healthy-forward-rollout",
   ]);
   assert.deepEqual(w.concurrency, {
     group: "timeweb-platform-production",
@@ -36,6 +37,7 @@ test("upgrade implementation and workflow select required platform contracts and
   for (const file of [
     "deploy/platform/upgrade-transport.mjs",
     "deploy/platform/host/upgrade-command-runtime.mjs",
+    "deploy/platform/host/healthy-forward-rollout-runtime.mjs",
     ".github/workflows/upgrade-platform.yml",
     ".github/workflows/ci.yml",
     "deploy/platform/forward-ci.mjs",

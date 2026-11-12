@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  UPGRADE_BUNDLE_FILES,
+  upgradeBundleFiles,
   loadUpgradeOperation,
   runUpgradeHostCommand,
 } from "./host/upgrade-command.mjs";
@@ -14,6 +14,7 @@ import {
   buildSourceBundle as buildRecoverySourceBundle,
 } from "./recovery-transport.mjs";
 import {
+  HEALTHY_FORWARD_ROLLOUT_PHASE,
   upgradePhase,
   validateUpgradeDispatch,
   verifyUpgradeDispatch,
@@ -36,6 +37,11 @@ const HOST_ROOT = "/opt/markiro-platform";
 const CLEAN_ENV = Object.freeze({ PATH: "/usr/bin:/bin", HOME: "/nonexistent", LANG: "C" });
 const RECEIVED = "Platform upgrade executor bundle received.\n";
 const HASH = /^[a-f0-9]{64}$/u;
+const LONG_COORDINATOR_PHASES = new Set([
+  "post-migration-prepare",
+  "post-migration-activate",
+  HEALTHY_FORWARD_ROLLOUT_PHASE,
+]);
 const SELECTION_KEYS = [
   "executorSha",
   "executorCiRunId",
@@ -90,7 +96,7 @@ export async function upgradeTransportProcess(request) {
     ensure(
       mode === "host-command" &&
         executor === toolingSha &&
-        ["post-migration-prepare", "post-migration-activate"].includes(phase) &&
+        LONG_COORDINATOR_PHASES.has(phase) &&
         matches(id, /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u) &&
         script ===
           `${HOST_ROOT}/upgrade-bootstrap/${executor}/deploy/platform/upgrade-transport.mjs`,
@@ -102,9 +108,7 @@ export async function upgradeTransportProcess(request) {
     const parts = remote.split(" ");
     ensure(parts.length === 15);
     const [, , , , , , , , mode, id, phase, executor, toolingSha, runId, runAttempt] = parts;
-    ensure(
-      mode === "execute" && ["post-migration-prepare", "post-migration-activate"].includes(phase),
-    );
+    ensure(mode === "execute" && LONG_COORDINATOR_PHASES.has(phase));
     const port = args.indexOf("-p");
     ensure(port === args.length - 9);
     const hosts = args.find(
@@ -137,7 +141,7 @@ export function upgradeOutcome(result, phase) {
   );
   return phaseStatus(phase);
 }
-export function validateBundle(bundle, receipt) {
+export function validateBundle(bundle, receipt, phase) {
   keys(receipt, [
     "version",
     "kind",
@@ -161,10 +165,11 @@ export function validateBundle(bundle, receipt) {
       s.executorCiRunId === receipt.ci.runId &&
       s.executorCiRunAttempt === receipt.ci.runAttempt,
   );
-  keys(receipt.files, UPGRADE_BUNDLE_FILES);
-  keys(bundle.files, UPGRADE_BUNDLE_FILES);
+  const bundleFiles = upgradeBundleFiles(phase);
+  keys(receipt.files, bundleFiles);
+  keys(bundle.files, bundleFiles);
   const files = {};
-  for (const p of UPGRADE_BUNDLE_FILES) {
+  for (const p of bundleFiles) {
     const text = bundle.files[p];
     ensure(typeof text === "string" && text.length <= 1048576 && matches(receipt.files[p], HASH));
     const b = Buffer.from(text, "base64");
@@ -192,7 +197,8 @@ export async function buildSourceBundle(
   const original = await buildRecoverySourceBundle(selection, checkoutRoot, workDirectory, options);
   const files = { ...original.bundle.files },
     hashes = { ...original.receipt.files };
-  for (const p of UPGRADE_BUNDLE_FILES.filter((p) => !RECOVERY_BUNDLE_FILES.includes(p))) {
+  const bundleFiles = upgradeBundleFiles(options.phase);
+  for (const p of bundleFiles.filter((p) => !RECOVERY_BUNDLE_FILES.includes(p))) {
     const b = (
       await (options.runProcess ?? runHostProcess)({
         ...processOptions(workDirectory),
@@ -214,8 +220,8 @@ export async function buildSourceBundle(
     installationDispatch: dispatch,
     files: hashes,
   };
-  validateBundle(bundle, receipt);
-  ensure(Buffer.byteLength(JSON.stringify(bundle)) <= 1048576);
+  validateBundle(bundle, receipt, options.phase);
+  ensure(Buffer.byteLength(JSON.stringify({ bundle, phase: options.phase, dispatch })) <= 1048576);
   return { bundle, receipt };
 }
 /** All local gates precede the first SSH. No remote cleanup/retry follows failure. */
@@ -325,13 +331,14 @@ export async function runTransport(
       },
     );
     const { bundle } = await buildSourceBundle(selection, checkoutRoot, workDirectory, dispatch, {
+      phase,
       runProcess: run,
     });
     const invoke = (mode, input) =>
       run({
         ...processOptions(workDirectory),
         timeoutMs:
-          mode === "execute" ? (phase.startsWith("post-migration-") ? 6900000 : 3000000) : 120000,
+          mode === "execute" ? (LONG_COORDINATOR_PHASES.has(phase) ? 6900000 : 3000000) : 120000,
         executable: "/usr/bin/ssh",
         args: upgradeSshArguments(
           target,
@@ -419,7 +426,7 @@ export async function receiveUpgradeBundle(
     dispatch,
     options,
   );
-  validateBundle(input.bundle, loaded.receipt);
+  validateBundle(input.bundle, loaded.receipt, phase);
   const s = input.bundle.selection,
     original = admission.identity.admission;
   ensure(
@@ -493,7 +500,7 @@ export async function executeUpgradeHost(
   });
   const result = await (options.runProcess ?? upgradeTransportProcess)({
     ...processOptions(directory),
-    timeoutMs: phase.startsWith("post-migration-") ? 6840000 : 2940000,
+    timeoutMs: LONG_COORDINATOR_PHASES.has(phase) ? 6840000 : 2940000,
     executable: "/usr/bin/node",
     args: [
       join(record.installedRoot, "deploy/platform/upgrade-transport.mjs"),

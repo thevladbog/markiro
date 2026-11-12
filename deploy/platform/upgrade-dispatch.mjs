@@ -1,6 +1,7 @@
 import { canonical, ensure, keys } from "./backup/schemas.mjs";
 import { canonicalId } from "./release-admission.mjs";
 import { REPOSITORY } from "./admission-github.mjs";
+export const HEALTHY_FORWARD_ROLLOUT_PHASE = "healthy-forward-rollout";
 // One strict phase table for receiver, executor, loader and outcome validation.
 const phases = Object.freeze({
   prepare: Object.freeze({
@@ -25,6 +26,11 @@ const phases = Object.freeze({
   }),
   "post-migration-activate": Object.freeze({
     kind: "platform-forward-recovery-host-operation",
+    status: "healthy",
+    sshPhase: "activate",
+  }),
+  [HEALTHY_FORWARD_ROLLOUT_PHASE]: Object.freeze({
+    kind: "platform-healthy-forward-rollout-host-operation",
     status: "healthy",
     sshPhase: "activate",
   }),

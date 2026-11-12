@@ -7,6 +7,7 @@ import { ensure, runtime, fail, digest } from "./schemas.mjs";
 import { withHeldHostState } from "../host/state.mjs";
 import { withHeldUpgradeState } from "../host/upgrade-state.mjs";
 const recoveryRuntimes = new WeakMap();
+const healthyForwardRuntimes = new WeakMap();
 
 // This factory cannot be supplied an arbitrary predecessor or phase. It consumes
 // the live upgrade guard and binds independently provisioned bytes for this op.
@@ -99,6 +100,16 @@ async function createRecoveryBackupRuntime(root, admission) {
 }
 export async function readBackupRuntime(root, operationId, recoveryRuntime) {
   if (recoveryRuntime === undefined) return readPrivateFile(root, "backup-runtime.json");
+  const healthyForward = healthyForwardRuntimes.get(recoveryRuntime);
+  if (healthyForward) {
+    ensure(healthyForward.root === root && healthyForward.operationId === operationId);
+    await healthyForward.verify();
+    const bytes = await readPrivateFile(root, healthyForward.name);
+    ensure(bytes.equals(healthyForward.bytes));
+    await healthyForward.verify();
+    ensure(healthyForwardRuntimes.get(recoveryRuntime) === healthyForward);
+    return bytes;
+  }
   const bound = recoveryRuntimes.get(recoveryRuntime);
   ensure(bound && bound.root === root && bound.operationId === operationId);
   if (bound.verify) await bound.verify();
@@ -553,6 +564,36 @@ export async function withForwardBackupRuntime(capability, action) {
       return result;
     } finally {
       recoveryRuntimes.delete(context);
+    }
+  });
+}
+
+/** The new rollout lease provides the descriptor pins after the source has stopped. */
+export async function withHealthyForwardBackupRuntime(capability, action) {
+  const { withHealthyForwardBackupState } =
+    await import("../host/healthy-forward-rollout-state.mjs");
+  ensure(typeof action === "function");
+  return withHealthyForwardBackupState(capability, async (held) => {
+    const { root, operationId, executorSha, backupRuntimeSha256 } = held.operation;
+    const name = `healthy-forward-backup-runtime-${operationId}.json`;
+    const bytes = await readPrivateFile(root, name);
+    ensure(digest(bytes) === backupRuntimeSha256);
+    const config = runtime(JSON.parse(bytes));
+    ensure(
+      config.executorSha === executorSha &&
+        config.provenance === "live-source" &&
+        config.dockerExecutable === "/usr/bin/docker" &&
+        config.endpoint === "unix:///var/run/docker.sock",
+    );
+    await held.verify();
+    const context = Object.freeze({});
+    healthyForwardRuntimes.set(context, { root, operationId, name, bytes, verify: held.verify });
+    try {
+      const result = await action(held, context);
+      await readBackupRuntime(root, operationId, context);
+      return result;
+    } finally {
+      healthyForwardRuntimes.delete(context);
     }
   });
 }
