@@ -205,7 +205,11 @@ class ShiftListScanTest {
     @Before
     fun setUp() = runTest {
         db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java)
-            .allowMainThreadQueries().build()
+            .allowMainThreadQueries()
+            // Keep Room work on the test thread so virtual time cannot outrun the refresh.
+            .setQueryExecutor { it.run() }
+            .setTransactionExecutor { it.run() }
+            .build()
         db.deviceConfigDao().upsert(
             DeviceConfigEntity(
                 deviceId = "dev-1", deviceName = "ТСД 1", tenantId = "t", organizationName = "ООО",
@@ -243,11 +247,8 @@ class ShiftListScanTest {
     /**
      * Waits for the first real `state` emission.
      *
-     * `observeShifts()` and the initial refresh land through Room's own
-     * executor thread, not the test's virtual clock -- `advanceUntilIdle`
-     * alone races that real completion, and reading `state.value` too early
-     * returns the `stateIn` seed rather than a value reflecting what the
-     * scan-collector subscription and the refresh actually did.
+     * The `stateIn` seed is published before Room's initial queries and the
+     * refresh complete. Wait for the resulting list before sending a scan.
      */
     private suspend fun ShiftListViewModel.settled() = state.first { !it.loading }
 
@@ -390,12 +391,8 @@ class ShiftListScanTest {
      * Finding B (PR #616 review): a scan that lands while `loading` is true
      * and the shift is not yet in `mine`/`others`/Room must retry the lookup
      * once the in-flight refresh settles, rather than reporting the shift
-     * unknown. Settles the model first (the established pattern every other
-     * test here uses to get the scan collector genuinely running), then
-     * exercises the exact same `onScan` loading-check with a second, gated
-     * `refresh()` -- this makes `loading == true` a guarantee rather than a
-     * race against Room's own executor thread, since nothing but the gated
-     * `shifts()` call can flip it back to `false`.
+     * unknown. Start a gated refresh after the initial list has loaded, and
+     * let the scan reach the loading check before releasing the refresh.
      */
     @Test
     fun `scan that arrives while a refresh is in flight is entered once that refresh finds it`() = runTest {
@@ -411,10 +408,14 @@ class ShiftListScanTest {
         model.state.first { it.loading }
 
         scan("markiro:shift:v1:$shiftId")
-        // Only now let the refresh -- and with it, the retried lookup -- proceed.
+        testScheduler.runCurrent()
+        assertNull(api.enteredShiftId)
         gate.complete(Unit)
 
-        model.state.first { it.continueShift?.id == shiftId }
+        val result = model.state.first {
+            it.continueShift?.id == shiftId || it.dialog == ShiftDialog.BarcodeUnknown
+        }
+        assertEquals("Shift lookup ended with ${result.dialog}", shiftId, result.continueShift?.id)
 
         assertEquals(shiftId, api.enteredShiftId)
         assertEquals("task_barcode", api.lastEnterBody?.entryMethod)
@@ -440,6 +441,7 @@ class ShiftListScanTest {
         model.state.first { it.loading }
 
         scan("markiro:shift:v1:$shiftId")
+        testScheduler.runCurrent()
         gate.complete(Unit)
 
         val dialog = model.state.first { it.dialog != null }.dialog
