@@ -184,10 +184,10 @@ it("offers both 75×120 duplicate layouts with one complete marking code", () =>
     .buildStockLotNumberLabelVariants()
     .filter(({ purpose, spec }) => purpose === "product_duplicate" && spec.widthMm === 75);
   expect(wide.map(({ spec }) => spec.elements.find(({ id }) => id === "product"))).toEqual([
-    expect.objectContaining({ field: "product.name", fontSizePt: 17, bold: true, maxLines: 3 }),
+    expect.objectContaining({ field: "product.name", fontSizePt: 13, bold: true, maxLines: 3 }),
     expect.objectContaining({
       field: "product.printName",
-      fontSizePt: 17,
+      fontSizePt: 13,
       bold: true,
       maxLines: 3,
     }),
