@@ -38,7 +38,7 @@ test("signs the verified CI artifact in the terminal and dispatches only public 
     },
     async run(command, args, runOptions) {
       if (command === process.execPath) {
-        assert.match(args[0], /\/sign-update\.mjs$/u);
+        assert.equal(args[0], join(import.meta.dirname, "..", "sign-update.mjs"));
         assert.ok(args.includes(options.key));
         assert.equal(runOptions.stdio, "inherit");
         await mkdir(folder);
