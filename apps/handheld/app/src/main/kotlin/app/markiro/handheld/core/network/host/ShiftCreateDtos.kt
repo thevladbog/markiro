@@ -14,6 +14,7 @@ data class ShiftCreateOptionsDto(
     val templates: List<ShiftCreateTemplateDto>,
     val boxDefault: String? = null,
     val palletDefault: String? = null,
+    val useLotNumbers: Boolean = false,
 )
 
 @Serializable
@@ -37,6 +38,8 @@ data class ShiftCreateTemplateDto(
     val name: String,
     val purpose: String,
     val groups: List<Int>?,
+    val supportsLotNumber: Boolean = false,
+    val lotNumberSourceId: String? = null,
 )
 
 @Serializable
@@ -54,4 +57,5 @@ data class HostShiftCreateRequest(
     val palletBoxCapacity: Int? = null,
     val palletTemplateId: String? = null,
     val palletSheetTemplateId: String? = null,
+    val lotNumber: String? = null,
 )

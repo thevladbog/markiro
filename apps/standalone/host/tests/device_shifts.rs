@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use http_body_util::BodyExt;
 use markiro_host::auth::AuthDevice;
-use markiro_host::error::{ApiError, ApiJson, ApiPath};
+use markiro_host::error::{ApiError, ApiJson, ApiPath, ApiQuery};
 use markiro_host::routes::device_shifts::{create_device_shift, enter_shift};
 use markiro_proto::{DeviceKind, DeviceShift, DeviceShiftCreate};
 use serde_json::{json, Value};
@@ -1809,6 +1809,7 @@ async fn a_station_revoked_while_its_write_waited_neither_enters_nor_creates_a_s
             kind: DeviceKind::Station,
             key_hash: None,
         },
+        ApiQuery(Default::default()),
         ApiJson(create),
     );
     for (what, station, answer) in [
@@ -3346,6 +3347,128 @@ async fn station_create_replays_the_stored_lot_and_entry_checks_capability() {
     let (status, refused) = enter(&admin, &admin.key, &without_lot).await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
     assert_eq!(refused["error"]["details"]["constraint"], "station_update");
+}
+
+#[tokio::test]
+async fn handheld_lot_capability_enables_creation_and_freezes_the_lot_on_entry() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let key = pair_handheld(&admin).await;
+    let device = device_id(&admin, &key).await;
+    let (status, reply) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/devices/{device}"),
+            Some(json!({ "lineId": setup.line })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{reply}");
+    sqlx::query("UPDATE org_profile SET use_lot_numbers = 1 WHERE id = 1")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+
+    let lot_box = office_template(&admin, "box", true, Value::Null).await;
+    sqlx::query(
+        "UPDATE label_templates SET lot_number_source_id = ?, \
+         spec = json_set(spec, '$.elements', json(?)) WHERE id = ?",
+    )
+    .bind(&setup.template)
+    .bind(json!([{ "kind": "field", "field": "shift.lotNumber" }]).to_string())
+    .bind(&lot_box)
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let (status, options) = device_call(
+        &admin,
+        &key,
+        "GET",
+        "/v1/device/shift-create-options?lotNumbers=1",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{options}");
+    assert_eq!(options["useLotNumbers"], true);
+    let templates = options["templates"].as_array().unwrap();
+    let variant = templates.iter().find(|row| row["id"] == lot_box).unwrap();
+    assert_eq!(variant["supportsLotNumber"], true);
+    assert_eq!(variant["lotNumberSourceId"], setup.template);
+    let original = templates
+        .iter()
+        .find(|row| row["id"] == setup.template)
+        .unwrap();
+    assert_eq!(original["supportsLotNumber"], false);
+
+    let mut body = device_create(&setup, REQUEST);
+    body["expectedLineId"] = json!(setup.line);
+    body["lotNumber"] = json!(" 0042Бк07AЁ ");
+    body["boxTemplateId"] = json!(lot_box);
+    let revision = host_revision(&admin.app).await;
+    let (status, refused) = device_call(
+        &admin,
+        &key,
+        "POST",
+        "/v1/device/shifts",
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    assert_eq!(host_revision(&admin.app).await, revision);
+
+    let create_path = "/v1/device/shifts?lotNumbers=1";
+    let mut missing_binding = body.clone();
+    missing_binding["boxTemplateId"] = json!(setup.template);
+    let (status, refused) =
+        device_call(&admin, &key, "POST", create_path, Some(missing_binding)).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(
+        refused["error"]["details"]["constraint"],
+        "lot_template_missing"
+    );
+    assert_eq!(host_revision(&admin.app).await, revision);
+
+    let (status, created) =
+        device_call(&admin, &key, "POST", create_path, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    assert_eq!(created["number"], "OCT26-001/M");
+    assert_eq!(created["lotNumber"], "0042Бк07AЁ");
+    let revision = host_revision(&admin.app).await;
+    body["lotNumber"] = json!("another-lot");
+    let replay = device_call(&admin, &key, "POST", create_path, Some(body)).await;
+    assert_eq!(replay, (StatusCode::OK, created.clone()));
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(
+        audit_trail(&admin.app, "shift.create").await,
+        vec![device_row(
+            &device,
+            "shift.create",
+            created["id"].as_str().unwrap(),
+            json!({
+                "number": created["number"], "productId": setup.product, "lineId": setup.line,
+                "productionDate": "2026-10-09", "lotNumber": "0042Бк07AЁ"
+            }),
+        )],
+    );
+
+    let (status, refused) = enter_with(
+        &admin,
+        &key,
+        &created,
+        json!({ "supports": ["handheld-host-v1"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"]["details"]["constraint"], "station_update");
+    assert_eq!(host_revision(&admin.app).await, revision);
+    let (status, opened) = enter_with(
+        &admin,
+        &key,
+        &created,
+        json!({ "supports": ["handheld-host-v1", "lot-number"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{opened}");
+    assert_eq!(opened["snapshot"]["lotNumber"], "0042Бк07AЁ");
 }
 
 #[tokio::test]

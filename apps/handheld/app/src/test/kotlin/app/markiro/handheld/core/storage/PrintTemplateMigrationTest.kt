@@ -34,9 +34,9 @@ class PrintTemplateMigrationTest {
             version = 22
         }
         old.close()
-        val upgraded = Room.databaseBuilder(context, HandheldDatabase::class.java, name).addMigrations(MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27).allowMainThreadQueries().build()
+        val upgraded = Room.databaseBuilder(context, HandheldDatabase::class.java, name).addMigrations(MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28).allowMainThreadQueries().build()
         try {
-            assertEquals(27, upgraded.openHelper.readableDatabase.version)
+            assertEquals(28, upgraded.openHelper.readableDatabase.version)
             assertEquals(spec, upgraded.printTemplateDao().snapshot("box", "box")?.specJson)
             assertEquals("unknown", upgraded.boxDao().get("box")?.printState)
             assertEquals("link lost", upgraded.boxDao().get("box")?.printReason)

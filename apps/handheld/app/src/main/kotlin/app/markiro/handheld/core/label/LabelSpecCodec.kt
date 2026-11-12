@@ -49,6 +49,7 @@ object LabelSpecCodec {
             align = o.strOrNull("align")?.let(LabelAlign::fromWire),
             maxWidthMm = o.numOrNull("maxWidthMm"), maxLines = o.intOrNull("maxLines"),
             fontFamily = o.strOrNull("fontFamily"), lineHeight = o.numOrNull("lineHeight"), minFontSizePt = o.numOrNull("minFontSizePt"),
+            visibleWhen = o.visibleWhen(),
         )
         "field" -> LabelElement.Field(
             id = o.str("id"), xMm = o.num("xMm"), yMm = o.num("yMm"),
@@ -58,6 +59,7 @@ object LabelSpecCodec {
             align = o.strOrNull("align")?.let(LabelAlign::fromWire),
             maxWidthMm = o.numOrNull("maxWidthMm"), maxLines = o.intOrNull("maxLines"),
             fontFamily = o.strOrNull("fontFamily"), lineHeight = o.numOrNull("lineHeight"), minFontSizePt = o.numOrNull("minFontSizePt"),
+            visibleWhen = o.visibleWhen(),
         )
         "organization_logo" -> {
             if (o.str("source") != "organization" || o.str("fallback") != "markiro") throw LabelRenderException("invalid logo source")
@@ -69,7 +71,11 @@ object LabelSpecCodec {
             data = when (val source = o["data"]) {
                 is JsonObject -> BarcodeSource.Literal(source.str("literal"))
                 is JsonNull, null -> throw LabelRenderException("label spec is missing barcode data")
-                is JsonPrimitive -> BarcodeSource.Field(LabelField.fromWire(source.content))
+                is JsonPrimitive -> {
+                    val field = LabelField.fromWire(source.content)
+                    if (field == LabelField.LOT_NUMBER) throw LabelRenderException("lot number is a text field")
+                    BarcodeSource.Field(field)
+                }
                 else -> throw LabelRenderException("label spec barcode data is neither a field nor a literal")
             },
             sizeMm = o.num("sizeMm"), moduleWidthMm = o.numOrNull("moduleWidthMm"),
@@ -83,6 +89,17 @@ object LabelSpecCodec {
             widthMm = o.num("widthMm"), heightMm = o.num("heightMm"), thicknessMm = o.num("thicknessMm"),
         )
         else -> throw LabelRenderException("unknown label element kind: $kind")
+    }
+
+    private fun JsonObject.visibleWhen(): LabelField? {
+        val condition = get("when") ?: return null
+        if (condition !is JsonObject || condition.keys != setOf("field", "op") || condition.str("op") != "present") {
+            throw LabelRenderException("invalid label visibility condition")
+        }
+        return when (val field = LabelField.fromWire(condition.str("field"))) {
+            LabelField.LOT_NUMBER, LabelField.PRODUCT_EGAIS -> field
+            else -> throw LabelRenderException("invalid label visibility field")
+        }
     }
 
     /**

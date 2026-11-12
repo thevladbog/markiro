@@ -37,6 +37,7 @@ import app.markiro.handheld.core.signal.SignalKind
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaStore
+import app.markiro.handheld.core.storage.PalletPrint
 import app.markiro.handheld.core.sync.SyncEngine
 import app.markiro.handheld.core.sync.SyncTransport
 import app.markiro.handheld.feature.shift.ShiftEntityFixtures
@@ -53,6 +54,7 @@ import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -64,8 +66,8 @@ import org.junit.runner.RunWith
  * 06d's pallet strip, pallet-close screen and «Закрыть паллету досрочно» from
  * the `WorkViewModel` side. `ClosePalletTest` already covers the domain layer
  * (`CloseBox`/`ClosePallet`/`PalletRepository`) in isolation; this file checks
- * that the view model actually reads `CloseResult.Closed.pallet`, prints the
- * pallet's own label, and resets the strip -- none of which `ClosePalletTest`
+ * that the view model actually reads `CloseResult.Closed.pallet`, handles the
+ * two labels in order, and resets the strip -- none of which `ClosePalletTest`
  * can see, because it never touches `WorkViewModel`.
  */
 @RunWith(AndroidJUnit4::class)
@@ -210,15 +212,22 @@ class WorkViewModelPalletTest {
     }
 
     @Test
-    fun theLastBoxClosesThePalletTooWithItsOwnSignalAndPrint() = runTest {
+    fun theLastBoxClosesThePalletButDoesNotSendItsLabelAutomatically() = runTest {
         aggregatingWithPallets(palletBoxCapacity = 2)
         val vm = vm()
         advanceUntilIdle()
         scan("a")
         advanceUntilIdle()
         scan("b")
-        advanceUntilIdle()
+        vm.palletCloseStep.first { it is PalletCloseStep.ReadyToPrint || it is PalletCloseStep.Printed }
+        assertEquals("Only the two box labels may have been sent", 2, transport.sent)
+        scan("tooSoon")
+        vm.state.first { it.last?.blockedBy == ScanBlock.PACK_LABEL }
+        assertEquals(2, db.codeDao().countForShift("s1"))
+        vm.retryPalletPrint()
+        vm.retryPalletPrint()
         val step = vm.palletCloseStep.first { it is PalletCloseStep.Printed } as PalletCloseStep.Printed
+        assertEquals(3, transport.sent)
         assertEquals(2, step.pallet.boxCount)
         // Pallet completion mirrors box completion (brief 10 §6): the SAME
         // signal, never a new one. Two scans closed two boxes here, and only the
@@ -230,6 +239,56 @@ class WorkViewModelPalletTest {
         // The strip resets against the shift's own capacity rather than vanishing.
         val pallet = vm.state.first { it.pallet?.boxCount == 0 }.pallet!!
         assertEquals(2, pallet.capacity)
+    }
+
+    @Test
+    fun thePlanPromptWaitsForConfirmationOfTheFinalPalletLabel() = runTest {
+        aggregatingWithPallets(palletBoxCapacity = 1)
+        db.shiftDao().upsert(checkNotNull(db.shiftDao().get("s1")).copy(plannedQty = 1))
+        val vm = vm()
+        vm.state.first { it.plan == 1 }
+        scan("final")
+        vm.palletCloseStep.first { it is PalletCloseStep.ReadyToPrint }
+        vm.state.first { it.total == 1 }
+        advanceUntilIdle()
+        assertFalse(vm.planPrompt.value)
+        vm.retryPalletPrint()
+        val printed = vm.palletCloseStep.first { it is PalletCloseStep.Printed } as PalletCloseStep.Printed
+        assertEquals(PalletPrint.UNKNOWN, db.palletDao().get(printed.pallet.palletId)?.printState)
+        assertFalse(vm.planPrompt.value)
+        vm.confirmPalletPrinted()
+        assertTrue(vm.planPrompt.first { it })
+        assertEquals(PalletPrint.PRINTED, db.palletDao().get(printed.pallet.palletId)?.printState)
+    }
+
+    @Test
+    fun thePlanPromptWaitsForTheFinalBoxWhenNoPalletClosed() = runTest {
+        aggregatingWithPallets(palletBoxCapacity = 12)
+        db.shiftDao().upsert(checkNotNull(db.shiftDao().get("s1")).copy(plannedQty = 1))
+        val vm = vm()
+        vm.state.first { it.plan == 1 }
+        scan("final")
+        val printed = vm.closeStep.first { it is BoxCloseStep.Printed } as BoxCloseStep.Printed
+        assertTrue(printed.awaitingConfirmation)
+        assertFalse(vm.planPrompt.value)
+        vm.confirmPrinted()
+        assertTrue(vm.planPrompt.first { it })
+    }
+
+    @Test
+    fun deferringTheLastPalletKeepsThePlanPromptHiddenUntilRecovery() = runTest {
+        aggregatingWithPallets(palletBoxCapacity = 1)
+        db.shiftDao().upsert(checkNotNull(db.shiftDao().get("s1")).copy(plannedQty = 1))
+        val vm = vm()
+        vm.state.first { it.plan == 1 }
+        scan("final")
+        val ready = vm.palletCloseStep.first { it is PalletCloseStep.ReadyToPrint } as PalletCloseStep.ReadyToPrint
+        vm.deferPalletLabel()
+        vm.palletCloseStep.first { it == PalletCloseStep.Idle }
+        assertEquals(PalletPrint.DEFERRED, db.palletDao().get(ready.pallet.palletId)?.printState)
+        assertFalse(vm.planPrompt.value)
+        db.palletDao().setPrintState(ready.pallet.palletId, PalletPrint.PRINTED, null)
+        assertTrue(vm.planPrompt.first { it })
     }
 
     @Test
@@ -246,7 +305,7 @@ class WorkViewModelPalletTest {
         advanceUntilIdle()
         scan("a")
         advanceUntilIdle()
-        vm.palletCloseStep.first { it is PalletCloseStep.Printed }
+        vm.palletCloseStep.first { it is PalletCloseStep.ReadyToPrint }
         assertEquals(1, played.count { it == SignalKind.BOX_DONE })
     }
 
@@ -311,8 +370,8 @@ class WorkViewModelPalletTest {
         advanceUntilIdle()
         scan("a")
         advanceUntilIdle()
-        val step = vm.palletCloseStep.first { it is PalletCloseStep.Failed } as PalletCloseStep.Failed
-        assertEquals(PrintReason.PRINTER_UNCONFIGURED, step.reason)
+        vm.palletCloseStep.first { it is PalletCloseStep.ReadyToPrint }
+        assertEquals(PrintReason.PRINTER_UNCONFIGURED, (vm.closeStep.value as BoxCloseStep.Failed).reason)
         // Both the box that closed and the pallet it just filled are owed a label.
         assertEquals(2, vm.state.first { it.unprintedLabels == 2 }.unprintedLabels)
     }
@@ -325,10 +384,16 @@ class WorkViewModelPalletTest {
         advanceUntilIdle()
         scan("a")
         advanceUntilIdle()
+        vm.palletCloseStep.first { it is PalletCloseStep.ReadyToPrint }
+        vm.retryPalletPrint()
+        assertEquals("The box outcome is still unknown", 1, transport.sent)
+        vm.confirmPrinted()
+        vm.closeStep.first { it == BoxCloseStep.Idle }
+        vm.retryPalletPrint()
         vm.palletCloseStep.first { it is PalletCloseStep.Unknown }
         val sentSoFar = transport.sent
         vm.confirmPalletPrinted()
-        assertEquals(PalletCloseStep.Idle, vm.palletCloseStep.value)
+        vm.palletCloseStep.first { it == PalletCloseStep.Idle }
         // Confirming resolves it without sending anything more.
         assertEquals(sentSoFar, transport.sent)
     }
@@ -340,6 +405,10 @@ class WorkViewModelPalletTest {
         val vm = vm()
         advanceUntilIdle()
         scan("a")
+        vm.palletCloseStep.first { it is PalletCloseStep.ReadyToPrint }
+        vm.confirmPrinted()
+        vm.closeStep.first { it == BoxCloseStep.Idle }
+        vm.retryPalletPrint()
         val unknown = vm.palletCloseStep.first { it is PalletCloseStep.Unknown } as PalletCloseStep.Unknown
         db.printerDao().upsert(PrinterEntity("replacement", "Replacement", "wifi", "replacement:9100", "zpl", 203, false, null, null))
         transport.outcome = SendOutcome.Delivered
@@ -361,9 +430,10 @@ class WorkViewModelPalletTest {
         advanceUntilIdle()
         scan("a")
         advanceUntilIdle()
-        vm.palletCloseStep.first { it is PalletCloseStep.Failed }
+        vm.palletCloseStep.first { it is PalletCloseStep.ReadyToPrint }
+        vm.deferLabel()
         vm.deferPalletLabel()
-        assertEquals(PalletCloseStep.Idle, vm.palletCloseStep.value)
+        vm.palletCloseStep.first { it == PalletCloseStep.Idle }
         // The box is also owed (no printer at all), so 2 rather than 1.
         assertEquals(2, vm.state.first { it.unprintedLabels == 2 }.unprintedLabels)
     }

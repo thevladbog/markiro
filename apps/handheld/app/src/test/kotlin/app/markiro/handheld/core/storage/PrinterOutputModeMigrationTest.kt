@@ -30,9 +30,9 @@ class PrinterOutputModeMigrationTest {
         }
         original.close()
         val upgraded = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
-            .addMigrations(MIGRATION_25_26, MIGRATION_26_27).allowMainThreadQueries().build()
+            .addMigrations(MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28).allowMainThreadQueries().build()
         try {
-            assertEquals(27, upgraded.openHelper.readableDatabase.version)
+            assertEquals(28, upgraded.openHelper.readableDatabase.version)
             assertEquals(printer, upgraded.printerDao().get("p"))
             assertEquals(printer, upgraded.printerDao().destination("box", "box", "initial")?.printer)
             assertEquals("unknown", upgraded.boxDao().get("box")?.printState)

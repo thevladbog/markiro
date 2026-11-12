@@ -1,6 +1,8 @@
 package app.markiro.handheld.feature.work
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -57,17 +59,22 @@ private const val PRINTED_DWELL_MS = 1_000L
  * not to a box.
  */
 @Composable
-fun PalletCloseScreen(step: PalletCloseStep, cb: PalletCloseCallbacks, destinationLabel: String? = null) {
+fun PalletCloseScreen(
+    step: PalletCloseStep,
+    cb: PalletCloseCallbacks,
+    destinationLabel: String? = null,
+    confirmDelivery: Boolean = false,
+) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    if (step is PalletCloseStep.Printed) {
+    if (step is PalletCloseStep.Printed && !confirmDelivery) {
         LaunchedEffect(step) {
             kotlinx.coroutines.delay(PRINTED_DWELL_MS)
             cb.onDismiss()
         }
     }
     Column(
-        Modifier.fillMaxSize().background(c.surfacePage).padding(MarkiroSizes.sp4),
+        Modifier.fillMaxSize().background(c.surfacePage).verticalScroll(rememberScrollState()).padding(MarkiroSizes.sp4),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -76,6 +83,15 @@ fun PalletCloseScreen(step: PalletCloseStep, cb: PalletCloseCallbacks, destinati
         when (step) {
             PalletCloseStep.Idle -> Unit
             is PalletCloseStep.Refused -> Refused(step.reason, cb)
+            is PalletCloseStep.ReadyToPrint -> {
+                Header(step.pallet)
+                Text(stringResource(R.string.pallet_wait_for_box_label), style = t.body, color = c.fg2, textAlign = TextAlign.Center)
+                Spacer(Modifier.size(MarkiroSizes.sp4))
+                Actions {
+                    PrimaryButton(stringResource(R.string.pallet_print_label), cb.onRetry)
+                    MarkiroTextButton(stringResource(R.string.box_close_defer), cb.onDefer)
+                }
+            }
             is PalletCloseStep.Printing -> {
                 Header(step.pallet)
                 CircularProgressIndicator(color = c.accent)
@@ -84,7 +100,17 @@ fun PalletCloseScreen(step: PalletCloseStep, cb: PalletCloseCallbacks, destinati
             }
             is PalletCloseStep.Printed -> {
                 Header(step.pallet)
-                Text(stringResource(R.string.box_close_printed), style = t.title, color = c.tone(Tone.Ok).fg)
+                if (confirmDelivery) {
+                    Text(stringResource(R.string.pack_confirm_label), style = t.body, color = c.fg2, textAlign = TextAlign.Center)
+                    Spacer(Modifier.size(MarkiroSizes.sp4))
+                    Actions {
+                        PrimaryButton(stringResource(R.string.box_close_confirm_printed), cb.onConfirmPrinted)
+                        SecondaryButton(stringResource(R.string.box_close_print_again), cb.onRetry)
+                        MarkiroTextButton(stringResource(R.string.box_close_defer), cb.onDefer)
+                    }
+                } else {
+                    Text(stringResource(R.string.box_close_printed), style = t.title, color = c.tone(Tone.Ok).fg)
+                }
             }
             is PalletCloseStep.Failed -> {
                 Header(step.pallet)

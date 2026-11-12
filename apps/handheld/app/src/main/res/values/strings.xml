@@ -464,6 +464,10 @@
     <string name="box_refused_invalid_serial">Номер не подошёл под префикс</string>
     <string name="box_refused_invalid_serial_hint">Короб остался открытым. Попробуйте закрыть ещё раз.</string>
     <string name="box_refused_dismiss">Понятно</string>
+    <string name="pallet_wait_for_box_label">Если этикетка короба ещё печатается, дождитесь её выхода.</string>
+    <string name="pallet_print_label">Печать этикетки палета</string>
+    <string name="pack_confirm_label">Подтвердите, когда этикетка выйдет из принтера.</string>
+    <string name="work_pack_label_pending">Завершите печать этикетки и отсканируйте код снова.</string>
     <string name="pallet_close_title">Палет закрыт</string>
     <string name="pallet_close_boxes">%1$d коробов</string>
     <string name="pallet_refused_empty">В палете нет коробов</string>
@@ -1039,6 +1043,8 @@
     <string name="shift_create_mode_choose">Выбрать режим</string>
     <string name="shift_create_date">Дата смены</string>
     <string name="shift_create_production_date">Дата производства</string>
+    <string name="shift_create_lot_number">Номер партии (необязательно)</string>
+    <string name="shift_create_lot_number_invalid">Введите русские или латинские буквы и цифры без пробелов внутри номера.</string>
     <string name="shift_create_plan">План, шт.</string>
     <string name="shift_create_no_plan">Без плана</string>
     <string name="shift_create_plan_hint">Введите целое число от 1 до 10 000 000.</string>

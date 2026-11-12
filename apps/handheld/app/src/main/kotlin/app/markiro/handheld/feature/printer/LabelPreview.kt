@@ -24,6 +24,7 @@ import app.markiro.handheld.core.label.BarcodeSource
 import app.markiro.handheld.core.label.LabelElement
 import app.markiro.handheld.core.label.LabelField
 import app.markiro.handheld.core.label.LabelSpec
+import app.markiro.handheld.core.label.isVisible
 import app.markiro.handheld.core.label.labelFieldDisplayValue
 import app.markiro.handheld.core.label.ptToMm
 
@@ -60,6 +61,7 @@ fun LabelPreview(spec: LabelSpec, data: Map<LabelField, String>, modifier: Modif
             }
 
             for (element in spec.elements) {
+                if (!element.isVisible(data)) continue
                 when (element) {
                     is LabelElement.OrganizationLogo -> {
                         if (logo != null) {

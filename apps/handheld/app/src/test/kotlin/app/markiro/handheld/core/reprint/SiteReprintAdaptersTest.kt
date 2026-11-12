@@ -18,6 +18,18 @@ class SiteReprintAdaptersTest {
             assertEquals(response.getValue("source").toString(), source.source.sourceJson)
         }
     }
+    @Test fun hostKeepsTheHistoricalLotWithThePalletPrintFields() {
+        val response = fixture("warehouse-lookup-found-pallet.json")
+        val snapshot = response.getValue("source").jsonObject
+        val sscc = snapshot.getValue("sscc").jsonPrimitive.content
+        val lot = "0042Бк07AЁ"
+        val lotResponse = JsonObject(response + ("source" to JsonObject(snapshot + ("lotNumber" to JsonPrimitive(lot)))))
+        val withLot = HostSiteReprintBackend.decodeLookup(sscc, lotResponse) as SiteReprintLookup.Found
+        val withoutLot = HostSiteReprintBackend.decodeLookup(sscc, response) as SiteReprintLookup.Found
+        assertEquals(lot, withLot.source.fields["shift.lotNumber"])
+        assertEquals("", withoutLot.source.fields["shift.lotNumber"])
+    }
+
     @Test fun hostRefusesFullCodeWithDifferentCryptoOrMismatchedIdentity() {
         val response = fixture("warehouse-lookup-found-unit.json")
         val canonical = response.getValue("source").jsonObject.getValue("canonical").jsonPrimitive.content
@@ -71,7 +83,7 @@ class SiteReprintAdaptersTest {
         val sscc="046006820000015000"
         val body=buildJsonObject {
             put("kind","box");put("sourceId",id);put("identity",sscc);put("productName","Milk");put("chzProductGroupCode",JsonNull)
-            put("fields",buildJsonObject { for(field in app.markiro.handheld.core.label.LabelField.entries) put(field.wire,if(field.wire=="sscc") sscc else "") })
+            put("fields",buildJsonObject { for(field in app.markiro.handheld.core.label.LabelField.entries.filter { it.wire != "shift.lotNumber" }) put(field.wire,if(field.wire=="sscc") sscc else "") })
             put("sourceShiftId",JsonNull);put("payloadDigest","a".repeat(64));put("unavailableFields",JsonArray(listOf(JsonPrimitive("expiry"))))
         }
         val source=JsonObject(body+("revision" to JsonPrimitive(reprintDigest(body))))

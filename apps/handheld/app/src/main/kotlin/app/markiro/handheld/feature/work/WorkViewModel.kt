@@ -83,6 +83,9 @@ enum class ScanBlock {
     BOX_FULL,
 
     SET_MEMBERSHIP,
+
+    /** A box or pallet close still needs the operator at the printer. */
+    PACK_LABEL,
 }
 
 data class LastScan(
@@ -113,7 +116,7 @@ data class ClosedBoxUi(val boxId: String, val ordinal: Int, val sscc: String, va
 sealed interface BoxCloseStep {
     data object Idle : BoxCloseStep
     data class Printing(val box: ClosedBoxUi) : BoxCloseStep
-    data class Printed(val box: ClosedBoxUi) : BoxCloseStep
+    data class Printed(val box: ClosedBoxUi, val awaitingConfirmation: Boolean = false) : BoxCloseStep
     data class Failed(val box: ClosedBoxUi, val reason: String) : BoxCloseStep
 
     /** The link broke partway. Nothing resends from here without a person. */
@@ -141,18 +144,10 @@ data class PalletConfirm(val boxCount: Int, val capacity: Int)
 /** The closed pallet a print state is about, carried so no step has to look it up again. */
 data class ClosedPalletUi(val palletId: String, val sscc: String, val boxCount: Int)
 
-/**
- * What the full-screen pallet-close state is showing.
- *
- * Mirrors `BoxCloseStep` exactly (brief 10 §6: pallet completion mirrors box
- * completion) rather than folding into it, because a pallet close can arrive
- * WHILE a box close is already on screen -- the same scan that fills the last
- * box of a pallet closes both -- and the two are independent full-screen
- * states the operator reads one after the other, not one state with two
- * meanings.
- */
+/** A closed pallet can wait for its preceding box label before its own print starts. */
 sealed interface PalletCloseStep {
     data object Idle : PalletCloseStep
+    data class ReadyToPrint(val pallet: ClosedPalletUi) : PalletCloseStep
     data class Printing(val pallet: ClosedPalletUi) : PalletCloseStep
     data class Printed(val pallet: ClosedPalletUi) : PalletCloseStep
     data class Failed(val pallet: ClosedPalletUi, val reason: String) : PalletCloseStep
@@ -165,6 +160,7 @@ sealed interface PalletCloseStep {
 
     /** The pallet this step is about, or null when none closed. */
     fun closedPallet(): ClosedPalletUi? = when (this) {
+        is ReadyToPrint -> pallet
         is Printing -> pallet
         is Printed -> pallet
         is Failed -> pallet
@@ -346,6 +342,7 @@ class WorkViewModel(
     val palletCloseStep: StateFlow<PalletCloseStep> = _palletCloseStep
 
     private val scanActionMutex = Mutex()
+    private val handlingWork = MutableStateFlow(false)
     private val _duplicateStep = MutableStateFlow<DuplicateStep>(DuplicateStep.Idle)
     val duplicateStep: StateFlow<DuplicateStep> = _duplicateStep
     private val duplicateUi = MutableStateFlow<DuplicateUi?>(null)
@@ -362,18 +359,23 @@ class WorkViewModel(
 
     private val unprintedLabels = combine(boxes.observeUnprintedCount(), pallets.observeUnprintedCount()) { b, p -> b + p }
 
-    /**
-     * Offered once, when the shift's accepted count crosses its plan.
-     *
-     * Deliberately a crossing and not «total >= plan»: entering a shift that is
-     * already over plan is not the moment anyone wants to be asked, and a plain
-     * comparison would raise this again on every scan after the first. Scanning
-     * is never blocked -- the prompt sits over the screen while the router keeps
-     * recording, because a line does not stop for a dialogue.
-     */
-    private val _planPrompt = MutableStateFlow(false)
-    val planPrompt: StateFlow<Boolean> = _planPrompt
+    // Latch the crossing even if the same scan is still closing a box or pallet.
+    private val _planPending = MutableStateFlow(false)
     private var belowPlanSeen = false
+
+    private val printStepsIdle = combine(closeStep, palletCloseStep, duplicateStep) { box, pallet, duplicate ->
+        box == BoxCloseStep.Idle && pallet == PalletCloseStep.Idle && duplicate == DuplicateStep.Idle
+    }
+
+    private val shiftLabelDebt = combine(
+        db.boxDao().observeUnprintedCountForShift(shiftId),
+        db.palletDao().observeUnprintedCountForShift(shiftId),
+        db.productLabelJobDao().observeOpen(shiftId),
+    ) { boxes, pallets, duplicate -> boxes > 0 || pallets > 0 || duplicate != null }
+
+    val planPrompt = combine(_planPending, handlingWork, printStepsIdle, shiftLabelDebt) { reached, working, idle, owed ->
+        reached && !working && idle && !owed
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     /** [lost]: this shift's own codes the host answered `conflict` or `rejected` (`CodeDao.lostForShift`), which `SharedShiftRules` must not count twice. */
     private data class Counters(val mine: Int, val errors: Int, val duplicates: Int, val lost: Int)
@@ -510,7 +512,7 @@ class WorkViewModel(
                     belowPlanSeen = true
                 } else if (belowPlanSeen) {
                     belowPlanSeen = false
-                    _planPrompt.value = true
+                    _planPending.value = true
                 }
             }
         } }
@@ -530,14 +532,24 @@ class WorkViewModel(
     }
 
     fun dismissPlanPrompt() {
-        _planPrompt.value = false
+        _planPending.value = false
     }
 
-    private suspend fun onScan(raw: String) = scanActionMutex.withLock { handleScan(raw) }
+    private suspend fun onScan(raw: String) = printAwareWork { handleScan(raw) }
+
+    private suspend fun printAwareWork(action: suspend () -> Unit) = scanActionMutex.withLock {
+        handlingWork.value = true
+        try {
+            action()
+        } finally {
+            handlingWork.value = false
+        }
+    }
 
     private suspend fun handleScan(raw: String) {
         val shift = db.shiftDao().get(shiftId) ?: return
         if (shift.productGtin14 == null || shift.status == "closed") return
+        if (refuseScanWhileLabelIsOpen()) return
         if (shift.setItemsJson != null) {
             val operator = session.state.value
             val operatorId = operator.operator?.operatorId ?: return
@@ -591,6 +603,7 @@ class WorkViewModel(
                 signals.play(SignalKind.ERROR)
                 return
             }
+            if (refuseScanWhileLabelIsOpen()) return
             box = boxes.currentBox(shiftId)
         }
         val outcome = recorder.record(shift, raw, operatorId, box?.boxId)
@@ -611,6 +624,16 @@ class WorkViewModel(
             printDuplicate(shift, raw, outcome.scannedAt)
         }
     }
+
+    private fun refuseScanWhileLabelIsOpen(): Boolean {
+        if (!awaitingPrintConfirmation()) return false
+        last.value = LastScan(Verdict.OK, BLOCKED_TAIL, null, Iso.format(System.currentTimeMillis()), blockedBy = ScanBlock.PACK_LABEL)
+        signals.play(SignalKind.ERROR)
+        return true
+    }
+
+    private fun awaitingPrintConfirmation(): Boolean =
+        _palletCloseStep.value.closedPallet() != null || (_closeStep.value as? BoxCloseStep.Printed)?.awaitingConfirmation == true
 
     /**
      * The open pallet, or the one the next box will join (06d).
@@ -637,8 +660,11 @@ class WorkViewModel(
         if (!closing.compareAndSet(false, true)) return
         viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) {
             try {
-                val shift = db.shiftDao().get(shiftId) ?: return@work
-                closeAndPrint(shift)
+                printAwareWork {
+                    if (awaitingPrintConfirmation()) return@printAwareWork
+                    val shift = db.shiftDao().get(shiftId) ?: return@printAwareWork
+                    closeAndPrint(shift)
+                }
             } finally {
                 closing.set(false)
             }
@@ -685,21 +711,18 @@ class WorkViewModel(
                 // The box's own membership join already happened inside `closer.close`
                 // (06d); this only refreshes the strip's numbers to match.
                 showCurrentPallet()
-                _closeStep.value = attempt(closed)
+                val boxPrint = attempt(closed, confirmDelivery = !palletAlsoClosed && boxLabelNeedsConfirmation())
+                if (boxPrint !is BoxCloseStep.Printed || !palletAlsoClosed) _closeStep.value = boxPrint
                 // The closure is queued the moment the box closes, whatever the
                 // printer did: the label is a separate debt.
                 sync.nudge()
-                // A box that fills the shift's pallet closes it too, as part of the
-                // SAME close (`CloseBox`'s own contract) -- one outcome for one scan,
-                // never a box confirmation followed by a separate, easy-to-miss
-                // pallet event. `result.pallet` is null when this box did not bring
-                // any pallet to capacity; anything else means one attempted to close
-                // and either did (`Closed`, its own signal already played above) or
-                // refused for a reason the operator must see -- a dry pool here is
-                // otherwise completely silent, because the BOX still closed and
-                // printed just fine.
+                // Closing the last box still closes the pallet durably. The
+                // operator starts its label after the box label has come out.
                 when (val palletResult = result.pallet) {
-                    is ClosePalletResult.Closed -> handleClosedPallet(palletResult)
+                    is ClosePalletResult.Closed -> {
+                        handleClosedPallet(palletResult, afterBox = true)
+                        if (boxPrint is BoxCloseStep.Printed) _closeStep.value = BoxCloseStep.Idle
+                    }
                     null -> Unit
                     else -> _palletCloseStep.value = PalletCloseStep.Refused(palletResult)
                 }
@@ -712,8 +735,26 @@ class WorkViewModel(
         }
     }
 
-    private suspend fun attempt(closed: ClosedBoxUi, replacementPrinterId: String? = null, explicitRetry: Boolean = false): BoxCloseStep = when (val printed = boxPrinter.print(closed.boxId, replacementPrinterId, allowUnknown = explicitRetry)) {
-        PrintOutcome.Printed -> BoxCloseStep.Printed(closed)
+    private suspend fun boxLabelNeedsConfirmation(): Boolean {
+        if (_planPending.value) return true
+        val plan = state.value.plan?.takeIf { it > 0 && belowPlanSeen } ?: return false
+        // The scan transaction may have reached the plan before the observed count updates.
+        val mine = db.codeDao().countForShift(shiftId)
+        val figures = ShiftParticipationStore(db).get(shiftId)
+        val total = SharedShiftRules.strip(figures, mine, plan, db.codeDao().lostForShift(shiftId))?.total
+            ?: maxOf(state.value.team?.acceptedUnits ?: 0, mine)
+        return total >= plan
+    }
+
+    private suspend fun attempt(
+        closed: ClosedBoxUi,
+        replacementPrinterId: String? = null,
+        explicitRetry: Boolean = false,
+        confirmDelivery: Boolean = false,
+    ): BoxCloseStep = when (val printed = boxPrinter.print(
+        closed.boxId, replacementPrinterId, allowUnknown = explicitRetry, confirmDelivery = confirmDelivery,
+    )) {
+        PrintOutcome.Printed -> BoxCloseStep.Printed(closed, awaitingConfirmation = confirmDelivery)
         is PrintOutcome.Failed -> BoxCloseStep.Failed(closed, printed.reason)
         is PrintOutcome.Unknown -> BoxCloseStep.Unknown(closed, printed.cause)
     }
@@ -738,16 +779,19 @@ class WorkViewModel(
         if (!closingPallet.compareAndSet(false, true)) return
         viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) {
             try {
-                val shift = db.shiftDao().get(shiftId) ?: return@work
-                when (
-                    val result = closePallet.close(
-                        shiftId,
-                        shift.ssccIssuerPrefix,
-                        session.state.value.operator?.operatorId,
-                    )
-                ) {
-                    is ClosePalletResult.Closed -> handleClosedPallet(result)
-                    else -> _palletCloseStep.value = PalletCloseStep.Refused(result)
+                printAwareWork {
+                    if (awaitingPrintConfirmation()) return@printAwareWork
+                    val shift = db.shiftDao().get(shiftId) ?: return@printAwareWork
+                    when (
+                        val result = closePallet.close(
+                            shiftId,
+                            shift.ssccIssuerPrefix,
+                            session.state.value.operator?.operatorId,
+                        )
+                    ) {
+                        is ClosePalletResult.Closed -> handleClosedPallet(result, afterBox = false)
+                        else -> _palletCloseStep.value = PalletCloseStep.Refused(result)
+                    }
                 }
             } finally {
                 closingPallet.set(false)
@@ -755,66 +799,75 @@ class WorkViewModel(
         } }
     }
 
-    /**
-     * Pallet completion mirrors box completion (brief 10 §6): the SAME signal
-     * and its short-short vibration, never a new one, and the same
-     * printing-then-owed-label shape as a box's own close.
-     */
-    private suspend fun handleClosedPallet(result: ClosePalletResult.Closed) {
+    private suspend fun handleClosedPallet(result: ClosePalletResult.Closed, afterBox: Boolean) {
         signals.play(SignalKind.BOX_DONE)
         val closed = ClosedPalletUi(palletId = result.pallet.palletId, sscc = result.sscc, boxCount = result.boxCount)
-        _palletCloseStep.value = PalletCloseStep.Printing(closed)
-        // The strip resets against the shift's own capacity rather than vanishing.
+        if (afterBox) {
+            _palletCloseStep.value = PalletCloseStep.ReadyToPrint(closed)
+        } else {
+            _palletCloseStep.value = PalletCloseStep.Printing(closed)
+            _palletCloseStep.value = attemptPalletPrint(closed)
+        }
         showCurrentPallet()
-        _palletCloseStep.value = attemptPalletPrint(closed)
         sync.nudge()
     }
 
     private suspend fun attemptPalletPrint(closed: ClosedPalletUi, replacementPrinterId: String? = null, explicitRetry: Boolean = false): PalletCloseStep =
-        when (val printed = palletPrinter.print(closed.palletId, replacementPrinterId, allowUnknown = explicitRetry)) {
+        when (val printed = palletPrinter.print(closed.palletId, replacementPrinterId, allowUnknown = explicitRetry, confirmDelivery = true)) {
             PrintOutcome.Printed -> PalletCloseStep.Printed(closed)
             is PrintOutcome.Failed -> PalletCloseStep.Failed(closed, printed.reason)
             is PrintOutcome.Unknown -> PalletCloseStep.Unknown(closed, printed.cause)
         }
 
-    /** An explicit second send, chosen by a person who has looked at the printer. */
-    private val retryingPallet = AtomicBoolean(false)
+    /** Starts a pending label or retries a label the operator has checked. */
     fun retryPalletPrint(replacementPrinterId: String? = null) {
-        val closed = _palletCloseStep.value.closedPallet() ?: return
-        if (!retryingPallet.compareAndSet(false, true)) return
-        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) {
-            try {
-                val row = db.palletDao().get(closed.palletId)
-                if (row?.printState == app.markiro.handheld.core.storage.PalletPrint.UNKNOWN) {
-                    exceptions.reprintPallet(row.shiftId, row.palletId, ReprintReason.PRINT_OUTCOME_UNKNOWN,
-                        session.state.value.operator?.operatorId, db.deviceConfigDao().get()?.deviceId)
-                }
-                _palletCloseStep.value = PalletCloseStep.Printing(closed)
-                _palletCloseStep.value = attemptPalletPrint(closed, replacementPrinterId, explicitRetry = true)
-            } finally {
-                retryingPallet.set(false)
+        val step = _palletCloseStep.value
+        if (step is PalletCloseStep.Printing) return
+        val closed = step.closedPallet() ?: return
+        launchPrintAction {
+            if (_palletCloseStep.value !== step) return@launchPrintAction
+            if (_closeStep.value != BoxCloseStep.Idle) return@launchPrintAction
+            _palletCloseStep.value = PalletCloseStep.Printing(closed)
+            val row = db.palletDao().get(closed.palletId)
+            if (row?.printState == app.markiro.handheld.core.storage.PalletPrint.UNKNOWN) {
+                exceptions.reprintPallet(row.shiftId, row.palletId, ReprintReason.PRINT_OUTCOME_UNKNOWN,
+                    session.state.value.operator?.operatorId, db.deviceConfigDao().get()?.deviceId)
             }
-        } }
-    }
-
-    /** The operator looked at the printer and says the label is there. Nothing is sent. */
-    fun confirmPalletPrinted() {
-        val closed = _palletCloseStep.value.closedPallet()
-        _palletCloseStep.value = PalletCloseStep.Idle
-        if (closed != null) {
-            viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) { palletPrinter.resolveUnknownAsPrinted(closed.palletId) } }
+            _palletCloseStep.value = attemptPalletPrint(closed, replacementPrinterId, explicitRetry = step !is PalletCloseStep.ReadyToPrint)
         }
     }
 
-    /** Set aside for later, so a dead printer does not stop the line. */
+    /** The operator has the physical label. Nothing is sent. */
+    fun confirmPalletPrinted() {
+        val step = _palletCloseStep.value
+        if (step !is PalletCloseStep.Printed && step !is PalletCloseStep.Unknown) return
+        val closed = step.closedPallet() ?: return
+        launchPrintAction {
+            if (_palletCloseStep.value !== step) return@launchPrintAction
+            palletPrinter.resolveUnknownAsPrinted(closed.palletId)
+            _palletCloseStep.value = PalletCloseStep.Idle
+        }
+    }
+
+    /** The outstanding label stays in the device's queue. */
     fun deferPalletLabel() {
-        val closed = _palletCloseStep.value.closedPallet()
-        _palletCloseStep.value = PalletCloseStep.Idle
-        if (closed != null) viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) { palletPrinter.defer(closed.palletId) } }
+        val step = _palletCloseStep.value
+        if (step is PalletCloseStep.Printing) return
+        val closed = step.closedPallet() ?: return
+        launchPrintAction {
+            if (_palletCloseStep.value !== step) return@launchPrintAction
+            palletPrinter.defer(closed.palletId)
+            _palletCloseStep.value = PalletCloseStep.Idle
+        }
+    }
+
+    private fun launchPrintAction(action: suspend () -> Unit) {
+        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) { printAwareWork(action) } }
     }
 
     fun dismissPalletClose() {
-        _palletCloseStep.value = PalletCloseStep.Idle
+        val step = _palletCloseStep.value
+        if (step is PalletCloseStep.Refused) _palletCloseStep.compareAndSet(step, PalletCloseStep.Idle)
     }
 
     /**
@@ -854,22 +907,19 @@ class WorkViewModel(
 
     /** An explicit second send, chosen by a person who has looked at the printer. */
     fun retryPrint(replacementPrinterId: String? = null) {
-        val closed = _closeStep.value.closedBox() ?: return
-        // Two taps would both read the same `unknown` state before the first
-        // print updated it, and each would write its own reprint fact.
-        if (!retrying.compareAndSet(false, true)) return
-        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) {
-            try {
-                auditIfOutcomeUnknown(closed.boxId)
-                _closeStep.value = BoxCloseStep.Printing(closed)
-                _closeStep.value = attempt(closed, replacementPrinterId, explicitRetry = true)
-            } finally {
-                retrying.set(false)
-            }
-        } }
+        val step = _closeStep.value
+        if (step is BoxCloseStep.Printing) return
+        val closed = step.closedBox() ?: return
+        launchPrintAction {
+            if (_closeStep.value !== step) return@launchPrintAction
+            _closeStep.value = BoxCloseStep.Printing(closed)
+            auditIfOutcomeUnknown(closed.boxId)
+            _closeStep.value = attempt(
+                closed, replacementPrinterId, explicitRetry = true,
+                confirmDelivery = _palletCloseStep.value !is PalletCloseStep.ReadyToPrint && boxLabelNeedsConfirmation(),
+            )
+        }
     }
-
-    private val retrying = AtomicBoolean(false)
 
     /**
      * Printing again a box whose last attempt ended `unknown` is an explicit
@@ -892,29 +942,34 @@ class WorkViewModel(
         )
     }
 
-    /**
-     * The operator looked at the printer and says the label is there. Nothing is
-     * sent.
-     *
-     * The screen goes first and the row is updated behind it: a person who has
-     * just answered a question should not wait on a database write, and the write
-     * is idempotent either way.
-     */
+    /** The operator has the physical label. Nothing is sent. */
     fun confirmPrinted() {
-        val closed = _closeStep.value.closedBox()
-        _closeStep.value = BoxCloseStep.Idle
-        if (closed != null) viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) { boxPrinter.resolveUnknownAsPrinted(closed.boxId) } }
+        val step = _closeStep.value
+        if (step !is BoxCloseStep.Printed && step !is BoxCloseStep.Unknown) return
+        val closed = step.closedBox() ?: return
+        launchPrintAction {
+            if (_closeStep.value !== step) return@launchPrintAction
+            boxPrinter.resolveUnknownAsPrinted(closed.boxId)
+            _closeStep.value = BoxCloseStep.Idle
+        }
     }
 
     /** Set aside for later, so a dead printer does not stop the line. */
     fun deferLabel() {
-        val closed = _closeStep.value.closedBox()
-        _closeStep.value = BoxCloseStep.Idle
-        if (closed != null) viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) { boxPrinter.defer(closed.boxId) } }
+        val step = _closeStep.value
+        if (step is BoxCloseStep.Printing) return
+        val closed = step.closedBox() ?: return
+        launchPrintAction {
+            if (_closeStep.value !== step) return@launchPrintAction
+            boxPrinter.defer(closed.boxId)
+            _closeStep.value = BoxCloseStep.Idle
+        }
     }
 
-    fun dismissClose() {
-        _closeStep.value = BoxCloseStep.Idle
+    fun dismissClose(step: BoxCloseStep = _closeStep.value) {
+        if (step is BoxCloseStep.Refused || (step is BoxCloseStep.Printed && !step.awaitingConfirmation)) {
+            if (_closeStep.value === step) _closeStep.value = BoxCloseStep.Idle
+        }
     }
 
     private fun ScanOutcome.toLastScan(raw: String) = LastScan(

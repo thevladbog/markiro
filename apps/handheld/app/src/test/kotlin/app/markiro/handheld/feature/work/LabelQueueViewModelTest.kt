@@ -303,6 +303,28 @@ class LabelQueueViewModelTest {
     }
 
     @Test
+    fun bulkRecoveryKeepsActiveShiftLabelsOwedUntilTheOperatorSeesThem() = runTest {
+        val config = checkNotNull(db.deviceConfigDao().get())
+        db.deviceConfigDao().upsert(config.copy(activeShiftId = "s1"))
+        box("b1", "046800899000000018", BoxPrint.DEFERRED)
+        pallet("p1", "146800899000000012", PalletPrint.PENDING)
+        val vm = model()
+        vm.state.first { it.items.size == 2 }
+        vm.printAll()
+        vm.state.first { it.printing }
+        vm.state.first { !it.printing }
+
+        assertEquals(2, transport.printed.size)
+        assertEquals(BoxPrint.UNKNOWN, db.boxDao().get("b1")?.printState)
+        assertEquals(PalletPrint.UNKNOWN, db.palletDao().get("p1")?.printState)
+
+        vm.resolveUnknown("b1")
+        vm.resolveUnknown("p1")
+        vm.state.first { it.items.isEmpty() }
+        assertEquals(2, transport.printed.size)
+    }
+
+    @Test
     fun resolvingAnUnknownPalletSendsNothing() = runTest {
         pallet("p1", "146800899000000012", PalletPrint.UNKNOWN)
         val vm = model()

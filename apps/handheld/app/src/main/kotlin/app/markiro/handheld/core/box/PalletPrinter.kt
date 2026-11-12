@@ -41,16 +41,24 @@ class PalletPrinter(
     private val renderer: LabelRenderer,
     private val transport: PrinterTransport,
 ) {
-    suspend fun print(palletId: String, replacementPrinterId: String? = null, allowUnknown: Boolean = false, reprint: Boolean = false): PrintOutcome = db.recovery.printing {
+    suspend fun print(
+        palletId: String,
+        replacementPrinterId: String? = null,
+        allowUnknown: Boolean = false,
+        reprint: Boolean = false,
+        confirmDelivery: Boolean = false,
+    ): PrintOutcome = db.recovery.printing {
         if (replacementPrinterId != null) {
             val replacement = db.printerDao().get(replacementPrinterId)
                 ?: return@printing PrintOutcome.Failed(PrintReason.PRINTER_UNCONFIGURED)
             PrintDestinations(db).replace(PrintPurpose.PALLET, palletId, "initial", replacement)
         }
-        printOwned(palletId, allowUnknown, reprint, replacementPrinterId != null)
+        printOwned(palletId, allowUnknown, reprint, replacementPrinterId != null, confirmDelivery)
     }
 
-    private suspend fun printOwned(palletId: String, allowUnknown: Boolean, reprint: Boolean, replaced: Boolean): PrintOutcome {
+    private suspend fun printOwned(
+        palletId: String, allowUnknown: Boolean, reprint: Boolean, replaced: Boolean, confirmDelivery: Boolean,
+    ): PrintOutcome {
         val pallet = db.palletDao().get(palletId) ?: return fail(palletId, PrintReason.PALLET_MISSING)
         if (pallet.printState == PalletPrint.PRINTED && !reprint && !replaced) return PrintOutcome.Printed
         if (pallet.printState == PalletPrint.UNKNOWN && !allowUnknown) return PrintOutcome.Unknown(pallet.printReason ?: "interrupted")
@@ -68,6 +76,7 @@ class PalletPrinter(
         val template = app.markiro.handheld.core.print.PrintTemplateStore(db).forPrint(
             PrintPurpose.PALLET, palletId, ready.templateJson, productId,
             productId?.let { db.palletProductDao().byId(it)?.chzProductGroupCode },
+            requiresLotNumber = ready.lotNumber != null,
             recoverUnsent = pallet.printState in setOf(PalletPrint.FAILED, PalletPrint.DEFERRED) && pallet.printReason in setOf(PrintReason.TEMPLATE_INVALID, PrintReason.TEMPLATE_INCOMPATIBLE),
         )
         template.reason?.let { return fail(palletId, it) }
@@ -115,7 +124,10 @@ class PalletPrinter(
         }
         return when (val outcome = transport.sendRemembered(printer, document, db.printerDao(), db.recovery)) {
             SendOutcome.Delivered -> {
-                pallets.setPrintState(palletId, PalletPrint.PRINTED, null)
+                // A socket delivery cannot tell whether paper came out. Keep the
+                // label recoverable, without an automatic resend, until confirmed.
+                val state = if (confirmDelivery) PalletPrint.UNKNOWN else PalletPrint.PRINTED
+                pallets.setPrintState(palletId, state, PrintReason.AWAITING_CONFIRMATION.takeIf { confirmDelivery })
                 PrintOutcome.Printed
             }
             is SendOutcome.Refused -> fail(palletId, outcome.reason.wire())
@@ -140,6 +152,7 @@ class PalletPrinter(
             val templateJson: String?,
             val input: (boxCount: Int, itemCount: Int) -> PalletLabelInput,
             val omitDates: Boolean,
+            val lotNumber: String? = null,
         ) : Source
 
         data class Refused(val reason: String) : Source
@@ -166,9 +179,11 @@ class PalletPrinter(
                     closedAt = closedAt,
                     productionDate = shift.productionDate,
                     shiftNumber = shift.number,
+                    lotNumber = shift.lotNumber,
                 )
             },
             omitDates = false,
+            lotNumber = shift.lotNumber,
         )
     }
 

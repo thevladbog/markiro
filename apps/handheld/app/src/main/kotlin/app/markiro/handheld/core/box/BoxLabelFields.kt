@@ -31,6 +31,7 @@ data class BoxLabelInput(
     val closedAt: String,
     val productionDate: String?,
     val shiftNumber: String?,
+    val lotNumber: String? = null,
 )
 
 private val ISO_DATE = Regex("^(\\d{4})-(\\d{2})-(\\d{2})$")
@@ -141,5 +142,5 @@ fun boxLabelFields(input: BoxLabelInput, zone: ZoneId = ZoneId.systemDefault()):
         LabelField.QTY_BOXES to "",
         LabelField.OPERATOR to (input.operatorName ?: ""),
         LabelField.COUNTERPARTY_NAME to (input.counterpartyName ?: ""),
-    )
+    ) + input.lotNumber?.let { mapOf(LabelField.LOT_NUMBER to it) }.orEmpty()
 }

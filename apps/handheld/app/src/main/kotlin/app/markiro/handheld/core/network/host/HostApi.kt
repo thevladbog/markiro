@@ -103,10 +103,10 @@ class HostApi(private val transport: HostTransport, private val json: Json = Jso
     suspend fun shifts(): Result<DeviceShiftsDto> = parse(transport.get("/v1/device/shifts"), DeviceShiftsDto.serializer())
 
     suspend fun shiftCreateOptions(): Result<ShiftCreateOptionsDto> =
-        parse(transport.get("/v1/device/shift-create-options"), ShiftCreateOptionsDto.serializer())
+        parse(transport.get("/v1/device/shift-create-options?lotNumbers=1"), ShiftCreateOptionsDto.serializer())
 
     suspend fun createShift(request: HostShiftCreateRequest): Result<DeviceShiftDto> =
-        parse(transport.post("/v1/device/shifts", json.encodeToString(HostShiftCreateRequest.serializer(), request)), DeviceShiftDto.serializer())
+        parse(transport.post("/v1/device/shifts?lotNumbers=1", json.encodeToString(HostShiftCreateRequest.serializer(), request)), DeviceShiftDto.serializer())
 
     suspend fun enter(shiftId: String): Result<DeviceShiftDto> {
         val body = buildJsonObject { put("supports", JsonArray(ENTER_SUPPORTS.map(::JsonPrimitive))) }.toString()
@@ -208,7 +208,10 @@ class HostApi(private val transport: HostTransport, private val json: Json = Jso
         /** Several devices in one shift (protocol 7): named on every entry, so a free slot of the line takes this device; an older host ignores the name. */
         const val CAPABILITY_MULTI_STATION = "multi-station-v1"
         const val CAPABILITY_SET_ASSEMBLY = "set-assembly-v1"
-        internal val ENTER_SUPPORTS = listOf(CAPABILITY, CAPABILITY_VALIDATION, CAPABILITY_MULTI_STATION, CAPABILITY_SET_ASSEMBLY)
+        const val CAPABILITY_LOT_NUMBER = "lot-number"
+        internal val ENTER_SUPPORTS = listOf(
+            CAPABILITY, CAPABILITY_VALIDATION, CAPABILITY_MULTI_STATION, CAPABILITY_SET_ASSEMBLY, CAPABILITY_LOT_NUMBER,
+        )
         const val KNOWN_BLOCKS_BATCH = 64
 
         /**

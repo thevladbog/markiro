@@ -31,6 +31,38 @@ class PalletCloseScreensTest {
     }
 
     @Test
+    fun thePalletLabelStartsOnlyOnThePrintButton() {
+        var prints = 0
+        compose.setContent {
+            MarkiroTheme {
+                PalletCloseScreen(PalletCloseStep.ReadyToPrint(pallet), PalletCloseCallbacks(onRetry = { prints++ }))
+            }
+        }
+        assertEquals(0, prints)
+        compose.onNodeWithText("Печать этикетки палета").performClick()
+        assertEquals(1, prints)
+    }
+
+    @Test
+    fun theProductionPalletWaitsForPaperConfirmation() {
+        var dismissed = false
+        var confirmed = false
+        compose.setContent {
+            MarkiroTheme {
+                PalletCloseScreen(
+                    PalletCloseStep.Printed(pallet),
+                    PalletCloseCallbacks(onDismiss = { dismissed = true }, onConfirmPrinted = { confirmed = true }),
+                    confirmDelivery = true,
+                )
+            }
+        }
+        compose.mainClock.advanceTimeBy(2_000)
+        assertEquals(false, dismissed)
+        compose.onNodeWithText("Этикетка напечаталась").performClick()
+        assertTrue(confirmed)
+    }
+
+    @Test
     fun aFailedPrintNamesThePrintersOwnReasonAndOffersThreeWaysOut() {
         var deferred = false
         compose.setContent {

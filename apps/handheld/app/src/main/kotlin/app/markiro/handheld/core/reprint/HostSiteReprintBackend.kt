@@ -58,9 +58,22 @@ class HostSiteReprintBackend(
                 val product = value.getValue("product").jsonObject
                 val kind = value.string("kind")
                 val sscc = value.optionalString("sscc").orEmpty()
-                val base = BoxLabelInput(sscc, value.number("itemCount"), product.string("name"), product.optionalString("printName"), product.string("gtin14"), product.optionalString("egaisCode"), (product["shelfLifeDays"] as? JsonPrimitive)?.intOrNull, value.optionalString("operatorName"), value.optionalString("counterpartyName"), value.string("at"), value.string("productionDate"), value.string("shiftNumber"))
-                val fields = if (kind == "pallet") palletLabelFields(PalletLabelInput(sscc, value.number("boxCount"), base.itemCount, base.productName, base.productPrintName, base.gtin14, base.egaisCode, base.shelfLifeDays, base.operatorName, base.counterpartyName, base.closedAt, base.productionDate, base.shiftNumber)) else boxLabelFields(base)
+                val base = BoxLabelInput(
+                    sscc, value.number("itemCount"), product.string("name"), product.optionalString("printName"),
+                    product.string("gtin14"), product.optionalString("egaisCode"),
+                    (product["shelfLifeDays"] as? JsonPrimitive)?.intOrNull, value.optionalString("operatorName"),
+                    value.optionalString("counterpartyName"), value.string("at"), value.string("productionDate"),
+                    value.string("shiftNumber"), value.optionalString("lotNumber"),
+                )
+                val fields = if (kind == "pallet") palletLabelFields(
+                    PalletLabelInput(
+                        sscc, value.number("boxCount"), base.itemCount, base.productName, base.productPrintName,
+                        base.gtin14, base.egaisCode, base.shelfLifeDays, base.operatorName, base.counterpartyName,
+                        base.closedAt, base.productionDate, base.shiftNumber, base.lotNumber,
+                    ),
+                ) else boxLabelFields(base)
                 val wire = fields.mapKeys { it.key.wire }.toMutableMap()
+                wire.putIfAbsent(LabelField.LOT_NUMBER.wire, "")
                 if (kind == "unit") { wire[LabelField.KM_CODE.wire] = value.string("canonical"); wire[LabelField.SSCC.wire] = "" }
                 val source = SiteReprintSource(kind, value.string("subjectId"), value.string("identity"), product.string("name"), wire, value.toString(), product.string("id"), (product["chzProductGroupCode"] as? JsonPrimitive)?.intOrNull, reprintDigest(value), scanDigest = productLabelBytesDigest(raw.toByteArray(Charsets.UTF_8)), repair = if (Regex("^(?:\\]C[01])?!1").containsMatchIn(raw.trim())) "legacy_tspl_fnc1_literal" else null)
                 validateSourceIdentity(raw, source)

@@ -154,7 +154,7 @@ class HostApiTest {
         val (transport, host) = api(error(409, "conflict", """{"constraint":"station_update"}"""))
         host.enter("1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d")
         val body = transport.sent.single().third.orEmpty()
-        assertTrue(body, body.contains("\"supports\":[\"handheld-host-v1\",\"validation-v1\",\"multi-station-v1\",\"set-assembly-v1\"]"))
+        assertTrue(body, body.contains("\"supports\":[\"handheld-host-v1\",\"validation-v1\",\"multi-station-v1\",\"set-assembly-v1\",\"lot-number\"]"))
         assertTrue(!body.contains("duplicate"))
     }
 

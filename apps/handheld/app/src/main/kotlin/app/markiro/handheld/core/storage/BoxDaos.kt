@@ -87,6 +87,12 @@ interface BoxDao {
     )
     fun observeUnprintedCount(): Flow<Int>
 
+    @Query(
+        "SELECT COUNT(*) FROM boxes WHERE shiftId = :shiftId AND closedAt IS NOT NULL " +
+            "AND printState <> 'printed' AND disassembledAt IS NULL",
+    )
+    fun observeUnprintedCountForShift(shiftId: String): Flow<Int>
+
     /** Guarded so a redelivered confirmation cannot restamp a retirement. */
     @Query("UPDATE boxes SET disassembledAt = :at WHERE boxId = :boxId AND disassembledAt IS NULL")
     suspend fun markDisassembled(boxId: String, at: String): Int

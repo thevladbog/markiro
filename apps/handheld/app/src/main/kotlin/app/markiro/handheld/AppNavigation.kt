@@ -533,45 +533,48 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     nav.popBackStack(Routes.HUB, inclusive = false)
                     Unit
                 }
-                if (state.shift?.setItemsJson != null) SetAssemblyScreen(
-                    state, assembly, onLeave = leave, onClose = { nav.navigate(Routes.close(shiftId)) },
-                    onRemove = vm::removeSetItem,
-                ) else WorkScreen(
-                    state,
-                    WorkCallbacks(
-                        onLeave = leave,
-                        onClose = { nav.navigate(Routes.close(shiftId)) },
-                        onConflicts = { nav.navigate(Routes.conflicts(shiftId)) },
-                        onCloseBoxEarly = vm::closeEarly,
-                        onLabelQueue = { nav.navigate(Routes.LABEL_QUEUE) },
-                        onExceptions = { nav.navigate(Routes.exceptions(shiftId)) },
-                        onRequestEarlyPalletClose = vm::requestEarlyPalletClose,
-                        onConfirmEarlyPalletClose = vm::confirmEarlyPalletClose,
-                        onCancelEarlyPalletClose = vm::cancelEarlyPalletClose,
-                    ),
-                )
+                val printScreenOpen = closeStep != BoxCloseStep.Idle ||
+                    palletCloseStep != PalletCloseStep.Idle || duplicateStep != DuplicateStep.Idle
+                val awaitingConfirmation = (closeStep as? BoxCloseStep.Printed)?.awaitingConfirmation == true
+                val closeShift = {
+                    if (!printScreenOpen && choosingPrinter == null) nav.navigate(Routes.close(shiftId))
+                }
+                if (palletCloseStep.closedPallet() == null && !awaitingConfirmation) {
+                    if (state.shift?.setItemsJson != null) SetAssemblyScreen(
+                        state, assembly, onLeave = leave, onClose = closeShift,
+                        onRemove = vm::removeSetItem,
+                    ) else WorkScreen(
+                        state,
+                        WorkCallbacks(
+                            onLeave = leave,
+                            onClose = closeShift,
+                            onConflicts = { nav.navigate(Routes.conflicts(shiftId)) },
+                            onCloseBoxEarly = vm::closeEarly,
+                            onLabelQueue = { nav.navigate(Routes.LABEL_QUEUE) },
+                            onExceptions = { nav.navigate(Routes.exceptions(shiftId)) },
+                            onRequestEarlyPalletClose = vm::requestEarlyPalletClose,
+                            onConfirmEarlyPalletClose = vm::confirmEarlyPalletClose,
+                            onCancelEarlyPalletClose = vm::cancelEarlyPalletClose,
+                        ),
+                    )
+                }
                 // Drawn over the work screen rather than as a route of its own, so
                 // the fill grid underneath is not rebuilt between boxes.
-                if (closeStep != BoxCloseStep.Idle) {
+                val visibleBoxStep = closeStep
+                if (visibleBoxStep != BoxCloseStep.Idle) {
                     BoxCloseScreen(
-                        closeStep,
+                        visibleBoxStep,
                         BoxCloseCallbacks(
                             onRetry = { vm.retryPrint() },
                             onOtherPrinter = { choosingPrinter = PrintPurpose.BOX },
                             onDefer = vm::deferLabel,
                             onConfirmPrinted = vm::confirmPrinted,
-                            onDismiss = vm::dismissClose,
+                            onDismiss = { vm.dismissClose(visibleBoxStep) },
                         ),
                         destinationLabel = destinations.firstOrNull { it.purpose == "box" && it.attemptId == "initial" && it.jobId == closeStep.closedBox()?.boxId }?.printer?.name,
                     )
                 }
-                // Drawn AFTER the box's own overlay, so it takes the top of the
-                // stack when a box that fills a pallet closes both at once: one
-                // outcome for one scan (`CloseBox`'s own contract), rather than two
-                // sequential confirmations. The box screen underneath is not lost --
-                // once the pallet screen steps aside, an unresolved box print still
-                // shows and still needs a person.
-                if (palletCloseStep != PalletCloseStep.Idle) {
+                if (closeStep == BoxCloseStep.Idle && palletCloseStep != PalletCloseStep.Idle) {
                     PalletCloseScreen(
                         palletCloseStep,
                         PalletCloseCallbacks(
@@ -582,7 +585,11 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                             onDismiss = vm::dismissPalletClose,
                         ),
                         destinationLabel = destinations.firstOrNull { it.purpose == "pallet" && it.attemptId == "initial" && it.jobId == palletCloseStep.closedPallet()?.palletId }?.printer?.name,
+                        confirmDelivery = true,
                     )
+                }
+                BackHandler(enabled = choosingPrinter != null || palletCloseStep.closedPallet() != null || awaitingConfirmation) {
+                    choosingPrinter = null
                 }
                 // Verification owns the full screen while the work route keeps receiving scans.
                 if (duplicateStep != DuplicateStep.Idle) {
@@ -614,16 +621,13 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         choosingPrinter = null
                     }
                 }
-                // Last of the three overlays: a box close or a duplicate is about
-                // the unit in the operator's hand and must win over a prompt about
-                // the shift as a whole.
-                if (planPrompt && assembly.draft.isEmpty() && closeStep == BoxCloseStep.Idle && duplicateStep == DuplicateStep.Idle) {
+                if (planPrompt && !printScreenOpen && assembly.draft.isEmpty() && choosingPrinter == null) {
                     PlanReachedScreen(
                         total = state.total,
                         plan = state.plan ?: 0,
                         onClose = {
                             vm.dismissPlanPrompt()
-                            nav.navigate(Routes.close(shiftId))
+                            closeShift()
                         },
                         onContinue = vm::dismissPlanPrompt,
                     )

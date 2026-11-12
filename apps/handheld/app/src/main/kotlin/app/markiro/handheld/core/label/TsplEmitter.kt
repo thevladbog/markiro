@@ -41,17 +41,26 @@ suspend fun generateTspl(
     line("DIRECTION 1")
     line("CLS")
     for (element in spec.elements) {
+        if (!element.isVisible(data)) continue
         when (element) {
             is LabelElement.Text -> textLike(
                 spec, element.xMm, element.yMm, element.text, element.fontSizePt, element.bold,
                 element.align, element.maxWidthMm, element.maxLines, rasterize, out, terminator, ::line, element.fontFamily, element.lineHeight, element.minFontSizePt,
             )
-            is LabelElement.Field -> textLike(
-                spec, element.xMm, element.yMm,
-                labelFieldDisplayValue(element.field, data, element.textFormat),
-                element.fontSizePt, element.bold, element.align, element.maxWidthMm, element.maxLines,
-                rasterize, out, terminator, ::line, element.fontFamily, element.lineHeight, element.minFontSizePt,
-            )
+            is LabelElement.Field -> {
+                val value = labelFieldDisplayValue(element.field, data, element.textFormat)
+                if (element.field == LabelField.LOT_NUMBER) {
+                    val lot = rasterizeLotNumber(spec, element, value, rasterize)
+                    buildBitmapCommand(lot.x, lot.y, lot.raster, out)
+                    out.write(terminator)
+                } else {
+                    textLike(
+                        spec, element.xMm, element.yMm, value, element.fontSizePt, element.bold, element.align,
+                        element.maxWidthMm, element.maxLines, rasterize, out, terminator, ::line,
+                        element.fontFamily, element.lineHeight, element.minFontSizePt,
+                    )
+                }
+            }
             is LabelElement.OrganizationLogo -> {
                 if (logo == null) continue
                 val fitted = fitLabelLogo(element, spec.dpi, logo)

@@ -593,3 +593,12 @@ val MIGRATION_26_27 = object : Migration(26, 27) {
         db.execSQL("CREATE TABLE IF NOT EXISTS set_assembly_claims (codeHash TEXT NOT NULL PRIMARY KEY, setId TEXT NOT NULL)")
     }
 }
+
+/** An entered host shift uses the lot from its immutable snapshot, even offline. */
+val MIGRATION_27_28 = object : Migration(27, 28) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        if ("lotNumber" !in db.columnsOf("shift_mirror")) {
+            db.execSQL("ALTER TABLE shift_mirror ADD COLUMN lotNumber TEXT")
+        }
+    }
+}

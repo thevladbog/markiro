@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.ceil
@@ -37,10 +38,10 @@ internal data class RasterLayout(val lines: List<String>, val width: Int, val he
  */
 internal fun rasterLayout(text: String, options: RasterOptions, measure: (String) -> Double): RasterLayout {
     val maxWidth = options.maxWidthPx
-    val lines = if (maxWidth == null) {
-        listOf(text)
-    } else {
-        wrapTextToWidth(text, measure, maxWidth.toDouble(), options.maxLines)
+    val lines = when {
+        maxWidth == null -> listOf(text)
+        options.requireComplete -> wrapCompleteText(text, measure, maxWidth, options.maxLines)
+        else -> wrapTextToWidth(text, measure, maxWidth.toDouble(), options.maxLines)
             .map { line -> if (measure(line) > maxWidth) clipWithEllipsis(line, measure, maxWidth.toDouble()) else line }
     }
     val natural = ceil(lines.maxOf { measure(it) }).toInt()
@@ -71,11 +72,24 @@ class AndroidTextRasterizer @Inject constructor(@dagger.hilt.android.qualifiers.
                 }
                 if (paint.measureText(text) > options.maxWidthPx) throw LabelRenderException("Label quantity exceeds its box at minimum font size")
             }
-            val layout = rasterLayout(text, fitted) { paint.measureText(it).toDouble() }
+            val bounds = Rect()
+            fun inkBounds(line: String, rect: Rect) = paint.getTextBounds(line, 0, line.length, rect)
+            val layout = rasterLayout(text, fitted) { line ->
+                val advance = paint.measureText(line).toDouble()
+                if (fitted.requireComplete) {
+                    inkBounds(line, bounds)
+                    max(0, -bounds.left) + max(advance, bounds.right.toDouble())
+                } else {
+                    advance
+                }
+            }
             val lines = layout.lines
             val width = layout.width
-            val height = layout.height
-            val lineHeight = layout.lineHeight
+            val ink = if (fitted.requireComplete) lines.map { line -> Rect().also { inkBounds(line, it) } } else emptyList()
+            val ascent = ink.maxOfOrNull { max(0, -it.top) } ?: 0
+            val descent = ink.maxOfOrNull { max(0, it.bottom) } ?: 0
+            val lineHeight = if (ink.isEmpty()) layout.lineHeight else max(layout.lineHeight, ascent + descent + 2)
+            val height = if (ink.isEmpty()) layout.height else max(1, lineHeight * lines.size)
 
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
@@ -84,8 +98,15 @@ class AndroidTextRasterizer @Inject constructor(@dagger.hilt.android.qualifiers.
             canvas.drawColor(Color.WHITE)
             val metrics = paint.fontMetrics
             lines.forEachIndexed { index, line ->
-                val centre = index * lineHeight + lineHeight / 2f
-                canvas.drawText(line, 0f, centre - (metrics.ascent + metrics.descent) / 2f, paint)
+                val boundsOnLine = ink.getOrNull(index)
+                val left = boundsOnLine?.let { max(0, -it.left).toFloat() } ?: 0f
+                val baseline = if (boundsOnLine == null) {
+                    val centre = index * lineHeight + lineHeight / 2f
+                    centre - (metrics.ascent + metrics.descent) / 2f
+                } else {
+                    (index * lineHeight + (lineHeight - ascent - descent) / 2 + ascent).toFloat()
+                }
+                canvas.drawText(line, left, baseline, paint)
             }
             val pixels = IntArray(width * height)
             bitmap.getPixels(pixels, 0, width, 0, 0, width, height)

@@ -50,6 +50,7 @@ object PrintReason {
     const val NO_PAPER = "no_paper"
     const val HEAD_OPEN = "head_open"
     const val UNREACHABLE = "unreachable"
+    const val AWAITING_CONFIRMATION = "awaiting_confirmation"
 }
 
 /**
@@ -71,16 +72,24 @@ class BoxPrinter(
     fun observeProfiles() = db.printerDao().observeAll()
     fun observeDestinations() = db.printerDao().observeQueuedDestinations()
 
-    suspend fun print(boxId: String, replacementPrinterId: String? = null, allowUnknown: Boolean = false, reprint: Boolean = false): PrintOutcome = db.recovery.printing {
+    suspend fun print(
+        boxId: String,
+        replacementPrinterId: String? = null,
+        allowUnknown: Boolean = false,
+        reprint: Boolean = false,
+        confirmDelivery: Boolean = false,
+    ): PrintOutcome = db.recovery.printing {
         if (replacementPrinterId != null) {
             val replacement = db.printerDao().get(replacementPrinterId)
                 ?: return@printing PrintOutcome.Failed(PrintReason.PRINTER_UNCONFIGURED)
             PrintDestinations(db).replace(PrintPurpose.BOX, boxId, "initial", replacement)
         }
-        printOwned(boxId, allowUnknown, reprint, replacementPrinterId != null)
+        printOwned(boxId, allowUnknown, reprint, replacementPrinterId != null, confirmDelivery)
     }
 
-    private suspend fun printOwned(boxId: String, allowUnknown: Boolean, reprint: Boolean, replaced: Boolean): PrintOutcome {
+    private suspend fun printOwned(
+        boxId: String, allowUnknown: Boolean, reprint: Boolean, replaced: Boolean, confirmDelivery: Boolean,
+    ): PrintOutcome {
         val box = db.boxDao().get(boxId) ?: return fail(boxId, PrintReason.BOX_MISSING)
         if (box.printState == BoxPrint.PRINTED && !reprint && !replaced) return PrintOutcome.Printed
         if (box.printState == BoxPrint.UNKNOWN && !allowUnknown) return PrintOutcome.Unknown(box.printReason ?: "interrupted")
@@ -90,6 +99,7 @@ class BoxPrinter(
         val template = app.markiro.handheld.core.print.PrintTemplateStore(db).forPrint(
             PrintPurpose.BOX, boxId, shift.boxLabelTemplate, shift.productId,
             db.palletProductDao().byId(shift.productId)?.chzProductGroupCode,
+            requiresLotNumber = shift.lotNumber != null,
             recoverUnsent = box.printState in setOf(BoxPrint.FAILED, BoxPrint.DEFERRED) && box.printReason in setOf(PrintReason.TEMPLATE_INVALID, PrintReason.TEMPLATE_INCOMPATIBLE),
         )
         template.reason?.let { return fail(boxId, it) }
@@ -127,6 +137,7 @@ class BoxPrinter(
                 closedAt = closedAt,
                 productionDate = shift.productionDate,
                 shiftNumber = shift.number,
+                lotNumber = shift.lotNumber,
             ),
         )
 
@@ -142,7 +153,8 @@ class BoxPrinter(
         }
         return when (val outcome = transport.sendRemembered(printer, document, db.printerDao(), db.recovery)) {
             SendOutcome.Delivered -> {
-                boxes.setPrintState(boxId, BoxPrint.PRINTED, null)
+                val state = if (confirmDelivery) BoxPrint.UNKNOWN else BoxPrint.PRINTED
+                boxes.setPrintState(boxId, state, PrintReason.AWAITING_CONFIRMATION.takeIf { confirmDelivery })
                 PrintOutcome.Printed
             }
             is SendOutcome.Refused -> fail(boxId, outcome.reason.wire())

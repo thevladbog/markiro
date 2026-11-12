@@ -66,6 +66,22 @@ class CreateShiftDraftTest {
         assertEquals(false, request.palletsEnabled)
     }
 
+    @Test fun lotRequiresCompatibleLayoutsAndKeepsThePreferredFormat() {
+        val regular = options.templates.first { it.id == "box" }
+        val unrelated = regular.copy(id = "other-lot", supportsLotNumber = true)
+        val variant = regular.copy(id = "box-lot", supportsLotNumber = true, lotNumberSourceId = regular.id)
+        val catalogue = options.copy(useLotNumbers = true, boxDefault = regular.id, templates = options.templates + unrelated + variant)
+        val withLot = draft.copy(lotNumber = "\u00a00042Бк07AЁ\ufeff")
+        val request = withLot.request(catalogue, "request")!!
+        assertEquals("0042Бк07AЁ", request.lotNumber)
+        assertEquals(variant.id, request.boxTemplateId)
+        assertEquals(regular.id, withLot.request(catalogue.copy(useLotNumbers = false), "request")?.boxTemplateId)
+        assertNull(withLot.request(catalogue.copy(useLotNumbers = false), "request")?.lotNumber)
+        assertNull(withLot.request(options.copy(useLotNumbers = true), "request"))
+        assertNull(withLot.copy(lotNumber = "0042-А").request(catalogue, "request"))
+        assertNull(draft.request(catalogue, "request")?.lotNumber)
+    }
+
     @Test fun invalidNumbersAndCivilDatesCannotBeSubmitted() {
         for (value in listOf("0", "-1", "1.5", "10000001")) {
             assertNull(draft.copy(plan = value).request(options, "request"))
