@@ -83,6 +83,8 @@ class KeyboardWedgeScanSource(private val buffer: WedgeBuffer = WedgeBuffer(time
 
     /** Returns true when the event was consumed as part of a scan. */
     fun onKeyEvent(event: KeyEvent): Boolean {
+        // Numeric IMEs can send key events instead of committing text. Let the editor handle them.
+        if ((event.flags and KeyEvent.FLAG_SOFT_KEYBOARD) != 0) return false
         val sink = sink ?: return false
         val isEnter = event.keyCode == KeyEvent.KEYCODE_ENTER || event.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
         if (event.action != KeyEvent.ACTION_DOWN) return isEnter

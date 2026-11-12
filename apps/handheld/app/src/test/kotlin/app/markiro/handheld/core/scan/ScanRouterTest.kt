@@ -2,6 +2,7 @@ package app.markiro.handheld.core.scan
 
 import android.content.Intent
 import android.os.Looper
+import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -11,6 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -67,6 +69,22 @@ class ScanRouterTest {
         yield()
         router.type("40318827")
         assertEquals("wedge", scanned.await().source)
+    }
+
+    @Test
+    fun theKeyboardWedgeLetsSoftwareKeyboardDigitsAndEnterReachTheEditor() {
+        val router = router(ScanSourceKind.BUILTIN_INTENT)
+
+        for (key in listOf(KeyEvent.KEYCODE_7, KeyEvent.KEYCODE_ENTER)) {
+            for (action in listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP)) {
+                val event = KeyEvent(
+                    0L, 0L, action, key, 0, 0,
+                    KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
+                    KeyEvent.FLAG_SOFT_KEYBOARD or KeyEvent.FLAG_KEEP_TOUCH_MODE,
+                )
+                assertFalse("Software keyboard event was intercepted: $event", router.wedge.onKeyEvent(event))
+            }
+        }
     }
 
     private fun broadcast(action: String, fill: Intent.() -> Unit) {
