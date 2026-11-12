@@ -47,6 +47,13 @@ describe("pasted SSCCs (the cloud page's splitSsccInput)", () => {
   it("finds nothing in blanks", () => {
     expect(parsePastedCodes(" \n\t ; , ")).toEqual([]);
   });
+
+  it("trims the edges of a set code while preserving its GS separator and punctuation", () => {
+    const code = "010460712345678121SET,01;A\u001d93AB12";
+    const input = ` \t${code}\t \n046007034967000017`;
+    expect(parsePastedCodes(input)).toEqual([code, "046007034967000017"]);
+    expect(parseCodeImport(input)).toEqual({ ok: true, tokens: [code, "046007034967000017"] });
+  });
 });
 
 describe("reading a picked file", () => {

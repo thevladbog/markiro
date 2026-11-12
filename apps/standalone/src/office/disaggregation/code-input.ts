@@ -14,7 +14,11 @@ const KM_PREFIX = /^(?:\]d2[\t ]*)?01\d{14}21/u;
 
 function splitCodes(raw: string, ssccSeparators: RegExp): string[] {
   return raw.split(/[\r\n]+/u).flatMap((line) => {
-    const code = line.replace(/^[\t ]+|[\t ]+$/gu, "");
+    let start = 0;
+    let end = line.length;
+    while (line[start] === " " || line[start] === "\t") start++;
+    while (end > start && (line[end - 1] === " " || line[end - 1] === "\t")) end--;
+    const code = line.slice(start, end);
     // Commas and semicolons can be part of a set's serial or crypto tail.
     if (KM_PREFIX.test(code)) return [code];
     return line

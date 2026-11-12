@@ -224,6 +224,7 @@ pub const NEVER: &[(&str, &str)] = &[
     ("PUT", "/v1/office/export-files/{id}/chunks/{seq}"),
     ("POST", "/v1/office/export-files/{id}/complete"),
     ("POST", "/v1/office/export-files/{id}/download"),
+    ("GET", "/v1/office/shifts/{id}/disaggregation-report"),
     ("GET", "/v1/office/shifts/{id}/pallet-report-data"),
     ("GET", "/v1/office/boxes/{id}/report-data"),
     ("GET", "/v1/office/disaggregation"),
