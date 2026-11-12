@@ -27,6 +27,45 @@ struct LabelVariant {
     spec: Value,
 }
 
+impl LabelVariant {
+    fn current_source_spec(&self) -> &Value {
+        self.updated_source_spec
+            .as_ref()
+            .unwrap_or(&self.source_spec)
+    }
+
+    fn matches_source(&self, spec: &Value) -> bool {
+        let current = self.current_source_spec();
+        spec == &self.source_spec
+            || spec == current
+            || matches_previous_75x120_heading(current, spec)
+    }
+}
+
+/// The preceding 75×120 layouts differ only in the three-line product heading.
+/// Compare the complete old spec so a modified layout is never overwritten.
+fn matches_previous_75x120_heading(target: &Value, existing: &Value) -> bool {
+    if target["widthMm"] != 75 || target["heightMm"] != 120 {
+        return false;
+    }
+    let mut previous = target.clone();
+    let Some(heading) = previous["elements"].as_array_mut().and_then(|elements| {
+        elements.iter_mut().find(|element| {
+            element["kind"] == "field"
+                && matches!(
+                    element["field"].as_str(),
+                    Some("product.name" | "product.printName")
+                )
+                && element["maxLines"] == 3
+                && element["fontSizePt"] == 13
+        })
+    }) else {
+        return false;
+    };
+    heading["fontSizePt"] = Value::from(17);
+    &previous == existing
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SheetVariant {
@@ -75,8 +114,7 @@ pub(crate) async fn add_label_variants(
         let Some(variant) = variants.iter().find(|variant| {
             variant.source_name == source.name
                 && variant.purpose == source.purpose
-                && (variant.source_spec == spec
-                    || variant.updated_source_spec.as_ref() == Some(&spec))
+                && variant.matches_source(&spec)
         }) else {
             continue;
         };
@@ -181,13 +219,17 @@ async fn update_stock_labels(
             if variant.purpose != *purpose {
                 continue;
             }
-            if !is_lot && variant.source_name == *name && variant.source_spec == current {
-                if let Some(updated) = &variant.updated_source_spec {
+            if !is_lot && variant.source_name == *name && variant.matches_source(&current) {
+                let updated = variant.current_source_spec();
+                if updated != &current {
                     updates.push((id, updated));
                 }
                 break;
             }
-            if *is_lot && variant.name == *name && variant.previous_spec.as_ref() == Some(&current)
+            if *is_lot
+                && variant.name == *name
+                && (variant.previous_spec.as_ref() == Some(&current)
+                    || matches_previous_75x120_heading(&variant.spec, &current))
             {
                 updates.push((id, &variant.spec));
                 break;
@@ -322,6 +364,104 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(repeated, rev);
+    }
+
+    #[tokio::test]
+    async fn existing_stock_75x120_headings_update_in_place_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let pool = crate::db::open(&directory.path().join("host.db"))
+            .await
+            .unwrap();
+        let at = "2026-11-12T10:00:00Z";
+        sqlx::query(
+            "INSERT INTO org_profile (id, name, gln, gs1_prefixes, time_zone, rev) \
+             VALUES (1, 'Маркиро', '4600682000013', '[\"4600682\"]', 'UTC', 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let fixture = variants().unwrap();
+        let boxed = fixture
+            .labels
+            .iter()
+            .find(|variant| variant.source_name == "Коробка 75×120")
+            .unwrap();
+        let duplicate = fixture
+            .labels
+            .iter()
+            .find(|variant| {
+                variant.source_name == "Дубликат Data Matrix 75×120 [Краткое наименование]"
+            })
+            .unwrap();
+        let with_old_heading = |target: &Value| {
+            let mut old = target.clone();
+            assert_eq!(old["elements"][2]["fontSizePt"], 13);
+            old["elements"][2]["fontSizePt"] = Value::from(17);
+            old
+        };
+        let box_target = boxed.updated_source_spec.as_ref().unwrap();
+        let old_box = with_old_heading(box_target);
+        let old_duplicate = with_old_heading(&duplicate.source_spec);
+        let old_lot = with_old_heading(&duplicate.spec);
+        let mut changed_box = old_box.clone();
+        changed_box["elements"][2]["xMm"] = Value::from(5);
+        for (id, variant, spec, stock, linked_to) in [
+            ("box", boxed, &old_box, true, None),
+            ("duplicate", duplicate, &old_duplicate, true, None),
+            ("lot", duplicate, &old_lot, true, Some("duplicate")),
+            ("copy", boxed, &old_box, false, None),
+            ("changed", boxed, &changed_box, true, None),
+        ] {
+            sqlx::query(
+                "INSERT INTO label_templates \
+                 (id, name, purpose, enabled, category_codes, spec, stock, rev, lot_number_source_id) \
+                 VALUES (?, ?, ?, 0, '[1]', ?, ?, 0, ?)",
+            )
+            .bind(id)
+            .bind(if linked_to.is_some() {
+                &variant.name
+            } else {
+                &variant.source_name
+            })
+            .bind(&variant.purpose)
+            .bind(spec.to_string())
+            .bind(stock)
+            .bind(linked_to)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        register(&pool, at).await.unwrap();
+        register(&pool, at).await.unwrap();
+
+        for (id, expected, rev) in [
+            ("box", box_target, 1),
+            ("duplicate", &duplicate.source_spec, 1),
+            ("lot", &duplicate.spec, 1),
+            ("copy", &old_box, 0),
+            ("changed", &changed_box, 0),
+        ] {
+            let actual: (String, bool, String, i64) = sqlx::query_as(
+                "SELECT spec, enabled, category_codes, rev FROM label_templates WHERE id = ?",
+            )
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(actual.3, rev, "{id}: revision");
+            assert_eq!(
+                (actual.1, actual.2.as_str()),
+                (false, "[1]"),
+                "{id}: metadata"
+            );
+            assert!(actual.0 == expected.to_string(), "{id}: layout");
+        }
+        let revision: i64 = sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(revision, 1);
     }
 
     #[tokio::test]

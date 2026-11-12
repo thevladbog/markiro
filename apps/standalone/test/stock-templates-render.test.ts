@@ -156,6 +156,24 @@ describe("the stock templates the wizard seeds", () => {
     expect(checked).toBeGreaterThanOrEqual(40);
   });
 
+  it.each(PRINTERS)(
+    "prints a long product name in three lines on 75×120 ($language/$dpi)",
+    async (printer) => {
+      const template = stock.find((candidate) => candidate.name === "Коробка 75×120");
+      if (template === undefined) throw new Error("no 75×120 box template");
+      const productName = "Сидр яблочный полусухой газированный «ДИКИЙ КРЕСТ» 0,45 л";
+      const data = { ...labelSampleData("box"), "product.name": productName };
+
+      await renderLabel(template.spec, data, printer, rasterizeText);
+
+      const nameLines = drawn
+        .filter(({ font, text }) => font.startsWith("700 ") && text !== "КОРОБКА")
+        .map(({ text }) => text);
+      expect(nameLines).toHaveLength(3);
+      expect(nameLines.join(" ")).toBe(productName);
+    },
+  );
+
   it("shrink a quantity that is too wide at its size, down to its minimum, rather than cut it", async () => {
     const template = stock.find((candidate) => candidate.name === "Коробка 75×120");
     if (template === undefined) throw new Error("no 75×120 box template");

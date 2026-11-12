@@ -110,7 +110,7 @@ function heading(
       yMm: 14,
       maxWidthMm: WIDTH,
       maxLines: 3,
-      fontSizePt: 17,
+      fontSizePt: 13,
       bold: true,
       lineHeight: 1,
     },
