@@ -18,8 +18,9 @@ import {
 } from "../src/floor/queue/outbox-recovery.js";
 import { UNSENT_SQL } from "../src/local/facts-sender.js";
 import { REOPEN_SQL } from "../src/local/restore-reconcile.js";
-import { DUE_SHIFTS_SQL, purgeTableSql, RETAINED_TABLES } from "../src/local/retention.js";
+import { DUE_SHIFTS_SQL, purgeTableSql } from "../src/local/retention.js";
 import { DEVICE_ID, HOST_ID } from "./support/fixtures.js";
+import { RETAINED_TABLES_AT_0010 } from "./support/local-db.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building a URL from it.
 const testModuleUrl = import.meta.url;
@@ -34,7 +35,7 @@ function migrate(db: DatabaseSync, from: string, to: string): void {
   for (const name of files) db.exec(readFileSync(new URL(name, MIGRATIONS), "utf8"));
 }
 
-/** The plans of what the station reads and deletes today: the migration re-plans none. */
+/** The plans of the queries available on schema 0015, before applying 0016. */
 function plans(db: DatabaseSync): Record<string, string> {
   const statements = [
     UNSENT_SQL,
@@ -49,8 +50,8 @@ function plans(db: DatabaseSync): Record<string, string> {
     QUEUE_SETTLED_SQL,
     QUEUE_TALLY_SQL,
     DISMISS_SQL,
-    // The participation cache's table comes with migration `0022` (plan of the shared shift), after this one.
-    ...RETAINED_TABLES.filter((table) => table !== "floor_shift_participation").map(purgeTableSql),
+    ...RETAINED_TABLES_AT_0010.map(purgeTableSql),
+    purgeTableSql("floor_unit_labels"),
   ];
   return Object.fromEntries(
     statements.map((sql) => [
