@@ -150,7 +150,7 @@ export function renderBoxReportHtml(data: BoxReportData, timeZone = "UTC"): stri
     tableHeadHtml: tableHead(),
     units: contentsUnits(data),
     finalBlocksHtml: finalBlocks(data),
-    footerSscc: data.sscc,
+    footerBarcodeSvg: data.sscc ? ssccBarcode(data.sscc) : null,
     footerSubject: "Короб",
   });
 }

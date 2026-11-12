@@ -9,16 +9,24 @@
 use axum::extract::State;
 use axum::Json;
 use markiro_proto::CodeCheck;
+use serde::Deserialize;
 
 use crate::auth::AskingDevice;
-use crate::error::{ApiError, ApiPath};
+use crate::error::{ApiError, ApiPath, ApiQuery};
 use crate::facts::{registry, rules};
 use crate::server::AppState;
+
+#[derive(Debug, Default, Deserialize)]
+pub struct CodeCheckQuery {
+    #[serde(default)]
+    aggregation: bool,
+}
 
 pub async fn check_code(
     State(state): State<AppState>,
     AskingDevice(device): AskingDevice,
     ApiPath(code_hash): ApiPath<String>,
+    ApiQuery(query): ApiQuery<CodeCheckQuery>,
 ) -> Result<Json<CodeCheck>, ApiError> {
     if !rules::is_code_hash(&code_hash) {
         return Err(ApiError::validation(
@@ -27,6 +35,11 @@ pub async fn check_code(
         ));
     }
     let mut conn = state.pool.acquire().await.map_err(ApiError::internal)?;
+    if query.aggregation {
+        if let Some(owner) = registry::set_owner(&mut conn, &code_hash, &device.id).await? {
+            return Ok(Json(CodeCheck::InSet { owner }));
+        }
+    }
     Ok(Json(match registry::owner(&mut conn, &code_hash).await? {
         Some(owner) => CodeCheck::Taken {
             owner: owner.to_wire(&device.id),

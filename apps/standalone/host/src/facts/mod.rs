@@ -25,6 +25,7 @@ pub mod registry_touch;
 pub mod rules;
 pub mod scan;
 pub mod set_assembled;
+mod set_box_disaggregation;
 pub mod shift_closed;
 pub mod unit_label;
 
@@ -381,7 +382,9 @@ async fn apply(
     };
     let answer = match record.kind {
         FactKind::Scan => scan::apply(conn, &context, &record.data).await,
-        FactKind::SetAssembled => set_assembled::apply(conn, &context, &record.data).await,
+        FactKind::SetAssembled => {
+            set_assembled::apply(conn, &context, &record.data, revision).await
+        }
         FactKind::BoxClosed => box_closed::apply(conn, &context, &record.data).await,
         FactKind::BoxLabel => box_label::apply(conn, &context, &record.data).await,
         FactKind::BoxException => exception::apply(conn, &context, &record.data).await,

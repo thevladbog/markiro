@@ -6,7 +6,7 @@ use markiro_proto::{
 use serde_json::{json, Value};
 use sqlx::SqliteConnection;
 
-use super::{rules, scan, Applied, Context, Failure, Reject};
+use super::{rules, scan, set_box_disaggregation, Applied, Context, Failure, Reject};
 use crate::{error::ApiError, shifts};
 
 fn valid_identity(code: &ScannedCode) -> bool {
@@ -66,6 +66,7 @@ pub async fn apply(
     conn: &mut SqliteConnection,
     context: &Context<'_>,
     data: &Value,
+    revision: &mut Option<i64>,
 ) -> Result<Applied, Failure> {
     let assembly: SetAssembledFact =
         serde_json::from_value(data.clone()).map_err(|_| Reject::field("data"))?;
@@ -99,7 +100,14 @@ pub async fn apply(
                 close: None,
             }
         }
-        None => Applied::accepted(),
+        None => {
+            let document_id =
+                set_box_disaggregation::apply(&mut *conn, context, &hashes[1..], revision).await?;
+            Applied {
+                details: document_id.map(|id| json!({ "disaggregationDocumentId": id })),
+                ..Applied::accepted()
+            }
+        }
     };
 
     sqlx::query(

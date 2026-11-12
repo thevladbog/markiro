@@ -8,7 +8,7 @@ use markiro_proto::disaggregation::{
     DisaggregationLinesAdd, DisaggregationReason, DisaggregationReasonCreate,
     DisaggregationReasonUpdate, DisaggregationReportRows, DisaggregationReportVariant,
     DisaggregationSource, DisaggregationStatus, DisaggregationTransition, DisaggregationUpdate,
-    DISAGGREGATION_XML_FORMAT_ID, DISAGGREGATION_XML_FORMAT_VERSION,
+    SetReleaseRecord, DISAGGREGATION_XML_FORMAT_ID, DISAGGREGATION_XML_FORMAT_VERSION,
 };
 use markiro_proto::{entities, ChangesResponse, ErrorBody};
 use serde::{de::DeserializeOwned, Serialize};
@@ -92,6 +92,22 @@ fn a_code_release_rides_the_feed_keyed_by_its_box() {
     let record: CodeReleaseRecord = serde_json::from_value(item.data.clone().unwrap()).unwrap();
     assert_eq!(record.code_count, 12);
     assert_eq!(record.document_id, "6a1f3c5e-7b9d-4e2f-8a4c-1d3e5f7a9b0c");
+}
+
+#[test]
+fn a_set_release_rides_the_feed_keyed_by_its_line() {
+    let page: ChangesResponse = round_trip("changes-set-releases.json");
+    let [item] = page.items.as_slice() else {
+        panic!("one release: {:?}", page.items);
+    };
+    assert_eq!(item.entity, entities::SET_RELEASES);
+    assert_eq!(item.id, "c0000000-0000-4000-8000-000000000001");
+    assert!(!item.deleted);
+    let data = item.data.as_ref().unwrap();
+    let record: SetReleaseRecord = serde_json::from_value(data.clone()).unwrap();
+    assert_eq!(record.record_id, "a0000000-0000-4000-8000-000000000001");
+    assert_eq!(record.set_code_hash.len(), 64);
+    assert_eq!(&serde_json::to_value(record).unwrap(), data);
 }
 
 #[test]

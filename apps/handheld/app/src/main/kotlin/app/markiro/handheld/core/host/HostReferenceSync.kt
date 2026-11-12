@@ -33,18 +33,32 @@ class HostReferenceSync(
     private val api: HostApi,
     private val pageSize: Int = 500,
 ) {
-    suspend fun sync(): Result<Unit> = runCatching {
+    suspend fun sync(): Result<Unit> = runCatching { db.recovery.work { syncOwned() } }
+
+    private suspend fun syncOwned() {
         while (true) {
             val current = config.get() ?: error("the device is not paired")
-            val since = current.hostRev ?: 0L
+            val replay = meta.get(SET_RELEASE_FEED_REPLAYED) == null
+            val since = if (replay) 0L else current.hostRev ?: 0L
             val page = api.changes(since, pageSize).getOrThrow()
             if (current.hostId != null && page.hostId != current.hostId) throw HostApiError(HostFailure.Constraint("host_mismatch"))
-            db.recovery.commit { applyPage(page.items, page.rev) }
-            if (!page.hasMore) break
+            if (!replay && !page.hasMore && page.rev == since && page.items.isEmpty()) return
+            val applied = db.recovery.commit {
+                val latest = config.get() ?: error("the device is not paired")
+                // Another reader may have finished the upgrade replay or moved the cursor during this request.
+                if (latest.hostRev != current.hostRev || (meta.get(SET_RELEASE_FEED_REPLAYED) == null) != replay) {
+                    return@commit false
+                }
+                applyPage(page.items, page.rev, latest.deviceId)
+                // Advancing the first page and marking the replay happen together, even if it has more pages.
+                if (replay) meta.put(SET_RELEASE_FEED_REPLAYED, "1")
+                true
+            }
+            if (applied && !page.hasMore) return
         }
     }
 
-    private suspend fun applyPage(items: List<ChangeItemDto>, rev: Long) {
+    private suspend fun applyPage(items: List<ChangeItemDto>, rev: Long, deviceId: String) {
         for (item in items) {
             when (item.entity) {
                 "operators" -> operator(item)
@@ -55,6 +69,7 @@ class HostReferenceSync(
                 "category_template_defaults" -> categoryDefault(item)
                 "org_profile" -> organization(item)
                 "code_releases" -> releaseCodes(item)
+                "set_releases" -> releaseSetItems(item, deviceId)
                 else -> Unit // `site`: nothing a handheld keeps
             }
         }
@@ -105,6 +120,19 @@ class HostReferenceSync(
         db.boxDao().markDisassembled(box.boxId,at)
         // Keep raw outbox sources and frozen host bytes: only receipts retire those.
         db.codeDao().deleteInBox(box.boxId)
+    }
+
+    private suspend fun releaseSetItems(item: ChangeItemDto, deviceId: String) {
+        if (item.deleted || !UUID.matches(item.id)) return
+        val data = item.data ?: return
+        val owner = data.stringField("deviceId")?.takeIf(UUID::matches) ?: return
+        if (owner != deviceId) return
+        val recordId = data.stringField("recordId")?.takeIf(UUID::matches) ?: return
+        val shiftId = data.stringField("shiftId")?.takeIf(UUID::matches) ?: return
+        val setCodeHash = data.stringField("setCodeHash")?.takeIf(HASH::matches) ?: return
+        // The host only releases accepted sets, even when the original receipt is still in flight here.
+        // The frozen record still waits for its receipt. An old release can never free a claim from a new set.
+        db.setAssemblyDao().releaseItems(recordId, shiftId, setCodeHash)
     }
 
     private suspend fun operator(item: ChangeItemDto) {
@@ -234,6 +262,9 @@ class HostReferenceSync(
 
     private companion object {
         const val ORG_PALLET_TEMPLATE = "host_org_pallet_template"
+        const val SET_RELEASE_FEED_REPLAYED = "host_set_release_feed_replayed"
+        val UUID = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+        val HASH = Regex("[0-9a-f]{64}")
 
         fun lineKey(id: String) = "host_line:$id"
     }

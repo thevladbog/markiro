@@ -10,6 +10,138 @@ let f: Awaited<ReturnType<typeof oidcFixture>>;
 beforeAll(async () => {
   f = await oidcFixture();
 });
+
+function taggedFixture(product: "handheld" | "standalone") {
+  const ref = `refs/tags/${product}-publisher-v1`;
+  const workflowRef = `${f.config.repository}/.github/workflows/${product}-stable-release.yml@${ref}`;
+  const environment = `${product}-stable-publisher`;
+  const workflowSha = "d".repeat(40);
+  const subject = `repo:${f.config.repository}:environment:${environment}`;
+  const workflow = {
+    mode: "pinned-tag",
+    product,
+    environment,
+    workflowRef,
+    workflowSha,
+    subject,
+    jobWorkflowRef: workflowRef,
+    jobWorkflowSha: workflowSha,
+  };
+  return {
+    workflow,
+    config: { ...f.config, workflows: [f.workflow, workflow] },
+    claims: {
+      ref,
+      ref_type: "tag",
+      environment,
+      sub: subject,
+      workflow_ref: workflowRef,
+      workflow_sha: workflowSha,
+      sha: workflowSha,
+      job_workflow_ref: workflowRef,
+      job_workflow_sha: workflowSha,
+      actor_id: f.config.ownerId,
+    },
+  };
+}
+
+describe("immutable stable publisher tags", () => {
+  it.each(["handheld", "standalone"] as const)(
+    "admits the exact %s publisher and preserves legacy admission",
+    async (product) => {
+      const tagged = taggedFixture(product);
+      expect(publisherConfiguration(JSON.stringify(tagged.config))).toEqual(tagged.config);
+      const verified = await verifyPublisherToken(
+        await f.sign(tagged.claims),
+        tagged.config,
+        f.now,
+        f.resolver,
+      );
+      expect(verified).toMatchObject({
+        product,
+        mode: "pinned-tag",
+        workflowSha: tagged.workflow.workflowSha,
+        actorId: f.config.ownerId,
+      });
+      const legacyToken = await f.sign();
+      const baseline = await verifyPublisherToken(legacyToken, f.config, f.now, f.resolver);
+      const legacy = await verifyPublisherToken(legacyToken, tagged.config, f.now, f.resolver);
+      expect(legacy).toEqual(baseline);
+    },
+  );
+
+  it("rejects a changed or incomplete tag, repository, environment, job identity, or owner", async () => {
+    const tagged = taggedFixture("standalone");
+    for (const patch of [
+      { ref: "refs/tags/standalone-publisher-v2" },
+      { ref_type: "branch" },
+      { environment: "standalone-release" },
+      {
+        workflow_ref:
+          "owner/another/.github/workflows/standalone-stable-release.yml@refs/tags/standalone-publisher-v1",
+      },
+      { workflow_sha: "e".repeat(40), sha: "e".repeat(40) },
+      { sha: "e".repeat(40) },
+      { job_workflow_ref: undefined },
+      { job_workflow_sha: undefined },
+      { job_workflow_sha: "e".repeat(40) },
+      { actor_id: "1011" },
+    ]) {
+      await expect(
+        verifyPublisherToken(
+          await f.sign({ ...tagged.claims, ...patch }),
+          tagged.config,
+          f.now,
+          f.resolver,
+        ),
+      ).rejects.toMatchObject({ code: "forbidden" });
+    }
+  });
+
+  it("rejects tagged configuration with a moving ref, another product, or a nonidentical job pin", () => {
+    const { workflow } = taggedFixture("handheld");
+    for (const invalid of [
+      { ...workflow, product: "station" },
+      { ...workflow, mode: undefined },
+      {
+        ...workflow,
+        workflowRef: workflow.workflowRef.replace(
+          "refs/tags/handheld-publisher-v1",
+          "refs/heads/main",
+        ),
+      },
+      {
+        ...workflow,
+        workflowRef: workflow.workflowRef.replace(
+          "handheld-publisher-v1",
+          "handheld-publisher-v01",
+        ),
+      },
+      { ...workflow, environment: "handheld-release" },
+      { ...workflow, jobWorkflowRef: workflow.workflowRef.replace("v1", "v2") },
+      { ...workflow, jobWorkflowSha: "e".repeat(40) },
+      { ...workflow, jobWorkflowSha: undefined },
+    ]) {
+      expect(() =>
+        publisherConfiguration(JSON.stringify({ ...f.config, workflows: [invalid] })),
+      ).toThrow("Invalid release catalog publisher configuration");
+    }
+  });
+
+  it("cannot admit two commits under the same publisher tag", () => {
+    const { workflow } = taggedFixture("handheld");
+    const nextSha = "e".repeat(40);
+    expect(() =>
+      publisherConfiguration(
+        JSON.stringify({
+          ...f.config,
+          workflows: [workflow, { ...workflow, workflowSha: nextSha, jobWorkflowSha: nextSha }],
+        }),
+      ),
+    ).toThrow("Invalid release catalog publisher configuration");
+  });
+});
+
 describe("pinned GitHub release publisher identity", () => {
   it("accepts GitHub certificate thumbprint and its backdated not-before claim", async () => {
     const token = await f.sign({ nbf: f.now - 600 }, { x5t: "a".repeat(27) });

@@ -36,7 +36,8 @@ pub enum ExportFileKind {
     ShiftExport,
     /// A pallet's ЧЗ document.
     PalletExport,
-    /// A disaggregation document's «Расформирование упаковки» file.
+    /// A disaggregation document's «Расформирование упаковки» file. Keep the
+    /// legacy kind for stored XML and JSON; `format_id` selects the format.
     DisaggregationXml,
     /// A printed form (`form_*` formats), as its HTML.
     Form,
@@ -78,12 +79,13 @@ impl ExportTargetType {
 
 /// The printed forms' format ids (`FormKind` of the office, `form_` first),
 /// all at version 1.
-pub const FORM_FORMATS: [&str; 6] = [
+pub const FORM_FORMATS: [&str; 7] = [
     "form_box",
     "form_pallet",
     "form_placard",
     "form_placards",
     "form_task",
+    "form_sets",
     "form_act",
 ];
 

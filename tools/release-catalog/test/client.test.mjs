@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { createCatalogClient } from "../client.mjs";
+import { createCatalogClient, createCatalogUploadStore } from "../client.mjs";
 const id = "11111111-1111-4111-8111-111111111111";
 const pubId = "22222222-2222-4222-8222-222222222222";
 const opId = "33333333-3333-4333-8333-333333333333";
 const hash = (b) => createHash("sha256").update(b).digest("hex");
-function fixture() {
+function fixture(product = "handheld", channel = "stable") {
   const bytes = Buffer.from("installer fixture");
   const spec = {
     name: "manifest.json",
@@ -14,19 +14,23 @@ function fixture() {
     sizeBytes: bytes.length,
     contentType: "application/json",
   };
-  const identity = { product: "handheld", channel: "stable", version: "1.7.0" };
+  const identity = { product, channel, version: "1.7.0" };
   const publication = {
     identity,
     sourceSha: "a".repeat(40),
     files: [spec],
-    evidence: { kind: "handheld", manifestName: "manifest.json", versionCode: 16 },
+    evidence: {
+      kind: product,
+      manifestName: "manifest.json",
+      ...(product === "handheld" ? { versionCode: 16 } : {}),
+    },
   };
   const intent = {
     id,
     identity,
     state: "pending",
     expiresAt: new Date(Date.now() + 600000).toISOString(),
-    files: [{ ...spec, key: `handheld/_uploads/${id}/manifest.json` }],
+    files: [{ ...spec, key: `${product}/_uploads/${id}/manifest.json` }],
   };
   const result = {
     publicationId: pubId,
@@ -34,7 +38,10 @@ function fixture() {
     files: [
       {
         ...spec,
-        publicPath: "/handheld/stable/releases/1.7.0/manifest.json",
+        publicPath:
+          product === "standalone"
+            ? `/standalone/${channel}/1.7.0/manifest.json`
+            : `/${product}/${channel}/releases/1.7.0/manifest.json`,
         versionId: "version/original+1",
       },
     ],
@@ -59,9 +66,9 @@ function fixture() {
       if (commitFailure) return Response.json({ secret: "do not log" }, { status: 409 });
       return Response.json(result);
     }
-    if (url.endsWith("/channels/handheld/stable"))
+    if (url.endsWith(`/channels/${product}/${channel}`))
       return Response.json({
-        identity: { product: "handheld", channel: "stable" },
+        identity: { product, channel },
         revision: options.method === "PUT" ? "2" : "1",
         publicationId: pubId,
         readable: true,
@@ -95,6 +102,56 @@ function fixture() {
     },
   };
 }
+test("a standalone publisher stages stable files and can only move the channel forward", async () => {
+  const f = fixture("standalone");
+  const scope = { product: "standalone", channel: "stable" };
+  const snapshot = await f.client.getChannel(scope);
+  const intent = await f.client.createIntent(id, f.publication);
+  const file = await f.client.uploadFile(intent, f.spec.name, f.bytes);
+  assert.equal(f.puts[0].key, `standalone/_uploads/${id}/manifest.json`);
+  await f.client.commitIntent(intent, [file]);
+  const change = {
+    operationId: opId,
+    expectedRevision: snapshot.revision,
+    targetPublicationId: pubId,
+    kind: "forward",
+  };
+  await assert.rejects(f.client.changeChannel(scope, { ...change, kind: "rollback" }), /invalid/u);
+  assert.equal(f.calls.filter(({ options }) => options.method === "PUT").length, 0);
+  assert.equal((await f.client.changeChannel(scope, change)).revision, "2");
+
+  const beta = fixture("standalone", "beta");
+  await assert.rejects(beta.client.createIntent(id, beta.publication), /invalid/u);
+  await assert.rejects(beta.client.uploadFile(beta.intent, beta.spec.name, beta.bytes), /invalid/u);
+  assert.equal(beta.calls.length, 0);
+  assert.equal(beta.puts.length, 0);
+});
+test("standalone upload adapter only writes private staging keys and returns the exact VersionId", async () => {
+  const writes = [];
+  const store = createCatalogUploadStore({
+    env: {
+      RELEASES_S3_ENDPOINT: "https://s3.twcstorage.ru",
+      RELEASES_S3_BUCKET: "fixture-releases",
+      RELEASES_S3_ACCESS_KEY_ID: "fixture-key",
+      RELEASES_S3_SECRET_ACCESS_KEY: "fixture-secret",
+    },
+    Client: class {
+      async send(command) {
+        writes.push(command.input);
+        return { VersionId: "fixture/opaque+version" };
+      }
+    },
+  });
+  const key = `standalone/_uploads/${id}/markiro-standalone-1.7.0.update.jws`;
+  const body = Buffer.from("manifest bytes");
+  const contentType = "application/octet-stream";
+  assert.equal(await store.put({ key, body, contentType }), "fixture/opaque+version");
+  await assert.rejects(store.put({ key: "standalone/stable/latest.json", body, contentType }));
+  assert.deepEqual(
+    writes.map(({ Key, CacheControl }) => [Key, CacheControl]),
+    [[key, "private, no-store"]],
+  );
+});
 test("uses fixed audience, staged key and opaque returned version; commits then full public readback before CAS", async () => {
   const f = fixture();
   const intent = await f.client.createIntent(id, f.publication);

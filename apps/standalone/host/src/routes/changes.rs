@@ -63,6 +63,7 @@ const FEED_KEYS: &str = "\
     UNION ALL SELECT 'category_template_defaults', chz_group_code || ':' || purpose, rev, 0 \
         FROM category_template_defaults WHERE rev > ?1 \
     UNION ALL SELECT 'code_releases', box_id, rev, 0 FROM code_releases WHERE rev > ?1 \
+    UNION ALL SELECT 'set_releases', line_id, rev, 0 FROM set_releases WHERE rev > ?1 \
     UNION ALL SELECT entity, id, rev, 1 FROM tombstones WHERE rev > ?1";
 
 #[derive(Debug, Deserialize)]
@@ -421,6 +422,24 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
                 document_id,
                 released_at,
                 code_count,
+            })
+        }
+        entities::SET_RELEASES => {
+            let (device_id, record_id, shift_id, set_code_hash): (String, String, String, String) =
+                sqlx::query_as(
+                    "SELECT a.device_id, a.record_id, a.shift_id, json_extract(a.data, '$.setCode.codeHash') \
+                     FROM set_releases r JOIN set_assemblies a \
+                       ON a.device_id = r.device_id AND a.record_id = r.record_id WHERE r.line_id = ?",
+                )
+                .bind(&key.id)
+                .fetch_one(&mut *conn)
+                .await
+                .map_err(ApiError::internal)?;
+            serde_json::to_value(markiro_proto::disaggregation::SetReleaseRecord {
+                device_id,
+                record_id,
+                shift_id,
+                set_code_hash,
             })
         }
         other => {

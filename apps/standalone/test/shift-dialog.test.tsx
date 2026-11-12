@@ -117,6 +117,58 @@ describe("office shifts: planning a shift", () => {
     vi.useRealTimers();
   });
 
+  it("plans a set assembly shift without ordinary printing or packaging controls", async () => {
+    const session = shiftsSession();
+    const assemblyProduct = {
+      ...MILK,
+      name: "Зимний набор",
+      printName: null,
+      gtin14: "04607123456781",
+      chzProductGroupCode: 35,
+      setItems: [{ gtin14: "04607123456804", productName: "Крем", quantity: 2 }],
+    };
+    session.api.listProducts.mockResolvedValue([assemblyProduct, WATER]);
+    session.api.getOrg.mockResolvedValue({ ...ORG_PROFILE, useLotNumbers: true });
+    session.api.createShift.mockResolvedValue({
+      ...CREATED,
+      mode: "validation",
+      productId: assemblyProduct.id,
+      setItems: assemblyProduct.setItems,
+    });
+    await openCreate(session);
+    expect(options("Товар")).toContain(`${assemblyProduct.name} — ${assemblyProduct.gtin14}`);
+    set("Товар", assemblyProduct.id);
+    expect(within(dialog()).getByText("Сборка наборов")).toBeTruthy();
+    expect(within(dialog()).queryByLabelText("Шаблон этикетки короба")).toBeNull();
+    expect(within(dialog()).queryByLabelText("Номер партии (необязательно)")).toBeNull();
+    expect(within(dialog()).queryByLabelText("Печатать дубликат Data Matrix")).toBeNull();
+    set("Товар", WATER.id);
+    expect(
+      within(dialog()).getByRole("radio", { name: "Агрегация" }).getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(valueOf("Шаблон этикетки короба")).toBe(BOX_58.id);
+    set("Товар", assemblyProduct.id);
+    set("Линия", LINE_2.id);
+    set("План, наборов", "30");
+    submit();
+    await waitFor(() =>
+      expect(session.api.createShift).toHaveBeenCalledWith(
+        TOKEN,
+        expect.objectContaining({
+          productId: assemblyProduct.id,
+          lineId: LINE_2.id,
+          mode: "validation",
+          plannedQty: 30,
+          palletsEnabled: false,
+          validationPrint: { mode: "none" },
+        }),
+      ),
+    );
+    const payload = session.api.createShift.mock.calls[0]?.[1];
+    expect(payload).not.toHaveProperty("boxTemplateId");
+    expect(payload).not.toHaveProperty("lotNumber");
+  });
+
   it("shows the optional lot field when enabled and sends the trimmed number with its original case", async () => {
     const session = shiftsSession();
     const stock = buildStockLotNumberLabelVariants().find((each) => each.purpose === "box");

@@ -2,8 +2,18 @@ import { act, fireEvent, screen, waitFor, within, type RenderResult } from "@tes
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostError } from "../src/host/client.js";
+import type {
+  DisaggregationReportRows,
+  DisaggregationReportVariant,
+} from "../src/host/disaggregation.js";
 import type { DeviceRecord, OfficeShift } from "../src/host/protocol.js";
-import { ORG_PROFILE, TECHNOLOGIST, type FakeOfficeSession } from "./support/office.js";
+import {
+  ORG_PROFILE,
+  renderOffice,
+  TECHNOLOGIST,
+  type FakeOfficeSession,
+} from "./support/office.js";
+import { fakeOfficeFiles } from "./support/office-files.js";
 import {
   ACTIVE,
   CLOSED,
@@ -88,6 +98,103 @@ describe("office shifts: a shift's figures", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("saves the shift-wide disaggregation act and JSON without recording a single document export", async () => {
+    const stationShift: OfficeShift = { ...ACTIVE, createdFrom: "station", number: "OCT26-004/S" };
+    const folderNumber = "OCT26-004_S";
+    const session = shiftsSession([stationShift]);
+    const files = fakeOfficeFiles();
+    const readReport = vi.fn(
+      async (
+        _token: string,
+        id: string,
+        variant: DisaggregationReportVariant,
+      ): Promise<DisaggregationReportRows> => ({
+        id,
+        docNo: stationShift.number,
+        status: "applied",
+        createdAt: "2026-10-08T09:00:00Z",
+        appliedAt: "2026-10-08T11:00:00Z",
+        createdByName: null,
+        appliedByName: null,
+        reasonName: null,
+        comment: null,
+        organization: { name: ORG_PROFILE.name, inn: ORG_PROFILE.inn },
+        variant,
+        lines: [
+          {
+            id: "ab000000-0000-4000-8000-000000000001",
+            boxId: "ab000000-0000-4000-8000-000000000002",
+            palletId: null,
+            sscc: "046007034967000017",
+            productName: "Крем для рук",
+            codeCount: 1,
+            items: [],
+            boxes: [],
+          },
+          {
+            id: "ab000000-0000-4000-8000-000000000003",
+            boxId: null,
+            palletId: null,
+            sscc: null,
+            setCode: "010460712345678121SET0001",
+            productName: "Зимний набор",
+            codeCount: 3,
+            items: [],
+            boxes: [],
+          },
+        ],
+      }),
+    );
+    session.api.getShiftDisaggregationReportRows.mockImplementation(readReport);
+    renderOffice(session, { initialPath: "/shifts", files });
+    fireEvent.click(
+      await screen.findByRole("button", { name: `Итоги смены ${stationShift.number}` }),
+    );
+    const totals = await screen.findByRole("dialog", {
+      name: `Итоги смены ${stationShift.number}`,
+    });
+    fireEvent.click(await within(totals).findByRole("button", { name: "Акт дезагрегации смены" }));
+    const actDialog = await screen.findByRole("dialog", {
+      name: `Акт дезагрегации смены ${stationShift.number}`,
+    });
+    const openAct = within(actDialog).getByRole("button", { name: "Открыть в браузере" });
+    await waitFor(() => expect(openAct.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(openAct);
+    await waitFor(() => expect(files.openFile).toHaveBeenCalledTimes(1));
+    expect(files.save.mock.calls[0]?.[1][0]?.name).toBe(
+      `Акт дезагрегации смены ${folderNumber}.html`,
+    );
+    const html = new TextDecoder().decode(files.save.mock.calls[0]?.[1][0]?.bytes);
+    expect(html).toContain(`Акт дезагрегации смены ${stationShift.number}`);
+    expect(html).toContain("КИ набора 010460712345678121SET0001");
+    expect(html).toContain("(00)046007034967000017");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: `Акт дезагрегации смены ${stationShift.number}` }),
+      ).toBeNull(),
+    );
+    fireEvent.click(
+      within(totals).getByRole("button", { name: "[JSON][ГИСМТ] Расформирование упаковки" }),
+    );
+    const jsonDialog = await screen.findByRole("dialog", {
+      name: `JSON дезагрегации смены ${stationShift.number}`,
+    });
+    await within(jsonDialog).findByText(
+      `Документы\\Markiro\\Выгрузки\\Дезагрегация\\${folderNumber}`,
+    );
+    fireEvent.click(within(jsonDialog).getByRole("button", { name: "Сформировать файл" }));
+    await within(jsonDialog).findByText(/Файл сохранён в папке/);
+    expect(files.save.mock.calls[1]?.[1][0]?.name).toBe(`disaggregation-${folderNumber}.json`);
+    expect(JSON.parse(new TextDecoder().decode(files.save.mock.calls[1]?.[1][0]?.bytes))).toEqual({
+      participant_inn: ORG_PROFILE.inn,
+      products_list: [{ uitu: "00046007034967000017" }, { uitu: "010460712345678121SET0001" }],
+    });
+    expect(readReport).toHaveBeenCalledWith(TOKEN, ACTIVE.id, "boxes");
+    expect(session.api.getDisaggregationReportRows).not.toHaveBeenCalled();
+    expect(session.api.recordDisaggregationExport).not.toHaveBeenCalled();
+    expect(session.api.beginExportFile).not.toHaveBeenCalled();
   });
 
   it("offers the figures of an active and a closed shift to both roles, and none of a planned one", async () => {

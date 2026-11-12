@@ -5,6 +5,7 @@ import process from "node:process";
 import { publishHandheldDownload } from "./download.mjs";
 import { readNotes } from "./changelog.mjs";
 import { assertSupersedes, buildHandheldManifest, handheldChannelBaseUrl } from "./manifest.mjs";
+import { HANDHELD_PUBLISHER_TAG } from "./stable-release.mjs";
 import {
   contentTypeFor,
   handheldApkName,
@@ -118,9 +119,20 @@ export async function publishHandheldRelease({
   };
 }
 
+export function resolvePublicationSource(env) {
+  if (env.GITHUB_REF === HANDHELD_PUBLISHER_TAG) {
+    if (!/^[a-f0-9]{40}$/u.test(env.HANDHELD_SOURCE_SHA ?? ""))
+      throw new Error("handheld stable release requires a verified product SHA");
+    return env.HANDHELD_SOURCE_SHA;
+  }
+  if (env.HANDHELD_SOURCE_SHA !== undefined)
+    throw new Error("separate product SHA is only allowed on the handheld publisher tag");
+  return env.GITHUB_SHA;
+}
+
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replaceAll("\\", "/"))) {
   const [apkPath, versionName, versionCode, channel] = process.argv.slice(2);
-  const sourceSha = process.env.GITHUB_SHA;
+  const sourceSha = resolvePublicationSource(process.env);
   if (!apkPath || !versionName || !versionCode || !sourceSha) {
     console.error(
       "usage: GITHUB_SHA=… node tools/handheld-release/publish.mjs <apk> <versionName> <versionCode> [channel]",
@@ -128,7 +140,12 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replaceAll("\\",
     process.exit(2);
   }
   // Use curated notes when available, otherwise generate the release description.
-  const notes = await readNotes(versionName);
+  const notes = await readNotes(
+    versionName,
+    process.env.GITHUB_REF === HANDHELD_PUBLISHER_TAG
+      ? process.env.HANDHELD_CHANGELOG_FILE
+      : undefined,
+  );
   const { createCatalogClient } = await import("../release-catalog/client.mjs");
   const { publishHandheldCatalogRelease } = await import("./catalog-publisher.mjs");
   if (

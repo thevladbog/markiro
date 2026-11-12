@@ -45,4 +45,26 @@ describe("«Акт дезагрегации» from the host's rows", () => {
     expect(form?.html).toBe(cloudBytes("disaggregation-act-full-moscow.html"));
     expect(form?.fileName).toBe("Акт дезагрегации DSG-26-0007.html");
   });
+
+  it("prints the set KI and its contents beside an ordinary SSCC without confusing the two", () => {
+    const ordinary = rows("disaggregation-report-rows-full.json");
+    const [box] = ordinary.lines;
+    if (box === undefined) throw new Error("Missing box fixture");
+    const setCode = "010460712345678121SET001";
+    const mixed = disaggregationReportRowsSchema.parse({
+      ...ordinary,
+      lines: [box, { ...box, sscc: null, setCode, productName: "Зимний набор" }],
+    });
+    const html = renderForm({ kind: "act", rows: mixed, timeZone: "Europe/Moscow" })?.html ?? "";
+    expect(html).toContain(`КИ набора ${setCode}`);
+    expect(html).toContain(`(00)${box.sscc}`);
+    expect(html).toContain("Зимний набор");
+    expect(html).toContain("упаковок — 2");
+    expect(html).not.toContain("(00)null");
+    const firstItem = box.items[0];
+    if (firstItem === undefined) throw new Error("Missing item fixture");
+    expect(
+      html.indexOf(`01 ${firstItem.gtin14} 21 ${firstItem.serial}`, html.indexOf(setCode)),
+    ).toBeGreaterThan(html.indexOf(setCode));
+  });
 });

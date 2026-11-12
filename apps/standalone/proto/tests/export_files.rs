@@ -65,7 +65,8 @@ fn the_bounds_are_the_ones_the_office_reads() {
     assert_eq!(EXPORT_FILE_CHUNK_BYTES, 1_048_576);
     assert_eq!(EXPORT_FILE_MAX_BYTES / EXPORT_FILE_CHUNK_BYTES, 256);
     assert_eq!(EXPORT_STORE_MAX_BYTES, 2 * 1024 * 1024 * 1024);
-    assert_eq!(FORM_FORMATS.len(), 6);
+    assert_eq!(FORM_FORMATS.len(), 7);
+    assert!(FORM_FORMATS.contains(&"form_sets"));
     assert_eq!(
         ExportFileKind::DisaggregationXml.as_str(),
         "disaggregation_xml"

@@ -28,6 +28,13 @@ catalogue. The work screen keeps the shift's frozen recipe and each item's
 count. Scan the package Data Matrix after all components are present. The
 unfinished assembly survives restart. A completed set enters the local sync
 queue and is sent to the host when connectivity returns.
+When the office disassembles an accepted set, the next successful host sync
+frees its component marks for another assembly or for box aggregation. The original packaging code
+remains claimed.
+In an Автоном aggregation shift, a mark known to belong to an active set is recorded
+in the scan journal as a duplicate outside the box. The terminal checks local claims
+first and uses a short host lookup when connected. If the host cannot answer, the
+scan follows the normal offline path and the host can report a conflict on sync.
 
 ## Build and test
 

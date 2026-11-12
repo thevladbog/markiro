@@ -8,6 +8,8 @@ import app.markiro.handheld.core.km.KmCodec
 import app.markiro.handheld.core.km.Verdict
 import app.markiro.handheld.core.storage.CodeEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
+import app.markiro.handheld.core.storage.SetAssemblyClaimEntity
+import app.markiro.handheld.core.storage.SetAssemblyEntity
 import app.markiro.handheld.core.storage.ShiftEntity
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -15,8 +17,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -110,6 +114,52 @@ class ScanRecorderTest {
         // The code stays in the box that actually accepted it.
         assertEquals("box-1", db.codeDao().get(second.hash!!)?.boxId)
         assertNull(db.outboxDao().head(2).last().boxId)
+    }
+
+    @Test
+    fun activeSetClaimsBlockAggregationUntilTheChildIsReleased() = runTest {
+        val config = checkNotNull(db.deviceConfigDao().get())
+        db.deviceConfigDao().upsert(config.copy(backend = "host"))
+        val aggregate = shift.copy(mode = "aggregation")
+        val raw = "010460068200001321held"
+        val hash = KmCodec.hash(KmCodec.canonicalize(raw))
+        val parent = "a".repeat(64)
+        db.setAssemblyDao().insert(SetAssemblyEntity("set", "set-shift", "queued"))
+        db.setAssemblyDao().claim(listOf(SetAssemblyClaimEntity(hash, "set"), SetAssemblyClaimEntity(parent, "set")))
+
+        val recorder = recorder()
+        assertTrue(recorder.record(aggregate, raw, "op-1", boxId = "box-1").blockedBySet)
+        db.setAssemblyDao().settle("set", "accepted")
+        assertTrue(recorder.record(aggregate, raw, "op-1", boxId = "box-1").blockedBySet)
+        assertNull(db.codeDao().get(hash))
+        assertEquals(listOf("duplicate", "duplicate"), db.outboxDao().head(10).map { it.verdict })
+        assertTrue(db.outboxDao().head(10).all { it.boxId == null })
+
+        db.setAssemblyDao().releaseItems("set", "set-shift", parent)
+        val accepted = recorder.record(aggregate, raw, "op-1", boxId = "box-1")
+        assertFalse(accepted.blockedBySet)
+        assertEquals(Verdict.OK, accepted.verdict)
+        assertEquals("box-1", db.codeDao().get(hash)?.boxId)
+        assertEquals(listOf(parent), db.setAssemblyDao().claimed(listOf(parent, hash)))
+    }
+
+    @Test
+    fun aLosingSetDoesNotBlockAggregationAndFlatValidationStillAcceptsSetMembers() = runTest {
+        val config = checkNotNull(db.deviceConfigDao().get())
+        db.deviceConfigDao().upsert(config.copy(backend = "host"))
+        val losing = "010460068200001321losing"
+        val active = "010460068200001321active"
+        db.setAssemblyDao().insert(SetAssemblyEntity("lost-set", "set-shift", "conflict"))
+        db.setAssemblyDao().insert(SetAssemblyEntity("active-set", "set-shift", "accepted"))
+        db.setAssemblyDao().claim(
+            listOf(
+                SetAssemblyClaimEntity(KmCodec.hash(KmCodec.canonicalize(losing)), "lost-set"),
+                SetAssemblyClaimEntity(KmCodec.hash(KmCodec.canonicalize(active)), "active-set"),
+            ),
+        )
+        val recorder = recorder()
+        assertEquals(Verdict.OK, recorder.record(shift.copy(mode = "aggregation"), losing, null, "box-1").verdict)
+        assertEquals(Verdict.OK, recorder.record(shift, active, null).verdict)
     }
 
     @Test

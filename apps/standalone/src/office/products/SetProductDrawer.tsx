@@ -1,15 +1,18 @@
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Input, Select } from "@markiro/ui";
+import { Alert, Button, IconButton, Input, Select } from "@markiro/ui";
 
-import type { OfficeProduct } from "../../host/protocol.js";
+import type { OfficeProduct, ProductGroup } from "../../host/protocol.js";
 import { productCreate, productUpdate, type ProductInput } from "../../host/requests.js";
 import { gtinRule, productNameRule, toGtin14 } from "../../lib/rules.js";
 import { EntityDrawer } from "../EntityDrawer.js";
 import { writeFailure, type AlertFailure } from "../form-errors.js";
+import { OfficeIcon } from "../OfficeIcon.js";
 import { useOfficeMutation } from "../office-query.js";
 import { WriteFailureAlert } from "../page-state.js";
 import { searchableSelect } from "../select-search.js";
+import { ProductPhotoField } from "./ProductPhotoField.js";
+import type { EncodedPhoto } from "./photo-encode.js";
 import { PRODUCT_CONFLICTS } from "./product-form.js";
 import "./set-product.css";
 
@@ -27,14 +30,16 @@ interface RecipeLine {
 interface SetProductDrawerProps {
   product: OfficeProduct | null;
   products: readonly OfficeProduct[];
+  groups: readonly ProductGroup[];
   onClose: () => void;
   onReload: () => void;
-  onSaved: (product: OfficeProduct) => void;
+  onSaved: (product: OfficeProduct, photoFailed: boolean) => void;
 }
 
 export function SetProductDrawer({
   product,
   products,
+  groups,
   onClose,
   onReload,
   onSaved,
@@ -45,6 +50,8 @@ export function SetProductDrawer({
   const [lines, setLines] = useState<RecipeLine[]>(() =>
     (product?.setItems ?? []).map((item) => ({ ...item, quantity: String(item.quantity) })),
   );
+  const [group, setGroup] = useState(String(COSMETICS_GROUP));
+  const [stagedPhoto, setStagedPhoto] = useState<EncodedPhoto | null>(null);
   const [selection, setSelection] = useState("");
   const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
   const [failure, setFailure] = useState<AlertFailure | null>(null);
@@ -56,10 +63,14 @@ export function SetProductDrawer({
           !row.archived &&
           !row.demo &&
           row.setItems === undefined &&
-          row.chzProductGroupCode === COSMETICS_GROUP,
+          row.chzProductGroupCode === Number(group),
       )
       .map((row) => [row.gtin14, row.name]),
   );
+  const groupName = groups.find(({ code }) => code === COSMETICS_GROUP)?.name;
+  const groupOptions = [
+    { value: String(COSMETICS_GROUP), label: groupName ?? t("office.products.sets.cosmetics") },
+  ];
   const choices = [...available]
     .filter(([code]) => !lines.some((line) => line.gtin14 === code))
     .map(([value, label]) => ({ value, label: `${label} · ${value}` }));
@@ -74,6 +85,10 @@ export function SetProductDrawer({
     product === null
       ? api.createProduct(token, productCreate(input))
       : api.updateProduct(token, product.id, productUpdate(input, product.archived, product.rev)),
+  );
+
+  const writePhoto = useOfficeMutation((api, token, write: { id: string; photo: EncodedPhoto }) =>
+    api.putProductPhoto(token, write.id, write.photo),
   );
 
   function updateLines(next: RecipeLine[]) {
@@ -107,7 +122,7 @@ export function SetProductDrawer({
         gtin14: toGtin14(checkedGtin.data),
         name: checkedName.data,
         setItems: checkedItems,
-        chzProductGroupCode: COSMETICS_GROUP,
+        chzProductGroupCode: Number(group),
         printName: product?.printName ?? null,
         boxCapacity: null,
         palletBoxCapacity: null,
@@ -118,7 +133,16 @@ export function SetProductDrawer({
         defaultCounterpartyId: product?.defaultCounterpartyId ?? null,
         egaisCode: null,
       });
-      onSaved(saved);
+      if (product === null && stagedPhoto !== null) {
+        try {
+          const { photo } = await writePhoto.mutateAsync({ id: saved.id, photo: stagedPhoto });
+          onSaved({ ...saved, photoChecksum: photo?.checksum ?? null }, false);
+        } catch {
+          onSaved(saved, true);
+        }
+      } else {
+        onSaved(saved, false);
+      }
     } catch (error) {
       const outcome = writeFailure(error, FIELDS, PRODUCT_CONFLICTS);
       if (outcome.kind === "field") {
@@ -137,7 +161,16 @@ export function SetProductDrawer({
       title={t(product === null ? "office.products.sets.add" : "office.products.sets.edit")}
       submitLabel={t("office.common.save")}
       submitDisabled={product !== null && !dirty}
-      dirty={dirty}
+      dirty={dirty || stagedPhoto !== null}
+      top={
+        <ProductPhotoField
+          productId={product?.id ?? null}
+          productName={name}
+          set
+          staged={stagedPhoto}
+          onStage={setStagedPhoto}
+        />
+      }
       onClose={onClose}
       onSubmit={submit}
       alert={<WriteFailureAlert failure={failure} onReload={onReload} />}
@@ -156,13 +189,20 @@ export function SetProductDrawer({
         onChange={(event) => setGtin(event.target.value)}
         {...(errors.gtin14 ? { error: t(errors.gtin14) } : {})}
       />
-      <Input
-        label={t("office.products.table.group")}
-        value={t("office.products.sets.cosmetics")}
-        readOnly
+      <Select
+        label={t("office.products.fields.group")}
+        options={groupOptions}
+        value={group}
+        onValueChange={setGroup}
       />
       <fieldset className="set-product__recipe">
         <legend>{t("office.products.sets.composition")}</legend>
+        {lines.length > 0 && (
+          <div className="set-product__head" aria-hidden="true">
+            <span>{t("office.products.table.product")}</span>
+            <span>{t("office.products.sets.quantity")}</span>
+          </div>
+        )}
         <ul>
           {lines.map((line) => (
             <li key={line.gtin14}>
@@ -174,8 +214,10 @@ export function SetProductDrawer({
                 )}
               </span>
               <Input
-                label={t("office.products.sets.quantityFor", { name: line.productName })}
+                aria-label={t("office.products.sets.quantityFor", { name: line.productName })}
+                className="set-product__quantity"
                 inputMode="numeric"
+                mono
                 value={line.quantity}
                 onChange={(event) =>
                   updateLines(
@@ -187,14 +229,14 @@ export function SetProductDrawer({
                   )
                 }
               />
-              <Button
+              <IconButton
                 type="button"
-                variant="secondary"
+                variant="ghost"
+                size="compact"
+                icon={<OfficeIcon name="trash" size={16} />}
                 aria-label={t("office.products.sets.removeNamed", { name: line.productName })}
                 onClick={() => updateLines(lines.filter((item) => item.gtin14 !== line.gtin14))}
-              >
-                {t("office.products.sets.remove")}
-              </Button>
+              />
             </li>
           ))}
         </ul>

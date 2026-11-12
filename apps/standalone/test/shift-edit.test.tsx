@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostError } from "../src/host/client.js";
 import type { OfficeShift } from "../src/host/protocol.js";
-import { TECHNOLOGIST, type FakeOfficeSession } from "./support/office.js";
+import { ORG_PROFILE, TECHNOLOGIST, type FakeOfficeSession } from "./support/office.js";
 import {
   ACTIVE,
   AYRAN_ARCHIVED,
@@ -14,6 +14,7 @@ import {
   KEFIR_DRAFT,
   LINE_10,
   LINE_2,
+  MILK,
   NORTH,
   OLD_BOX,
   OLD_LINE,
@@ -155,6 +156,42 @@ describe("office shifts: changing a shift", () => {
       expect(menuOf(CLOSED.number)).toEqual([["Выгрузка смены OCT26-001/S", null]]);
       view.unmount();
     }
+  });
+
+  it("edits a planned assembly shift without sending a box template or changing its mode", async () => {
+    const product = {
+      ...MILK,
+      name: "Зимний набор",
+      printName: null,
+      chzProductGroupCode: 35,
+      setItems: [{ gtin14: "04607123456804", productName: "Крем", quantity: 2 }],
+    };
+    const planned: OfficeShift = {
+      ...PLANNED,
+      productId: product.id,
+      mode: "validation",
+      boxTemplateId: "00000000-0000-0000-0000-000000000000",
+      setItems: product.setItems,
+    };
+    const session = shiftsSession([planned]);
+    session.api.listProducts.mockResolvedValue([product]);
+    session.api.getOrg.mockResolvedValue({ ...ORG_PROFILE, useLotNumbers: true });
+    session.api.updateShift.mockResolvedValue({ ...planned, plannedQty: 25, rev: planned.rev + 1 });
+    await openShifts(session);
+    const name = await startEditing(planned.number);
+    expect(within(dialog(name)).queryByLabelText("Шаблон этикетки короба")).toBeNull();
+    expect(within(dialog(name)).queryByLabelText("Номер партии (необязательно)")).toBeNull();
+    expect(within(dialog(name)).getByRole("group", { name: "Режим работы" }).textContent).toBe(
+      "Сборка наборов",
+    );
+    setField(name, "План, наборов", "25");
+    fireEvent.click(save(name));
+    await waitFor(() =>
+      expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, planned.id, {
+        expectedRev: planned.rev,
+        plannedQty: 25,
+      }),
+    );
   });
 
   it("opens a planned shift with its own values and its product named, and saves only after a change", async () => {

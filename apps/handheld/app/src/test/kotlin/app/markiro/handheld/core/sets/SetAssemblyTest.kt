@@ -64,6 +64,25 @@ class SetAssemblyTest {
     }
 
     @Test
+    fun `set scan validation uses the host's 64 byte serial limit`() {
+        val exact = code(cream, "я".repeat(32))
+        val tooLong = code(cream, "я".repeat(33))
+        assertEquals(SetScanStatus.ITEM_ADDED, judgeSetScan(kit, items, emptyList(), exact, emptySet()).status)
+        val invalid = judgeSetScan(kit, items, emptyList(), tooLong, emptySet())
+        assertEquals(SetScanStatus.INVALID, invalid.status)
+        assertTrue(invalid.items.isEmpty())
+
+        val complete = listOf(exact, code(cream, "cream2"), code(balm, "balm1"), code(gel, "gel1"))
+        val invalidPackage = judgeSetScan(kit, items, complete, code(kit, "A".repeat(65)), emptySet())
+        assertEquals(SetScanStatus.INVALID, invalidPackage.status)
+        assertEquals(complete, invalidPackage.items)
+        val legacyDraft = complete.drop(1) + tooLong
+        val invalidLegacy = judgeSetScan(kit, items, legacyDraft, code(kit, "set1"), emptySet())
+        assertEquals(SetScanStatus.INVALID, invalidLegacy.status)
+        assertEquals(legacyDraft, invalidLegacy.items)
+    }
+
+    @Test
     fun `fact batching keeps queue order within the host request size`() {
         val overhead = """{"records":[]}""".length
         val max = HostSyncEngine.MAX_BODY_BYTES

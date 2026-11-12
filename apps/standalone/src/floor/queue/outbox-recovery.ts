@@ -37,7 +37,8 @@ export const QUEUE_LISTED_PER_SHIFT = 20;
  */
 export const QUEUE_SETTLED_SQL =
   "SELECT o.id, o.seq, o.kind, o.shift_id, s.number AS shift_number, o.created_at, o.outcome, " +
-  "o.outcome_code AS code, coalesce(o.payload ->> '$.data.sscc', b.sscc, p.sscc) AS sscc " +
+  "o.outcome_code AS code, coalesce(o.payload ->> '$.data.sscc', b.sscc, p.sscc) AS sscc, " +
+  "o.outcome_details -> '$.setMembership' AS set_membership " +
   "FROM (SELECT seq, row_number() OVER (PARTITION BY shift_id, outcome ORDER BY seq) AS place " +
   "FROM outbox WHERE host_id = ? AND device_id = ? AND outcome IN ('rejected', 'conflict') " +
   "AND resolved_at IS NULL) AS f JOIN outbox o ON o.seq = f.seq " +
@@ -175,6 +176,7 @@ export interface SettledRecord {
   outcome: "rejected" | "conflict";
   /** The host's code of a refusal; `null` for a conflict or a refusal without one. */
   code: string | null;
+  setMembership?: true;
   /** The SSCC of the box or pallet the record names, when the station knows it. */
   sscc: string | null;
 }
@@ -237,6 +239,7 @@ const settledRow = z.object({
   created_at: z.string(),
   outcome: z.enum(["rejected", "conflict"]),
   code: z.string().nullable(),
+  set_membership: z.string().nullable(),
   sscc: z.string().nullable(),
 });
 const displacedRow = z.object({
@@ -297,6 +300,7 @@ export async function readQueue(local: LocalExecutor, pairing: Pairing): Promise
         createdAt: row.created_at,
         outcome: row.outcome,
         code: row.code,
+        ...(row.set_membership === "true" ? { setMembership: true as const } : {}),
         sscc: row.sscc,
       }))
       .sort((a, b) => a.seq - b.seq),

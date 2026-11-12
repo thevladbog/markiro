@@ -173,7 +173,15 @@ it("lists the assembled sets and their item codes in a set shift's card", async 
       operatorId: null,
       assembledAt: "2026-10-08T06:05:12.031Z",
       setCode,
-      items: [item],
+      items: [
+        item,
+        {
+          gtin14: "04607123456811",
+          serial: "ITEM2",
+          codeHash: "historical-item-hash",
+          canonical: "010460712345681121ITEM2",
+        },
+      ],
       outcome: "conflict",
     },
   ]);
@@ -183,7 +191,12 @@ it("lists the assembled sets and their item codes in a set shift's card", async 
   const sets = section("Наборы");
   const row = await within(sets).findByRole("row", { name: /010460712345678121SET1/ });
   expect(within(row).getByText("Конфликт кодов")).toBeTruthy();
-  fireEvent.click(within(row).getByText("Вложений: 1"));
+  fireEvent.click(within(row).getByText("Вложений: 2"));
+  expect(within(row).getByText("Крем для рук")).toBeTruthy();
+  expect(within(row).getByText("GTIN 04607123456804")).toBeTruthy();
+  expect(within(row).getAllByText("1 шт.")).toHaveLength(2);
+  expect(within(row).getByText("Товар без сохранённого названия")).toBeTruthy();
+  expect(within(row).getByText("GTIN 04607123456811")).toBeTruthy();
   expect(within(row).getByText("010460712345680421ITEM1").closest("details")?.open).toBe(true);
   expect(session.api.listShiftSets).toHaveBeenCalledWith(expect.any(String), shift.id);
   expect(session.api.listShiftBoxes).not.toHaveBeenCalled();

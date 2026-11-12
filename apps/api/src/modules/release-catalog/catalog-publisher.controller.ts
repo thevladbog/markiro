@@ -39,6 +39,7 @@ export class CatalogPublisherController {
       principal: { fingerprint: publisher.fingerprint, tokenHash: publisher.tokenHash },
       product: publisher.product,
       machine: true,
+      ...(publisher.mode ? { publisherMode: publisher.mode } : {}),
       expiresAt: publisher.expiresAt,
       actor: { actorPlatformUserId: null, actorRole: null, requestId: null },
     };

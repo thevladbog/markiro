@@ -1,11 +1,13 @@
+import { sanitizeShiftExportFilenameSegment } from "@markiro/domain";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, DefinitionGrid, Modal } from "@markiro/ui";
 
 import {
-  DISAGGREGATION_XML_FORMAT_ID,
-  DISAGGREGATION_XML_FORMAT_VERSION,
+  DISAGGREGATION_EXPORT_FORMATS,
+  DISAGGREGATION_EXPORT_FORMAT_VERSION,
+  type DisaggregationExportFormat,
   type DisaggregationExportRecord,
 } from "../../host/disaggregation.js";
 import { errorMessageKey } from "../../host/errors.js";
@@ -14,14 +16,19 @@ import { OfficeFilesError, type SavedFolder } from "../exports/office-files.js";
 import { storeExportFiles } from "../exports/stored-files.js";
 import { useRefreshStoredFiles } from "../exports/use-refresh-files.js";
 import { paint } from "../forms/print-form.js";
-import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
+import { useOfficeMutation } from "../office-query.js";
 import { useOfficeSession } from "../office-session.js";
 import { LoadError, PageLoading } from "../page-state.js";
-import { disaggregationXmlFolder, formDisaggregationXml } from "./disaggregation-xml.js";
+import {
+  disaggregationExportFolder,
+  formDisaggregationExport,
+  type DisaggregationExportRefusal,
+} from "./disaggregation-export.js";
+import { useDisaggregationReport, type DisaggregationReportSource } from "./report-source.js";
 
-export interface DisaggregationXmlDialogProps {
-  documentId: string;
-  docNo: string;
+interface DisaggregationExportDialogProps {
+  source: DisaggregationReportSource;
+  format: DisaggregationExportFormat;
   /** `formTimeZone(org)`: the folder's moment is the organization's. */
   timeZone: string;
   onClose: () => void;
@@ -39,7 +46,7 @@ type Outcome =
       /** The folder the shell wrote, or `null` when it could not and only the host holds the file. */
       saved: SavedFolder | null;
       folderFailure: string | null;
-      hostCopy: HostCopy;
+      hostCopy: HostCopy | null;
       unrecorded: DisaggregationExportRecord | null;
     }
   | { kind: "failed"; message: string };
@@ -52,15 +59,15 @@ type Outcome =
  * `Документы\Markiro\Выгрузки\Дезагрегация` and only then asks the host to
  * write the audit row of it. A row the host refuses leaves the saved file
  * where it is and offers to write the same row again. The file is loaded
- * into the Честный знак cabinet by hand. Every office role with the
- * disaggregation right forms it (`planShifts` gates the button).
+ * into the Честный знак cabinet by hand for XML, or used as the document
+ * body for True API for JSON.
  */
-export function DisaggregationXmlDialog({
-  documentId,
-  docNo,
+export function DisaggregationExportDialog({
+  source,
+  format,
   timeZone,
   onClose,
-}: DisaggregationXmlDialogProps) {
+}: DisaggregationExportDialogProps) {
   const { t } = useTranslation();
   const files = useOfficeFiles();
   const session = useOfficeSession();
@@ -76,23 +83,29 @@ export function DisaggregationXmlDialog({
     };
   }, []);
 
-  const rows = useOfficeQuery(officeKeys.disaggregationReport(documentId, "boxes"), (api, token) =>
-    api.getDisaggregationReportRows(token, documentId, "boxes"),
-  );
+  const rows = useDisaggregationReport(source, "boxes");
+  const shift = source.scope === "shift";
   const record = useOfficeMutation((api, token, body: DisaggregationExportRecord) =>
-    api.recordDisaggregationExport(token, documentId, body),
+    api.recordDisaggregationExport(token, source.id, body),
   );
   const busy = phase !== "idle";
   const reading = rows.isPending || (rows.isFetching && !busy);
   const failed = !reading && rows.isError;
+  const formatId = DISAGGREGATION_EXPORT_FORMATS[format];
   const planned = useMemo(
-    () => (rows.data === undefined ? null : formDisaggregationXml(rows.data)),
-    [rows.data],
+    () => (rows.data === undefined ? null : formDisaggregationExport(rows.data, format)),
+    [rows.data, format],
   );
 
   function failureText(error: unknown): string {
     const code = error instanceof OfficeFilesError ? error.code : "storage";
     return t(`office.exports.files.${code}`);
+  }
+
+  function refusalText(reason: DisaggregationExportRefusal): string {
+    return shift && reason === "NO_PACKINGS"
+      ? t("office.shifts.totals.disaggregation.empty")
+      : t(`office.disaggregation.export.refusals.${reason}`);
   }
 
   /** Writes the journal's row of a file already saved; a refusal leaves the same row to write again. */
@@ -125,53 +138,58 @@ export function DisaggregationXmlDialog({
       setPhase("forming");
       await paint();
       if (!alive.current) return;
-      const result = formDisaggregationXml(answer.data);
+      const result = formDisaggregationExport(answer.data, format);
       if (!result.ok) {
         setOutcome({
           kind: "failed",
-          message: t(`office.disaggregation.xml.refusals.${result.refusal}`),
+          message: refusalText(result.refusal),
         });
         return;
       }
       setPhase("saving");
       // The host keeps the exact bytes first; a host that cannot never stops the folder copy.
-      const stored = await storeExportFiles(session, {
-        kind: "disaggregation_xml",
-        targetType: "disaggregation_document",
-        targetId: documentId,
-        batchId: crypto.randomUUID(),
-        formatId: DISAGGREGATION_XML_FORMAT_ID,
-        formatVersion: DISAGGREGATION_XML_FORMAT_VERSION,
-        parts: [{ partNo: 1, name: result.file.name, bytes: result.file.bytes }],
-      });
-      refreshFiles();
-      const hostCopy: HostCopy = stored.ok
-        ? { kind: "stored" }
-        : { kind: "failed", message: t(stored.messageKey) };
+      let hostCopy: HostCopy | null = null;
+      if (!shift) {
+        const stored = await storeExportFiles(session, {
+          kind: "disaggregation_xml",
+          targetType: "disaggregation_document",
+          targetId: source.id,
+          batchId: crypto.randomUUID(),
+          formatId,
+          formatVersion: DISAGGREGATION_EXPORT_FORMAT_VERSION,
+          parts: [{ partNo: 1, name: result.file.name, bytes: result.file.bytes }],
+        });
+        refreshFiles();
+        hostCopy = stored.ok
+          ? { kind: "stored" }
+          : { kind: "failed", message: t(stored.messageKey) };
+      }
       let saved: SavedFolder | null = null;
       let folderFailure: string | null = null;
       try {
         saved = await files.save(
-          disaggregationXmlFolder(docNo, new Date().toISOString(), timeZone),
+          disaggregationExportFolder(source.number, new Date().toISOString(), timeZone, format),
           [{ name: result.file.name, bytes: result.file.bytes }],
         );
       } catch (error) {
         folderFailure = failureText(error);
       }
-      if (saved === null && !stored.ok) {
+      if (saved === null && hostCopy?.kind !== "stored") {
         if (alive.current) {
           setOutcome({ kind: "failed", message: folderFailure ?? failureText(null) });
         }
         return;
       }
-      await writeRecord(
-        { saved, folderFailure, hostCopy },
-        {
-          formatId: DISAGGREGATION_XML_FORMAT_ID,
-          formatVersion: DISAGGREGATION_XML_FORMAT_VERSION,
+      const done = { saved, folderFailure, hostCopy };
+      if (shift) {
+        if (alive.current) setOutcome({ kind: "saved", ...done, unrecorded: null });
+      } else {
+        await writeRecord(done, {
+          formatId,
+          formatVersion: DISAGGREGATION_EXPORT_FORMAT_VERSION,
           packingCount: result.file.packingCount,
-        },
-      );
+        });
+      }
     } catch {
       if (alive.current) {
         setOutcome({ kind: "failed", message: t("office.exports.failures.GENERATION_FAILED") });
@@ -213,32 +231,44 @@ export function DisaggregationXmlDialog({
     if (data === undefined) return null;
     return (
       <>
-        <p>{t("office.disaggregation.xml.summary")}</p>
+        <p>
+          {t(
+            shift
+              ? "office.shifts.totals.disaggregation.summary"
+              : "office.disaggregation.export.summary",
+          )}
+        </p>
         {refusal !== null ? (
-          <Alert tone="warn">{t(`office.disaggregation.xml.refusals.${refusal}`)}</Alert>
+          <Alert tone="warn">{refusalText(refusal)}</Alert>
         ) : (
           <DefinitionGrid
             items={[
               {
                 id: "packings",
-                term: t("office.disaggregation.xml.packings"),
+                term: t("office.disaggregation.export.packings"),
                 description: planned !== null && planned.ok ? planned.file.packingCount : "",
               },
               {
                 id: "inn",
-                term: t("office.disaggregation.xml.inn"),
+                term: t("office.disaggregation.export.inn"),
                 description: data.organization.inn ?? "",
                 mono: true,
               },
               {
                 id: "folder",
-                term: t("office.disaggregation.xml.folder"),
-                description: `Документы\\Markiro\\Выгрузки\\Дезагрегация\\${docNo}`,
+                term: t("office.disaggregation.export.folder"),
+                description: `Документы\\Markiro\\Выгрузки\\Дезагрегация\\${sanitizeShiftExportFilenameSegment(source.number)}`,
               },
             ]}
           />
         )}
-        <p className="office-note">{t("office.disaggregation.xml.manual")}</p>
+        <p className="office-note">
+          {t(
+            format === "json"
+              ? "office.disaggregation.export.jsonManual"
+              : "office.disaggregation.export.manual",
+          )}
+        </p>
       </>
     );
   };
@@ -246,7 +276,16 @@ export function DisaggregationXmlDialog({
   return (
     <Modal
       open
-      title={t("office.disaggregation.xml.title", { docNo })}
+      title={
+        shift
+          ? t("office.shifts.totals.disaggregation.jsonTitle", { number: source.number })
+          : t(
+              format === "json"
+                ? "office.disaggregation.export.jsonTitle"
+                : "office.disaggregation.export.title",
+              { docNo: source.number },
+            )
+      }
       onClose={() => {
         if (!inFlight.current) onClose();
       }}
@@ -258,7 +297,7 @@ export function DisaggregationXmlDialog({
           </Button>
           {!reading && !failed && refusal === null && (
             <Button {...waiting} onClick={() => void form()}>
-              {t("office.disaggregation.xml.submit")}
+              {t("office.disaggregation.export.submit")}
             </Button>
           )}
         </>
@@ -267,7 +306,7 @@ export function DisaggregationXmlDialog({
       {content()}
       <div aria-live="polite">
         {phase !== "idle" && (
-          <p className="office-note">{t(`office.disaggregation.xml.${phase}`)}</p>
+          <p className="office-note">{t(`office.disaggregation.export.${phase}`)}</p>
         )}
         {outcome?.kind === "saved" && (
           <>
@@ -281,18 +320,18 @@ export function DisaggregationXmlDialog({
                     size="compact"
                     onClick={() => outcome.saved !== null && void openFolder(outcome.saved)}
                   >
-                    {t("office.disaggregation.xml.showFolder")}
+                    {t("office.disaggregation.export.showFolder")}
                   </Button>
                 }
               >
-                {t("office.disaggregation.xml.saved", { path: outcome.saved.path })}
+                {t("office.disaggregation.export.saved", { path: outcome.saved.path })}
               </Alert>
             ) : (
               <Alert tone="warn" role="presentation">
-                {outcome.folderFailure} {t("office.disaggregation.xml.heldByHost")}
+                {outcome.folderFailure} {t("office.disaggregation.export.heldByHost")}
               </Alert>
             )}
-            {outcome.hostCopy.kind === "failed" && (
+            {outcome.hostCopy?.kind === "failed" && (
               <Alert tone="warn" role="presentation">
                 {t("office.storedFiles.hostCopyFailed", { reason: outcome.hostCopy.message })}
               </Alert>
@@ -311,11 +350,11 @@ export function DisaggregationXmlDialog({
                       }
                     }}
                   >
-                    {t("office.disaggregation.xml.recordAgain")}
+                    {t("office.disaggregation.export.recordAgain")}
                   </Button>
                 }
               >
-                {t("office.disaggregation.xml.recordFailed")}
+                {t("office.disaggregation.export.recordFailed")}
               </Alert>
             )}
           </>

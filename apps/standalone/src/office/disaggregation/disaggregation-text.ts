@@ -1,4 +1,4 @@
-import { formatSsccHri } from "@markiro/domain";
+import { canonicalizeKm, formatSsccHri, kmKey } from "@markiro/domain";
 
 import type { TagPhase } from "@markiro/ui";
 
@@ -26,9 +26,17 @@ export const LINE_STATUS_PHASE = {
   duplicate: "duplicate",
 } as const satisfies Record<DisaggregationLineStatus, TagPhase>;
 
-/** A line's SSCC as people read it: `(00)…`, or what was typed when it is no SSCC. */
-export function lineSsccLabel(line: Pick<DisaggregationLine, "sscc" | "ssccInput">): string {
-  return line.sscc === null ? line.ssccInput : formatSsccHri(line.sscc);
+/** Shows the set KI or SSCC, including duplicate rows without a resolved package. */
+export function lineCodeLabel(
+  line: Pick<DisaggregationLine, "sscc" | "ssccInput" | "setCode">,
+): string {
+  if (line.setCode !== undefined) return line.setCode;
+  if (line.sscc !== null) return formatSsccHri(line.sscc);
+  try {
+    return kmKey(canonicalizeKm(line.ssccInput));
+  } catch {
+    return line.ssccInput;
+  }
 }
 
 const NAMES = new Intl.Collator("ru", { numeric: true });

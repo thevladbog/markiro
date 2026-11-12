@@ -188,6 +188,42 @@ async fn planned_shift(admin: &Admin) -> String {
 }
 
 #[tokio::test]
+async fn set_composition_form_and_existing_shift_form_both_remain_downloadable() {
+    let admin = admin().await;
+    let shift = planned_shift(&admin).await;
+    let previous = b"<html><title>Earlier form</title></html>";
+    let sets = b"<html><title>Set composition</title></html>";
+    for (id, format_id, name, bytes) in [
+        (FILE, "form_task", "Бланк смены.html", &previous[..]),
+        (FILE_2, "form_sets", "Состав наборов.html", &sets[..]),
+    ] {
+        let mut begin = with_content(begin_of(id, 1, &shift, name, bytes), bytes);
+        begin["kind"] = json!("form");
+        begin["formatId"] = json!(format_id);
+        begin["batchId"] = json!(id);
+        let (status, stored) = admin
+            .call("POST", "/v1/office/export-files", Some(begin))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{stored}");
+        assert_eq!(stored["ready"], true);
+    }
+    let (status, listed) = admin
+        .call(
+            "GET",
+            &format!("/v1/office/export-files?shiftId={shift}&kind=form"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed["items"].as_array().unwrap().len(), 2);
+    for (id, expected) in [(FILE, &previous[..]), (FILE_2, &sets[..])] {
+        let (status, bytes, _) = download(&admin, &admin.token, id).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(bytes, expected);
+    }
+}
+
+#[tokio::test]
 async fn a_set_registry_workbook_is_stored_in_one_part_and_downloaded_unchanged() {
     let admin = admin().await;
     let shift = planned_shift(&admin).await;

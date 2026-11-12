@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { readCloseSummary } from "../src/floor/close/shift-close.js";
+import { syncReferences } from "../src/local/reference-sync.js";
+import type { ChangeItem } from "../src/host/protocol.js";
 import {
   readLostSets,
   readSetAssembly,
@@ -59,6 +61,8 @@ describe("station set assembly", () => {
         JSON.stringify({ product: { setItems: context.recipe } }),
       );
       expect(await recordSetScan(context, code(itemGtin, "FIRST01"))).toBe("item");
+      expect(await recordSetScan(context, "04607123456804")).toBe("invalid");
+      expect(await recordSetScan(context, code("04607123456811", "OTHER01"))).toBe("wrong_item");
       expect(await recordSetScan(context, code(setGtin, "SET0001"))).toBe("incomplete");
       db.close();
       ({ db, executor } = openLocalDbFile(path));
@@ -69,10 +73,15 @@ describe("station set assembly", () => {
         actualQty: 0,
       });
       expect(await recordSetScan(context, code(itemGtin, "FIRST01"))).toBe("duplicate");
+      db.prepare("UPDATE outbox SET outcome = NULL, acked_at = NULL").run();
       await undoSetItem(context);
       expect((await readSetAssembly(context)).items).toEqual([]);
       expect(await recordSetScan(context, code(itemGtin, "FIRST01"))).toBe("item");
       expect(await recordSetScan(context, code(itemGtin, "SECOND1"))).toBe("item");
+      expect(await recordSetScan(context, code(itemGtin, "FIRST01").replace("ABCD", "WXYZ"))).toBe(
+        "duplicate",
+      );
+      expect(await recordSetScan(context, code(itemGtin, "THIRD01"))).toBe("quantity_met");
       expect(await recordSetScan(context, code(setGtin, "SET0001"))).toBe("assembled");
       expect(await readSetAssembly(context)).toEqual({ items: [], completed: 1 });
       expect(
@@ -101,6 +110,36 @@ describe("station set assembly", () => {
         },
       });
       expect(await recordSetScan(context, code(itemGtin, "FIRST01"))).toBe("duplicate");
+      const setCodeHash = db
+        .prepare("SELECT code_hash FROM floor_set_marks WHERE is_set = 1")
+        .get()?.["code_hash"];
+      const release = {
+        entity: "set_releases",
+        id: "00000000-0000-4000-8000-000000000006",
+        rev: 1,
+        deleted: false,
+        data: { deviceId: pairing.deviceId, recordId: context.newId(), shiftId, setCodeHash },
+      } satisfies ChangeItem;
+      const sync = (item: ChangeItem) =>
+        syncReferences({
+          ...pairing,
+          local: executor,
+          changes: async () => ({
+            hostId: pairing.hostId,
+            rev: item.rev,
+            hasMore: false,
+            items: [item],
+          }),
+        });
+      await sync({ ...release, data: { ...release.data, deviceId: shiftId } });
+      expect(await recordSetScan(context, code(itemGtin, "FIRST01"))).toBe("duplicate");
+      await sync({ ...release, rev: 2 });
+      expect(await recordSetScan(context, code(setGtin, "SET0001"))).toBe("duplicate");
+      expect(await recordSetScan(context, code(itemGtin, "FIRST01"))).toBe("item");
+      await sync({ ...release, rev: 3 });
+      expect((await readSetAssembly(context)).items).toHaveLength(1);
+      expect((await readSetAssembly(context)).completed).toBe(1);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM outbox").get()?.["n"]).toBe(1);
     } finally {
       db.close();
       rmSync(dir, { recursive: true, force: true });

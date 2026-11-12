@@ -31,6 +31,19 @@ interface SetAssemblyDao {
     @Query("SELECT codeHash FROM set_assembly_claims WHERE codeHash IN (:hashes)")
     suspend fun claimed(hashes: List<String>): List<String>
 
+    @Query(
+        "SELECT EXISTS (SELECT 1 FROM set_assembly_claims AS claim JOIN set_assemblies AS assembly ON assembly.id = claim.setId " +
+            "WHERE claim.codeHash = :codeHash AND assembly.status IN ('queued','accepted'))",
+    )
+    suspend fun isActiveClaim(codeHash: String): Boolean
+
+    @Query(
+        "DELETE FROM set_assembly_claims WHERE setId = :setId AND codeHash <> :setCodeHash " +
+            "AND EXISTS (SELECT 1 FROM set_assemblies WHERE id = :setId AND shiftId = :shiftId AND status IN ('accepted','queued')) " +
+            "AND EXISTS (SELECT 1 FROM set_assembly_claims AS parent WHERE parent.codeHash = :setCodeHash AND parent.setId = :setId)",
+    )
+    suspend fun releaseItems(setId: String, shiftId: String, setCodeHash: String)
+
     @Query("UPDATE set_assemblies SET status = :status WHERE id = :id")
     suspend fun settle(id: String, status: String)
 

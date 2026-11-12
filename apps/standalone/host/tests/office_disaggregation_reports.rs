@@ -46,6 +46,101 @@ async fn report(admin: &Admin, id: &str, query: &str) -> (StatusCode, Value) {
         .await
 }
 
+#[tokio::test]
+async fn shift_report_collects_applied_lines_without_other_shifts_or_drafts() {
+    let admin = admin().await;
+    let (setup, first) = day_with_setup(&admin, false).await;
+    let block = issue_block(
+        &admin.app,
+        &first.key,
+        support::disaggregation::BLOCK_REQUEST,
+    )
+    .await;
+    let close_third = fact(
+        &record_id(8),
+        "box_closed",
+        &first.shift,
+        box_closed(
+            &box_id(3),
+            &block,
+            1502,
+            &[5],
+            &instant(5, 0),
+            &instant(12, 0),
+        ),
+    );
+    assert_eq!(
+        receipts(&admin.app, &first.key, &[close_third]).await[0]["outcome"],
+        "accepted"
+    );
+    close_from_office(&admin, &first.shift, "Конец смены").await;
+
+    let (_, other_key) = pair_device(&admin.app, "station").await;
+    let other = open_floor(&admin, &setup, &other_key, &setup.other_line).await;
+    let block = issue_block(&admin.app, &other.key, COLLEAGUE_BLOCK_REQUEST).await;
+    let (other_box, other_serial) = (box_id(4), 3500);
+    let other_records = [
+        fact(
+            &record_id(1),
+            "scan",
+            &other.shift,
+            ok_scan(6, &other_box, &instant(1, 0)),
+        ),
+        fact(
+            &record_id(2),
+            "box_closed",
+            &other.shift,
+            box_closed(
+                &other_box,
+                &block,
+                other_serial,
+                &[6],
+                &instant(1, 0),
+                &instant(2, 0),
+            ),
+        ),
+    ];
+    let received = receipts(&admin.app, &other.key, &other_records).await;
+    assert!(
+        received.iter().all(|r| r["outcome"] == "accepted"),
+        "{received:?}"
+    );
+    close_from_office(&admin, &other.shift, "Конец смены").await;
+
+    let path = format!("/v1/office/shifts/{}/disaggregation-report", first.shift);
+    let (status, empty) = admin.call("GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{empty}");
+    assert_eq!(empty["lines"], json!([]));
+    assert_eq!(empty["appliedAt"], Value::Null);
+
+    let (a, b, c, elsewhere) = (sscc(1500), sscc(1501), sscc(1502), sscc(other_serial));
+    document(&admin, &[(&a, Some(&a))], true).await;
+    document(
+        &admin,
+        &[(&b, Some(&b)), (&elsewhere, Some(&elsewhere))],
+        true,
+    )
+    .await;
+    document(&admin, &[(&c, Some(&c))], false).await;
+    let (status, rows) = admin
+        .call("GET", &format!("{path}?variant=full"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{rows}");
+    assert_eq!(rows["id"], first.shift);
+    assert_eq!(rows["docNo"], first.number);
+    assert_eq!(rows["status"], "applied");
+    assert!(rows["appliedAt"].is_string());
+    assert_eq!(rows["lines"].as_array().unwrap().len(), 2);
+    assert_eq!(rows["lines"][0]["sscc"], a);
+    assert_eq!(rows["lines"][0]["items"].as_array().unwrap().len(), 3);
+    assert_eq!(rows["lines"][1]["sscc"], b);
+    assert_eq!(rows["lines"][1]["items"].as_array().unwrap().len(), 1);
+    let (status, rows) = admin.call("GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{rows}");
+    assert_eq!(rows["variant"], "boxes");
+    assert_eq!(rows["lines"][0]["items"], json!([]));
+}
+
 /// Code `n` as the act prints it.
 fn printed(n: u32) -> Value {
     let code = code(n);
@@ -169,7 +264,7 @@ async fn an_act_leaves_out_lines_without_an_sscc() {
 #[tokio::test]
 async fn a_pallet_line_lists_its_boxes_not_taken_apart_closed_first() {
     let admin = admin().await;
-    pallet_day(&admin, true).await;
+    let floor = pallet_day(&admin, true).await;
     let pallet = pallet_sscc(40);
     let id = document(&admin, &[(&pallet, Some(&pallet))], true).await;
     let (status, rows) = report(&admin, &id, "?variant=full").await;
@@ -186,6 +281,18 @@ async fn a_pallet_line_lists_its_boxes_not_taken_apart_closed_first() {
         ])
     );
     assert_eq!(only["codeCount"], 3);
+    let (status, shift_report) = admin
+        .call(
+            "GET",
+            &format!(
+                "/v1/office/shifts/{}/disaggregation-report?variant=full",
+                floor.shift
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{shift_report}");
+    assert_eq!(shift_report["lines"], rows["lines"]);
     // The short variant leaves them out.
     let (_, short) = report(&admin, &id, "").await;
     assert_eq!(short["lines"][0]["boxes"], json!([]));
@@ -418,6 +525,87 @@ async fn the_file_of_an_applied_document_writes_one_audit_row_and_no_revision() 
                 details,
             ),
         ]
+    );
+}
+
+#[tokio::test]
+async fn records_and_stores_the_gismt_json_of_an_applied_document() {
+    use base64::prelude::{Engine, BASE64_STANDARD};
+    let admin = admin().await;
+    day(&admin, true).await;
+    let code = sscc(1500);
+    let doc_id = document(&admin, &[(&code, Some(&code))], true).await;
+    let record_body = |count| {
+        json!({
+            "formatId": "disaggregation_json_gismt", "formatVersion": 1, "packingCount": count
+        })
+    };
+    let (status, error) = record(&admin, &admin.token, &doc_id, record_body(2)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert_eq!(error["error"]["details"]["field"], "packingCount");
+    let (status, result) = record(&admin, &admin.token, &doc_id, record_body(1)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{result}");
+    assert_eq!(
+        support::app::audit_trail(&admin.app, "disaggregation.export").await,
+        [admin.row(
+            "disaggregation.export",
+            "disaggregation_document",
+            &doc_id,
+            record_body(1)
+        )]
+    );
+
+    let bytes = serde_json::to_vec(&json!({
+        "participant_inn": "7700000000", "products_list": [{"uitu": format!("00{code}")}]
+    }))
+    .unwrap();
+    let sha256: String = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, &bytes)
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let batch = uuid::Uuid::new_v4().to_string();
+    let upload = |name| {
+        json!({
+            "id": batch, "batchId": batch, "partNo": 1, "kind": "disaggregation_xml",
+            "targetType": "disaggregation_document", "targetId": doc_id,
+            "formatId": "disaggregation_json_gismt", "formatVersion": 1, "fileName": name,
+            "sizeBytes": bytes.len(), "sha256": sha256, "generator": "test",
+            "contentBase64": BASE64_STANDARD.encode(&bytes)
+        })
+    };
+    let (status, error) = admin
+        .call(
+            "POST",
+            "/v1/office/export-files",
+            Some(upload("disaggregation.xml")),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert_eq!(error["error"]["details"]["field"], "fileName");
+    let (status, stored) = admin
+        .call(
+            "POST",
+            "/v1/office/export-files",
+            Some(upload("disaggregation.json")),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{stored}");
+    assert_eq!(stored["ready"], true);
+    let (status, files) = admin
+        .call(
+            "GET",
+            &format!(
+                "/v1/office/export-files?targetType=disaggregation_document&targetId={doc_id}"
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{files}");
+    assert_eq!(files["items"][0]["formatId"], "disaggregation_json_gismt");
+    assert_eq!(
+        files["items"][0]["mediaType"],
+        "application/json; charset=utf-8"
     );
 }
 

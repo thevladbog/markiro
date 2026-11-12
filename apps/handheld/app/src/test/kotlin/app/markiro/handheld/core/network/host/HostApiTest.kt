@@ -1,10 +1,16 @@
 package app.markiro.handheld.core.network.host
 
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -19,6 +25,49 @@ class HostApiTest {
     private fun ok(body: String, code: Int = 200) = HostResult.Ok(code, body, null)
     private fun error(code: Int, kind: String, details: String = "{}", retryAfter: Long? = null) =
         HostResult.Ok(code, """{"error":{"code":"$kind","message":"m","details":$details}}""", retryAfter)
+
+    @Test
+    fun anAggregationLookupUsesTheSetAwareRouteAndOnlyBlocksInSet() = runTest {
+        val hash = "a".repeat(64)
+        val (transport, host) = api(
+            ok("""{"status":"in_set","owner":{"deviceId":"another-device"}}"""),
+            ok("""{"status":"taken","owner":{"deviceId":"another-device"}}"""),
+            ok("""{"status":"free"}"""),
+            error(404, "not_found"),
+        )
+        assertTrue(host.aggregationCodeInSet(hash))
+        repeat(3) { assertFalse(host.aggregationCodeInSet(hash)) }
+        assertEquals(List(4) { Triple("GET", "/v1/device/codes/$hash?aggregation=true", null) }, transport.sent)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun aSlowAggregationLookupLetsTheScanContinueAtThe300msBudget() = runTest {
+        val delayed = object : HostTransport {
+            override suspend fun get(path: String): HostResult {
+                delay(3_000)
+                return ok("""{"status":"in_set"}""")
+            }
+            override suspend fun post(path: String, body: String): HostResult = error("read only")
+        }
+        assertFalse(HostApi(delayed).aggregationCodeInSet("a".repeat(64)))
+        assertEquals(300L, currentTime)
+    }
+
+    @Test
+    fun anAggregationTimeoutCancelsTheOkHttpCall() = runTest {
+        val client = OkHttpClient()
+        var cancelled = false
+        val noResponse = Call.Factory { request ->
+            object : Call by client.newCall(request) {
+                override fun enqueue(responseCallback: Callback) = Unit
+                override fun cancel() { cancelled = true }
+            }
+        }
+        val transport = OkHttpHostTransport(noResponse, { "https://127.0.0.1" })
+        assertFalse(HostApi(transport).aggregationCodeInSet("a".repeat(64)))
+        assertTrue(cancelled)
+    }
 
     @Test
     fun aClaimSendsTheCapabilityAndReadsTheKey() = runTest {

@@ -8,11 +8,11 @@ import {
   type DisaggregationReportRows,
 } from "../src/host/disaggregation.js";
 import {
-  disaggregationXmlFileName,
-  disaggregationXmlFolder,
-  formDisaggregationXml,
-  type DisaggregationXmlRefusal,
-} from "../src/office/disaggregation/disaggregation-xml.js";
+  disaggregationExportFileName,
+  disaggregationExportFolder,
+  formDisaggregationExport,
+  type DisaggregationExportRefusal,
+} from "../src/office/disaggregation/disaggregation-export.js";
 
 const testModuleUrl = import.meta.url;
 const applied = disaggregationReportRowsSchema.parse(
@@ -27,7 +27,7 @@ const decoder = new TextDecoder();
 
 describe("ГИС МТ «Расформирование упаковки» of a document (plan ДЗГ-О)", () => {
   it("is the domain generator's output for the document's SSCCs, boxes and pallets", () => {
-    const result = formDisaggregationXml(applied);
+    const result = formDisaggregationExport(applied, "xml");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const expected = renderGismtDisaggregationXml({
@@ -44,39 +44,59 @@ describe("ГИС МТ «Расформирование упаковки» of a d
 
   it("names a twice-typed SSCC once", () => {
     const twice = { ...applied, lines: [...applied.lines, ...applied.lines] };
-    const result = formDisaggregationXml(twice);
+    const result = formDisaggregationExport(twice, "xml");
     expect(result.ok && result.file.packingCount).toBe(2);
   });
 
-  it.each<[DisaggregationReportRows, DisaggregationXmlRefusal]>([
+  it("does not export partial XML for a document with an SSCC and a set", () => {
+    const [first] = applied.lines;
+    if (first === undefined) throw new Error("Missing SSCC fixture");
+    const rows = disaggregationReportRowsSchema.parse({
+      ...applied,
+      lines: [first, { ...first, sscc: null, setCode: "010460712345678121SET001" }],
+    });
+    expect(formDisaggregationExport(rows, "xml")).toEqual({
+      ok: false,
+      refusal: "SET_LINES_UNSUPPORTED",
+    });
+  });
+
+  it.each<[DisaggregationReportRows, DisaggregationExportRefusal]>([
     [{ ...applied, status: "draft" }, "DOCUMENT_NOT_APPLIED"],
     [{ ...applied, organization: { name: "ООО «Атолл»", inn: null } }, "ORG_INN_MISSING"],
     [{ ...applied, organization: { name: "ООО «Атолл»", inn: "  " } }, "ORG_INN_MISSING"],
     [{ ...applied, organization: { name: "ООО «Атолл»", inn: "0000000000" } }, "INVALID_ORG_INN"],
     [{ ...applied, lines: [] }, "NO_PACKINGS"],
   ])("refuses %#: %s", (rows, refusal) => {
-    expect(formDisaggregationXml(rows)).toEqual({ ok: false, refusal });
+    expect(formDisaggregationExport(rows, "xml")).toEqual({ ok: false, refusal });
   });
 
   it("takes a 12-digit INN of an individual entrepreneur (the generator's rule)", () => {
-    const result = formDisaggregationXml({
-      ...applied,
-      organization: { name: "ИП Иванов", inn: "781234567890" },
-    });
+    const result = formDisaggregationExport(
+      {
+        ...applied,
+        organization: { name: "ИП Иванов", inn: "781234567890" },
+      },
+      "xml",
+    );
     expect(result.ok).toBe(true);
   });
 
   it("saves under Выгрузки\\Дезагрегация in the organization's time", () => {
     expect(
-      disaggregationXmlFolder("DSG-26-0007", "2026-10-12T21:30:00.000Z", "Europe/Moscow"),
+      disaggregationExportFolder("DSG-26-0007", "2026-10-12T21:30:00.000Z", "Europe/Moscow", "xml"),
     ).toEqual([
       "Выгрузки",
       "Дезагрегация",
       "DSG-26-0007",
       "2026-10-13_00-30-00_disaggregation_xml_gismt",
     ]);
-    expect(disaggregationXmlFileName("DSG-26-0007")).toBe("disaggregation-DSG-26-0007.xml");
+    expect(disaggregationExportFileName("DSG-26-0007", "xml")).toBe(
+      "disaggregation-DSG-26-0007.xml",
+    );
     // A number is written as an export's file name writes a segment.
-    expect(disaggregationXmlFileName("DSG/26 0007")).toBe("disaggregation-DSG_26_0007.xml");
+    expect(disaggregationExportFileName("DSG/26 0007", "xml")).toBe(
+      "disaggregation-DSG_26_0007.xml",
+    );
   });
 });

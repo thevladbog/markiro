@@ -117,11 +117,18 @@ export const officeKeys = {
     id,
     variant,
   ],
+  shiftDisaggregationReport: (id: string, variant: "boxes" | "full") => [
+    "office",
+    "shift-disaggregation-report",
+    id,
+    variant,
+  ],
   /** One shift with its figures (`GET /v1/office/shifts/{id}`), read afresh at every opening. */
   shift: (id: string) => ["office", "shift", id],
   /** What a shift's exports are built from (`GET /v1/office/shifts/{id}/export-source`, plan ЧЗ). */
   shiftExportSource: (id: string) => ["office", "shift-export-source", id],
   shiftSets: (id: string) => ["office", "shift-sets", id],
+  shiftSetForm: (id: string) => ["office", "shift-set-form", id],
   /** A shift's pallets with what the station counted (`GET /v1/office/shifts/{id}/pallets`, plan ЧЗ). */
   shiftPallets: (id: string) => ["office", "shift-pallets", id],
   /** A shift's boxes for its card (`GET /v1/office/shifts/{id}/boxes`, plan О-Ф); the pallets are `shiftPallets`. */

@@ -32,8 +32,14 @@ export interface ScanSource {
 
 type KeyTarget = Pick<Window, "addEventListener" | "removeEventListener">;
 
-/** The GS1 group separator a product's DataMatrix carries between its fields. */
-const GROUP_SEPARATOR = "\u001d";
+/** The control chord by which a keyboard-wedge scanner types a GS1 group separator. */
+export function gs1SeparatorFromKey({
+  key,
+  ctrlKey,
+  altKey,
+}: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey">): string | null {
+  return ctrlKey && !altKey && key === "]" ? "\u001d" : null;
+}
 
 /**
  * A HID scanner is a keyboard: it types the code and presses Enter. This
@@ -59,7 +65,8 @@ export function createKeyboardWedgeSource(target: KeyTarget = window): ScanSourc
     const onKeyDown = (event: Event) => {
       // Typing into a text field: no scan, and its Enter stays the field's.
       if (manualTextEntry) return;
-      const { key, ctrlKey, altKey, metaKey } = event as KeyboardEvent;
+      const keyEvent = event as KeyboardEvent;
+      const { key, ctrlKey, altKey, metaKey } = keyEvent;
       if (key === "Enter") {
         // The scan's closing Enter lands on whatever holds the focus, and a
         // focused button would also take it as a click. `preventDefault`
@@ -72,8 +79,9 @@ export function createKeyboardWedgeSource(target: KeyTarget = window): ScanSourc
         payload = "";
         return;
       }
-      if (ctrlKey && !altKey && key === "]") {
-        payload += GROUP_SEPARATOR;
+      const separator = gs1SeparatorFromKey(keyEvent);
+      if (separator !== null) {
+        payload += separator;
         return;
       }
       if ((ctrlKey || metaKey) && !altKey) return;

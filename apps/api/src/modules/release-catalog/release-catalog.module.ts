@@ -23,9 +23,15 @@ export function platformCatalogFingerprint(userId: string) {
 }
 export async function recheckCatalogCaller(db: Db, caller: CatalogCaller) {
   if (caller.machine) {
+    const legacyProduct =
+      caller.publisherMode === undefined &&
+      (caller.product === "station" || caller.product === "handheld");
+    const taggedProduct =
+      caller.publisherMode === "pinned-tag" &&
+      (caller.product === "handheld" || caller.product === "standalone");
     if (
       !caller.principal.tokenHash ||
-      (caller.product !== "station" && caller.product !== "handheld") ||
+      (!legacyProduct && !taggedProduct) ||
       caller.actor.actorPlatformUserId !== null ||
       caller.actor.actorRole !== null
     )
@@ -36,6 +42,7 @@ export async function recheckCatalogCaller(db: Db, caller: CatalogCaller) {
   if (
     !id ||
     caller.product !== "standalone" ||
+    caller.publisherMode !== undefined ||
     caller.principal.tokenHash !== undefined ||
     caller.principal.fingerprint !== platformCatalogFingerprint(id)
   )

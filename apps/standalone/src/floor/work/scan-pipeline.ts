@@ -2,7 +2,7 @@ import { classifyScan, type ParsedKm } from "@markiro/domain";
 import { z } from "zod";
 
 import { CLOUD_HISTORY_DEVICE_ID } from "../../host/cloud-history-read.js";
-import type { CodeCheck, CodeOwner, ScanFact, ScanRawKind } from "../../host/protocol.js";
+import type { CodeCheck, ScanFact, ScanRawKind } from "../../host/protocol.js";
 import type { LocalExecutor, LocalStatement } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import { outboxStatement, scanRecord, scannedCode, type RecordHead } from "../facts.js";
@@ -54,7 +54,7 @@ export interface ScanContext {
   /** The link is `online` right now: only then is the host asked. */
   online: () => boolean;
   /** `HostApi.checkCode` (300 ms). */
-  checkCode: (codeHash: string) => Promise<CodeCheck>;
+  checkCode: (codeHash: string, aggregation?: boolean) => Promise<CodeCheck>;
   /** A failed host call the shell may act on: a refused key, another certificate. */
   onHostError: (error: unknown) => void;
   now: () => Date;
@@ -106,6 +106,7 @@ export type ScanOutcome = {
       label?: UnitLabelRef;
     }
   | { kind: "duplicate"; source: "local"; firstScannedAt: string }
+  | { kind: "in_set" }
   | {
       kind: "duplicate";
       source: "host";
@@ -133,6 +134,21 @@ async function readLocalOwner(
   return row === undefined ? null : { scannedAt: row.scanned_at };
 }
 
+/** A completed local set holds its marks while its latest attempt is pending or accepted. */
+async function locallyInSet(context: ScanContext, codeHash: string): Promise<boolean> {
+  const [row] = await context.local.query(
+    "WITH RECURSIVE attempts(outcome, resent_as) AS (" +
+      "SELECT o.outcome, o.resent_as FROM floor_set_marks m JOIN outbox o ON o.id = m.assembly_id " +
+      "WHERE m.host_id = ? AND m.device_id = ? AND m.code_hash = ? " +
+      "UNION ALL SELECT o.outcome, o.resent_as FROM attempts a JOIN outbox o ON o.id = a.resent_as" +
+      ") SELECT count(*) AS n FROM attempts WHERE resent_as IS NULL " +
+      "AND (outcome IS NULL OR outcome = 'accepted')",
+    [context.pairing.hostId, context.pairing.deviceId, codeHash],
+    countRow,
+  );
+  return (row?.n ?? 0) > 0;
+}
+
 /**
  * Another device's scan the host knows owns the code (stage 2a spec §5.7.3,
  * step 4), asked only while the link is `online`. No answer in 300 ms, any
@@ -140,11 +156,15 @@ async function readLocalOwner(
  * newer than the host's: an undo it has not sent yet) all let the scan
  * through; a duplicate the host finds later is a `conflict` receipt.
  */
-async function hostOwner(context: ScanContext, codeHash: string): Promise<CodeOwner | null> {
+async function hostCheck(
+  context: ScanContext,
+  codeHash: string,
+  aggregation: boolean,
+): Promise<Exclude<CodeCheck, { status: "free" }> | null> {
   if (!context.online()) return null;
   let check: CodeCheck;
   try {
-    check = await context.checkCode(codeHash);
+    check = await context.checkCode(codeHash, aggregation);
   } catch (error) {
     try {
       context.onHostError(error);
@@ -153,8 +173,8 @@ async function hostOwner(context: ScanContext, codeHash: string): Promise<CodeOw
     }
     return null;
   }
-  if (check.status !== "taken" || check.owner.sameDevice) return null;
-  return check.owner;
+  if (check.status === "in_set") return aggregation ? check : null;
+  return check.status === "taken" && !check.owner.sameDevice ? check : null;
 }
 
 function scanRow(context: ScanContext, id: string, data: ScanFact): LocalStatement {
@@ -251,6 +271,11 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
     await journal({ ...refused, verdict: "wrong_gtin", duplicateSource: null });
     return { kind: "wrong_gtin", gtin14: code.gtin14, scannedAt, code: shown };
   }
+  const aggregation = shift.copy.mode === "aggregation";
+  if (aggregation && (await locallyInSet(context, code.codeHash))) {
+    await journal({ ...refused, verdict: "duplicate", duplicateSource: "local" });
+    return { kind: "in_set", scannedAt, code: shown };
+  }
   const mine = await readLocalOwner(context, code.codeHash);
   if (mine !== null) {
     await journal({ ...refused, verdict: "duplicate", duplicateSource: "local" });
@@ -262,8 +287,13 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
       code: shown,
     };
   }
-  const owner = await hostOwner(context, code.codeHash);
-  if (owner !== null) {
+  const check = await hostCheck(context, code.codeHash, aggregation);
+  if (check?.status === "in_set") {
+    await journal({ ...refused, verdict: "duplicate", duplicateSource: "host" });
+    return { kind: "in_set", scannedAt, code: shown };
+  }
+  if (check?.status === "taken") {
+    const { owner } = check;
     await journal({ ...refused, verdict: "duplicate", duplicateSource: "host" });
     return {
       kind: "duplicate",

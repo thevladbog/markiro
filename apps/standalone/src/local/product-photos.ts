@@ -157,14 +157,19 @@ const photoRow = z.object({
   media_type: photoMediaTypeSchema,
 });
 
-/** The stored photo of `productId` as a `data:` URL, or `null` when the station holds none. */
+/** The stored photo as a `data:` URL. Frozen set recipes refer to products by GTIN. */
 export async function readProductPhoto(
   local: LocalExecutor,
-  productId: string,
+  product: string,
+  by: "id" | "gtin" = "id",
 ): Promise<StoredPhoto | null> {
+  const productId =
+    by === "id"
+      ? "?"
+      : "(SELECT id FROM ref_products WHERE gtin14 = ? ORDER BY archived, rev DESC, id LIMIT 1)";
   const [row] = await local.query(
-    "SELECT checksum, data_base64, media_type FROM ref_product_photos WHERE product_id = ?",
-    [productId],
+    `SELECT checksum, data_base64, media_type FROM ref_product_photos WHERE product_id = ${productId}`,
+    [product],
     photoRow,
   );
   if (row === undefined) return null;

@@ -66,6 +66,9 @@ class DeviceHostTransport(
 
     override suspend fun get(path: String): HostResult = transport()?.get(path) ?: HostResult.Failed(TransportFailure.UNREACHABLE)
 
+    override suspend fun getCancellable(path: String): HostResult =
+        transport()?.getCancellable(path) ?: HostResult.Failed(TransportFailure.UNREACHABLE)
+
     override suspend fun post(path: String, body: String): HostResult =
         transport()?.post(path, body) ?: HostResult.Failed(TransportFailure.UNREACHABLE)
 }
@@ -124,7 +127,10 @@ object HostModule {
     ): HostHeartbeat = HostHeartbeat(
         db, monitor, { api }, config, blocks, meta,
         participation = participation::beat, participationStale = participation::markStale,
-    ) { reference.refreshDevice() }
+    ) {
+        reference.refreshDevice()
+        reference.sync().getOrThrow()
+    }
 
     @Provides
     @Singleton

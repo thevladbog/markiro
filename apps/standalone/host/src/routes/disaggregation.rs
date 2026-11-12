@@ -1,6 +1,6 @@
 //! Office disaggregation documents (plan ДЗГ, parity spec §5.1; the cloud's
 //! `apps/api/src/modules/disaggregation`): a draft with a number, a reason
-//! and lines by SSCC, applied for good or cancelled.
+//! and lines by SSCC or marked set, applied for good or cancelled.
 //!
 //! - `GET /v1/office/disaggregation` — the list, newest first, narrowed by
 //!   `status`, `reasonId`, `from`/`to` (host instants against the creation
@@ -10,7 +10,7 @@
 //! - `POST …/{id}/lines` adds lines and `DELETE …/{id}/lines/{lineId}` takes
 //!   one away; a draft only. The webview reads the SSCC out of what was typed
 //!   or imported (the marking rules live in `@markiro/domain`); the host
-//!   checks the shape and what the SSCC names.
+//!   checks the shape and what the SSCC names, or reads a scanned set mark.
 //! - `POST …/{id}/apply` and `…/cancel`, both over the card's `rev`.
 //!
 //! Every write takes the write lock before it reads (`begin_write`) and
@@ -36,7 +36,7 @@ use crate::audit::{self, actions, Entry, Outcome};
 use crate::auth::OfficeContext;
 use crate::clock::{format_timestamp, parse_timestamp};
 use crate::db::{begin_write, commit_with_revision, next_revision};
-use crate::disaggregation::{self, Target};
+use crate::disaggregation::{self, sets, Target};
 use crate::error::{ApiError, ApiJson, ApiPath, ApiQuery};
 use crate::facts::rules;
 use crate::server::AppState;
@@ -62,7 +62,7 @@ const DOCUMENTS_SQL: &str = "SELECT d.id, d.doc_no, d.status, d.reason_id, r.nam
      LEFT JOIN disaggregation_reasons r ON r.id = d.reason_id \
      JOIN disaggregation_authors authors ON authors.document_id = d.id";
 
-const LINES_SQL: &str = "SELECT l.id, l.sscc_input, l.sscc, COALESCE(l.box_id,l.cloud_box_id) AS box_id, COALESCE(l.pallet_id,l.cloud_pallet_id) AS pallet_id, l.warehouse_pallet_id, l.status, \
+const LINES_SQL: &str = "SELECT l.id, l.sscc_input, l.sscc, l.set_code, l.set_record_id, COALESCE(l.box_id,l.cloud_box_id) AS box_id, COALESCE(l.pallet_id,l.cloud_pallet_id) AS pallet_id, l.warehouse_pallet_id, l.status, \
      COALESCE(l.product_id,l.cloud_product_id) AS product_id, COALESCE(l.cloud_product_name,p.name) AS product_name, l.code_count, l.validated_at, COALESCE(s.id,cs.id) AS shift_id, \
      s.number_month_key, s.number_seq, s.number_origin AS created_from, cs.number AS cloud_number, \
      (l.cloud_box_id IS NOT NULL OR l.cloud_pallet_id IS NOT NULL) AS cloud_history \
@@ -70,7 +70,8 @@ const LINES_SQL: &str = "SELECT l.id, l.sscc_input, l.sscc, COALESCE(l.box_id,l.
      LEFT JOIN products p ON p.id = l.product_id \
      LEFT JOIN boxes b ON b.id = l.box_id \
      LEFT JOIN pallets pl ON pl.id = l.pallet_id \
-     LEFT JOIN shifts s ON s.id = COALESCE(b.shift_id, pl.shift_id) \
+     LEFT JOIN set_assemblies a ON a.device_id = l.set_device_id AND a.record_id = l.set_record_id \
+     LEFT JOIN shifts s ON s.id = COALESCE(b.shift_id, pl.shift_id, a.shift_id) \
      LEFT JOIN cloud_history_boxes cb ON cb.id=l.cloud_box_id \
      LEFT JOIN cloud_history_pallets cp ON cp.id=l.cloud_pallet_id \
      LEFT JOIN cloud_history_shifts cs ON cs.id=COALESCE(cb.shift_id,cp.shift_id) \
@@ -133,6 +134,8 @@ struct LineRow {
     cloud_history: bool,
     sscc_input: String,
     sscc: Option<String>,
+    set_code: Option<String>,
+    set_record_id: Option<String>,
     box_id: Option<String>,
     pallet_id: Option<String>,
     warehouse_pallet_id: Option<String>,
@@ -162,6 +165,8 @@ impl LineRow {
             cloud_history: self.cloud_history,
             sscc_input: self.sscc_input,
             sscc: self.sscc,
+            set_code: self.set_code,
+            set_id: self.set_record_id,
             box_id: self.box_id,
             pallet_id: self.pallet_id,
             warehouse_pallet_id: self.warehouse_pallet_id,
@@ -542,6 +547,7 @@ pub async fn update_document(
 struct NewLine {
     input: String,
     sscc: Option<String>,
+    set_code: Option<String>,
 }
 
 fn new_lines(add: &DisaggregationLinesAdd) -> Result<Vec<NewLine>, ApiError> {
@@ -555,6 +561,18 @@ fn new_lines(add: &DisaggregationLinesAdd) -> Result<Vec<NewLine>, ApiError> {
         .iter()
         .enumerate()
         .map(|(n, line)| {
+            if let Some((input, set_code)) = line
+                .sscc
+                .is_none()
+                .then(|| sets::read_input(&line.input))
+                .flatten()
+            {
+                return Ok(NewLine {
+                    input: input.to_owned(),
+                    sscc: None,
+                    set_code: Some(set_code.to_owned()),
+                });
+            }
             let input = validate::clean_text(
                 &format!("lines.{n}.input"),
                 &line.input,
@@ -572,33 +590,34 @@ fn new_lines(add: &DisaggregationLinesAdd) -> Result<Vec<NewLine>, ApiError> {
             Ok(NewLine {
                 input: input.to_owned(),
                 sscc: line.sscc.clone(),
+                set_code: None,
             })
         })
         .collect()
 }
 
 /// Write one line with the status its `target` gave.
-#[allow(clippy::too_many_arguments)]
 async fn insert_line(
     conn: &mut SqliteConnection,
     document_id: &str,
     position: i64,
-    input: &str,
-    sscc: Option<&str>,
+    line: &NewLine,
     status: LineStatus,
     target: Option<&Target>,
     at: &str,
 ) -> Result<(), ApiError> {
+    let set = target.and_then(|t| t.set.as_ref());
+    let keep_code = status != LineStatus::Duplicate;
     sqlx::query(
         "INSERT INTO disaggregation_document_lines (id, document_id, position, sscc_input, sscc, \
-         box_id, pallet_id, status, product_id, code_count, validated_at, created_at, cloud_box_id, cloud_pallet_id, cloud_product_id, cloud_product_name, warehouse_pallet_id) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         box_id, pallet_id, status, product_id, code_count, validated_at, created_at, cloud_box_id, cloud_pallet_id, cloud_product_id, cloud_product_name, warehouse_pallet_id, set_code, set_device_id, set_record_id) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(uuid::Uuid::new_v4().to_string())
     .bind(document_id)
     .bind(position)
-    .bind(input)
-    .bind(sscc)
+    .bind(&line.input)
+    .bind(line.sscc.as_deref().filter(|_| keep_code))
     .bind(target.filter(|t| !t.cloud).and_then(|t| t.box_id.as_deref()))
     .bind(target.filter(|t| !t.cloud).and_then(|t| t.pallet_id.as_deref()))
     .bind(status.as_str())
@@ -611,10 +630,27 @@ async fn insert_line(
     .bind(target.filter(|t| t.cloud).and_then(|t| t.product_id.as_deref()))
     .bind(target.filter(|t| t.cloud).and_then(|t| t.product_name.as_deref()))
     .bind(target.and_then(|t| t.warehouse_pallet_id.as_deref()))
+    .bind(line.set_code.as_deref().filter(|_| keep_code))
+    .bind(set.map(|s| s.device_id.as_str()))
+    .bind(set.map(|s| s.record_id.as_str()))
     .execute(conn)
     .await
     .map_err(ApiError::internal)?;
     Ok(())
+}
+
+async fn resolve_line(
+    conn: &mut SqliteConnection,
+    sscc: Option<&str>,
+    set_code: Option<&str>,
+) -> Result<Option<Target>, ApiError> {
+    if let Some(sscc) = sscc {
+        disaggregation::resolve(conn, sscc).await
+    } else if let Some(set_code) = set_code {
+        sets::resolve(conn, set_code).await
+    } else {
+        Ok(None)
+    }
 }
 
 pub async fn add_lines(
@@ -649,8 +685,8 @@ pub async fn add_lines(
         ));
     }
     let present: Vec<String> = sqlx::query_scalar(
-        "SELECT sscc FROM disaggregation_document_lines WHERE document_id = ? \
-         AND sscc IS NOT NULL",
+        "SELECT COALESCE(sscc, set_code) FROM disaggregation_document_lines WHERE document_id = ? \
+         AND (sscc IS NOT NULL OR set_code IS NOT NULL)",
     )
     .bind(&id)
     .fetch_all(&mut *tx)
@@ -662,29 +698,13 @@ pub async fn add_lines(
     let mut demo_ssccs: Vec<String> = Vec::new();
     for (offset, line) in lines.iter().enumerate() {
         let position = last + 1 + i64::try_from(offset).map_err(ApiError::internal)?;
-        let Some(sscc) = line.sscc.as_deref() else {
-            // Not read as an SSCC: nothing to look for.
+        let code = line.sscc.as_ref().or(line.set_code.as_ref());
+        if code.is_some_and(|code| !present.insert(code.clone())) {
             insert_line(
                 &mut tx,
                 &id,
                 position,
-                &line.input,
-                None,
-                LineStatus::NotFound,
-                None,
-                &at,
-            )
-            .await?;
-            continue;
-        };
-        if !present.insert(sscc.to_owned()) {
-            // A repeat: the cloud's marker, the input kept and the SSCC not.
-            insert_line(
-                &mut tx,
-                &id,
-                position,
-                &line.input,
-                None,
+                line,
                 LineStatus::Duplicate,
                 None,
                 &at,
@@ -692,43 +712,30 @@ pub async fn add_lines(
             .await?;
             continue;
         }
-        match disaggregation::resolve(&mut tx, sscc).await? {
-            None => {
-                insert_line(
-                    &mut tx,
-                    &id,
-                    position,
-                    &line.input,
-                    Some(sscc),
-                    LineStatus::NotFound,
-                    None,
-                    &at,
-                )
-                .await?;
+        let target = resolve_line(&mut tx, line.sscc.as_deref(), line.set_code.as_deref()).await?;
+        if let Some(target) = &target {
+            if target.cloud {
+                context.require_admin_in(&mut tx).await?;
             }
-            Some(target) => {
-                if target.cloud {
-                    context.require_admin_in(&mut tx).await?;
+            if let (Some(product_id), Some(code)) = (&target.product_id, code) {
+                if crate::demo::is_demo_product(&mut tx, product_id).await? {
+                    demo_ssccs.push(code.to_owned());
+                    continue;
                 }
-                if let Some(product_id) = &target.product_id {
-                    if crate::demo::is_demo_product(&mut tx, product_id).await? {
-                        demo_ssccs.push(sscc.to_owned());
-                        continue;
-                    }
-                }
-                insert_line(
-                    &mut tx,
-                    &id,
-                    position,
-                    &line.input,
-                    Some(sscc),
-                    target.status,
-                    Some(&target),
-                    &at,
-                )
-                .await?;
             }
         }
+        insert_line(
+            &mut tx,
+            &id,
+            position,
+            line,
+            target
+                .as_ref()
+                .map_or(LineStatus::NotFound, |target| target.status),
+            target.as_ref(),
+            &at,
+        )
+        .await?;
     }
     if !demo_ssccs.is_empty() {
         return Err(ApiError::conflict(
@@ -859,9 +866,10 @@ async fn revalidate_line(
     at: &str,
 ) -> Result<(), ApiError> {
     let status = target.map_or(LineStatus::NotFound, |target| target.status);
+    let set = target.and_then(|t| t.set.as_ref());
     sqlx::query(
         "UPDATE disaggregation_document_lines SET status = ?, box_id = ?, pallet_id = ?, \
-         product_id = ?, code_count = ?, validated_at = ?, cloud_box_id=?, cloud_pallet_id=?, cloud_product_id=?, cloud_product_name=?, warehouse_pallet_id=? WHERE id = ?",
+         product_id = ?, code_count = ?, validated_at = ?, cloud_box_id=?, cloud_pallet_id=?, cloud_product_id=?, cloud_product_name=?, warehouse_pallet_id=?, set_device_id=?, set_record_id=? WHERE id = ?",
     )
     .bind(status.as_str())
     .bind(target.filter(|t| !t.cloud).and_then(|t| t.box_id.as_deref()))
@@ -874,6 +882,8 @@ async fn revalidate_line(
     .bind(target.filter(|t| t.cloud).and_then(|t| t.product_id.as_deref()))
     .bind(target.filter(|t| t.cloud).and_then(|t| t.product_name.as_deref()))
     .bind(target.and_then(|t| t.warehouse_pallet_id.as_deref()))
+    .bind(set.map(|s| s.device_id.as_str()))
+    .bind(set.map(|s| s.record_id.as_str()))
     .bind(line_id)
     .execute(conn)
     .await
@@ -942,8 +952,14 @@ async fn apply(
             "the document has no reason",
         ));
     }
-    let lines: Vec<(String, Option<String>)> = sqlx::query_as(
-        "SELECT id, sscc FROM disaggregation_document_lines WHERE document_id = ? \
+    #[derive(sqlx::FromRow)]
+    struct ApplyLine {
+        id: String,
+        sscc: Option<String>,
+        set_code: Option<String>,
+    }
+    let lines: Vec<ApplyLine> = sqlx::query_as(
+        "SELECT id, sscc, set_code FROM disaggregation_document_lines WHERE document_id = ? \
          ORDER BY position",
     )
     .bind(&id)
@@ -956,22 +972,29 @@ async fn apply(
             "the document has no lines",
         ));
     }
-    // Every line again, from the live tables; a line without an SSCC (not
-    // read, or a repeat) keeps its status and is never `ok`.
+    // Every line again, from the live tables. Unread codes and repeats keep
+    // their status and cannot be applied.
     let mut targets = Vec::with_capacity(lines.len());
+    let mut set_targets = Vec::new();
     let mut invalid = 0usize;
-    for (line_id, sscc) in &lines {
-        let Some(sscc) = sscc else {
+    for line in &lines {
+        if line.sscc.is_none() && line.set_code.is_none() {
             invalid += 1;
             continue;
-        };
-        let target = disaggregation::resolve(&mut tx, sscc).await?;
+        }
+        let target = resolve_line(&mut tx, line.sscc.as_deref(), line.set_code.as_deref()).await?;
         if target.as_ref().is_some_and(|t| t.cloud) {
             context.require_admin_in(&mut tx).await?;
         }
-        revalidate_line(&mut tx, line_id, target.as_ref(), &at).await?;
+        revalidate_line(&mut tx, &line.id, target.as_ref(), &at).await?;
         match target {
-            Some(target) if target.status == LineStatus::Ok => targets.push(target),
+            Some(mut target) if target.status == LineStatus::Ok => {
+                if let Some(set) = target.set.take() {
+                    set_targets.push((&line.id, set, target.code_count));
+                } else {
+                    targets.push(target);
+                }
+            }
             _ => invalid += 1,
         }
     }
@@ -1006,7 +1029,11 @@ async fn apply(
         ));
     }
     let instant = rules::device_text(now);
-    let done = disaggregation::apply_targets(&mut tx, &id, &targets, &instant, &at, rev).await?;
+    let mut done =
+        disaggregation::apply_targets(&mut tx, &id, &targets, &instant, &at, rev).await?;
+    for (line_id, set, count) in &set_targets {
+        done.codes += sets::release(&mut tx, line_id, set, *count, &at, rev).await?;
+    }
     sqlx::query(
         "UPDATE disaggregation_documents SET status = 'applied', applied_at = ?, \
          applied_by = ?, updated_at = ?, rev = ? WHERE id = ?",
@@ -1019,14 +1046,18 @@ async fn apply(
     .execute(&mut *tx)
     .await
     .map_err(ApiError::internal)?;
+    let mut details = json!({ "docNo": doc.doc_no, "boxes": done.boxes, "pallets": done.pallets,
+        "codes": done.codes });
+    if !set_targets.is_empty() {
+        details["sets"] = json!(set_targets.len());
+    }
     audited(
         &mut tx,
         &context,
         &at,
         actions::DISAGGREGATION_APPLY,
         &id,
-        json!({ "docNo": doc.doc_no, "boxes": done.boxes, "pallets": done.pallets,
-            "codes": done.codes }),
+        details,
     )
     .await?;
     let answer = card(&mut tx, &id).await?;

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   GismtDisaggregationError,
+  renderGismtDisaggregationJson,
   renderGismtDisaggregationXml,
 } from "../src/gismt-disaggregation.js";
 
@@ -16,6 +17,28 @@ const golden = readFileSync(
 );
 
 describe("ГИС МТ «Расформирование упаковки»", () => {
+  it("writes True API JSON with full KITU, plain set KI and no repeated package", () => {
+    const setCode = "010460712345678121SET'\"A";
+    const result = renderGismtDisaggregationJson({
+      organizationInn: "7701234567",
+      packings: [{ setCode }, { sscc: "046007034967000017" }, { setCode }],
+    });
+    expect(result.packingCount).toBe(2);
+    expect(JSON.parse(decoder.decode(result.bytes))).toEqual({
+      participant_inn: "7701234567",
+      products_list: [{ uitu: "00046007034967000017" }, { uitu: setCode }],
+    });
+  });
+
+  it("refuses a marking code with its crypto tail where the API expects a set KI", () => {
+    expect(() =>
+      renderGismtDisaggregationJson({
+        organizationInn: "7701234567",
+        packings: [{ setCode: "010460712345678121SET0001\u001d93aBcD" }],
+      }),
+    ).toThrow(new GismtDisaggregationError("INVALID_SET_CODE"));
+  });
+
   it("is the inventory's golden for its one package", () => {
     const rendered = renderGismtDisaggregationXml({
       organizationInn: "9705119097",

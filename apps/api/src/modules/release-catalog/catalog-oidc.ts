@@ -16,18 +16,20 @@ const id = z.string().regex(/^[1-9][0-9]{0,19}$/),
     .min(1)
     .max(256)
     .regex(/^[A-Za-z0-9_.-]+$/);
-const workflow = z
-  .object({
+const workflowIdentity = z.object({
+  environment: word,
+  workflowSha: sha,
+  subject: z.string().min(1).max(1024),
+});
+const legacyWorkflow = workflowIdentity
+  .extend({
     product: z.enum(["station", "handheld"]),
-    environment: word,
     workflowRef: z
       .string()
       .max(512)
       .regex(
         /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/\.github\/workflows\/[A-Za-z0-9_.-]+\.ya?ml@refs\/heads\/main$/,
       ),
-    workflowSha: sha,
-    subject: z.string().min(1).max(1024),
     jobWorkflowRef: z
       .string()
       .max(512)
@@ -39,6 +41,16 @@ const workflow = z
   })
   .strict()
   .refine((w) => (w.jobWorkflowRef === undefined) === (w.jobWorkflowSha === undefined));
+const taggedWorkflow = workflowIdentity
+  .extend({
+    mode: z.literal("pinned-tag"),
+    product: z.enum(["handheld", "standalone"]),
+    workflowRef: z.string().max(512),
+    jobWorkflowRef: z.string().max(512),
+    jobWorkflowSha: sha,
+  })
+  .strict();
+const workflow = z.union([legacyWorkflow, taggedWorkflow]);
 const configSchema = z
   .object({
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
@@ -51,15 +63,28 @@ const configSchema = z
     const seen = new Set<string>(),
       [owner, repo] = c.repository.split("/");
     for (const w of c.workflows) {
-      const key = JSON.stringify([w.workflowRef, w.workflowSha, w.environment]);
+      const key = JSON.stringify([
+        w.workflowRef,
+        w.environment,
+        "mode" in w ? null : w.workflowSha,
+      ]);
       const subjects = [
         `repo:${c.repository}:environment:${w.environment}`,
         `repo:${owner}@${c.ownerId}/${repo}@${c.repositoryId}:environment:${w.environment}`,
       ];
+      const tagPrefix = `${c.repository}/.github/workflows/${w.product}-stable-release.yml@refs/tags/${w.product}-publisher-v`;
+      const invalidTag =
+        "mode" in w &&
+        (w.environment !== `${w.product}-stable-publisher` ||
+          !w.workflowRef.startsWith(tagPrefix) ||
+          !/^[1-9][0-9]*$/.test(w.workflowRef.slice(tagPrefix.length)) ||
+          w.jobWorkflowRef !== w.workflowRef ||
+          w.jobWorkflowSha !== w.workflowSha);
       if (
         !w.workflowRef.startsWith(`${c.repository}/`) ||
         seen.has(key) ||
-        !subjects.includes(w.subject)
+        !subjects.includes(w.subject) ||
+        invalidTag
       )
         ctx.addIssue({ code: "custom", message: "invalid pinned publisher" });
       seen.add(key);
@@ -83,8 +108,8 @@ const claimsSchema = z.object({
   repository_id: id,
   repository_owner_id: id,
   repository_owner: z.string(),
-  ref: z.literal("refs/heads/main"),
-  ref_type: z.literal("branch"),
+  ref: z.string().max(512),
+  ref_type: z.enum(["branch", "tag"]),
   environment: word,
   workflow_ref: z.string(),
   workflow_sha: sha,
@@ -106,7 +131,8 @@ const claimsSchema = z.object({
 });
 export interface GithubPublisherPrincipal {
   kind: "github";
-  product: "station" | "handheld";
+  product: "station" | "handheld" | "standalone";
+  mode?: "pinned-tag";
   repository: string;
   repositoryId: string;
   ownerId: string;
@@ -121,6 +147,11 @@ export interface GithubPublisherPrincipal {
   expiresAt: number;
 }
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+function matchesRef(w: z.infer<typeof workflow>, c: z.infer<typeof claimsSchema>, ownerId: string) {
+  if ("mode" in w)
+    return c.ref_type === "tag" && w.workflowRef.endsWith(`@${c.ref}`) && c.actor_id === ownerId;
+  return c.ref_type === "branch" && c.ref === "refs/heads/main";
+}
 /** Only the fixed GitHub key source is used in production; tests inject locally generated JWKS. */
 export async function verifyPublisherToken(
   token: string,
@@ -197,7 +228,8 @@ export async function verifyPublisherToken(
         w.workflowRef === c.workflow_ref &&
         w.workflowSha === c.workflow_sha &&
         w.environment === c.environment &&
-        w.subject === c.sub,
+        w.subject === c.sub &&
+        matchesRef(w, c, config.ownerId),
     );
     if (!w || w.jobWorkflowRef !== c.job_workflow_ref || w.jobWorkflowSha !== c.job_workflow_sha)
       throw new CatalogFault("forbidden");
@@ -216,6 +248,7 @@ export async function verifyPublisherToken(
     };
     return {
       ...identity,
+      ...("mode" in w ? { mode: w.mode } : {}),
       fingerprint: hash(
         JSON.stringify({
           ...identity,

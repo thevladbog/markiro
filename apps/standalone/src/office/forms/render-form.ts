@@ -4,9 +4,11 @@ import {
   renderDisaggregationReportHtml,
   renderPalletPlacardHtml,
   renderPalletReportHtml,
+  renderSetReportHtml,
   renderShiftPlacardsHtml,
   renderShiftTaskFormHtml,
   type PlacardFormat,
+  type SetReportData,
 } from "@markiro/domain";
 
 import type { DisaggregationReportRows } from "../../host/disaggregation.js";
@@ -24,7 +26,7 @@ import {
 } from "./form-data.js";
 
 /** The printed forms of a shift (pilot spec §5.5), as the cloud's routes serve them. */
-export type FormKind = "box" | "pallet" | "placard" | "placards" | "task" | "act";
+export type FormKind = "box" | "pallet" | "placard" | "placards" | "task" | "act" | "sets";
 
 /** A form to draw and the host's rows (or the office's records) it is drawn from. */
 export type FormRequest = (
@@ -33,8 +35,9 @@ export type FormRequest = (
   | { kind: "placard"; rows: PalletReportRows; palletId: string; format: PlacardFormat }
   | { kind: "placards"; rows: PalletReportRows; format: PlacardFormat }
   | { kind: "task"; inputs: TaskFormInputs; generatedAt: Date }
+  | { kind: "sets"; data: SetReportData; timeZone: string }
   // «Акт дезагрегации» of a disaggregation document (plan ДЗГ-О), of any status.
-  | { kind: "act"; rows: DisaggregationReportRows; timeZone: string }
+  | { kind: "act"; rows: DisaggregationReportRows; timeZone: string; scope?: "shift" }
 ) & {
   /**
    * The organization's own print logo as a PNG data URL (custom branding, a
@@ -147,19 +150,32 @@ export function prepareForm(request: FormRequest): PreparedForm | null {
         fileName: "Бланк смены.html",
       };
     }
+    case "sets": {
+      const org = request.data.org === null ? null : { ...request.data.org, logo };
+      return {
+        kind: "sets",
+        draw: () => renderSetReportHtml({ ...request.data, org }, request.timeZone),
+        fileName: `Состав наборов ${request.data.shiftNumber}.html`,
+      };
+    }
     case "act": {
       // The cloud prints an act of any status, so there is no refusal. The
       // note replaces the cloud's «передаются в ГИС МТ автоматически»: the
       // standalone sends nothing, a person uploads the file.
       const data = actData(request.rows, logo);
+      const shift = request.scope === "shift";
+      const operationNote =
+        shift || data.lines.some((line) => line.sscc === null)
+          ? "Сведения о расформировании упаковок в Честный знак подаются отдельно."
+          : DISAGGREGATION_MANUAL_UPLOAD_NOTE;
       return {
         kind: "act",
         draw: () =>
           renderDisaggregationReportHtml(
-            { ...data, operationNote: DISAGGREGATION_MANUAL_UPLOAD_NOTE },
+            { ...data, operationNote, ...(shift ? { scope: "shift" } : {}) },
             request.timeZone,
           ),
-        fileName: `Акт дезагрегации ${request.rows.docNo}.html`,
+        fileName: `Акт дезагрегации ${shift ? "смены " : ""}${request.rows.docNo}.html`,
       };
     }
   }

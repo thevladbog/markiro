@@ -28,6 +28,11 @@ function parse(schema, value) {
 function sameIdentity(a, b) {
   return a.product === b.product && a.channel === b.channel && a.version === b.version;
 }
+function assertPublisherScope({ product, channel }) {
+  if (product === "station" || product === "handheld") return;
+  if (product === "standalone" && channel === "stable") return;
+  invalid();
+}
 function sameFiles(a, b) {
   return (
     a.length === b.length &&
@@ -95,7 +100,11 @@ export function createCatalogUploadStore({ env = process.env, Client = S3Client 
   });
   return {
     async put({ key, body, contentType }) {
-      if (!/^(station|handheld)\/_uploads\/[0-9a-f-]{36}\/[0-9A-Za-z][0-9A-Za-z._+-]*$/.test(key))
+      if (
+        !/^(station|handheld|standalone)\/_uploads\/[0-9a-f-]{36}\/[0-9A-Za-z][0-9A-Za-z._+-]*$/.test(
+          key,
+        )
+      )
         invalid();
       try {
         const result = await client.send(
@@ -210,7 +219,7 @@ export function createCatalogClient({
   return {
     async createIntent(idempotencyKey, publication) {
       const input = parse(publicationIntentRequestSchema, { idempotencyKey, publication });
-      if (!["station", "handheld"].includes(input.publication.identity.product)) invalid();
+      assertPublisherScope(input.publication.identity);
       const result = await request("POST", "/intents", input, catalogIntentViewSchema);
       if (
         !sameIdentity(result.identity, publication.identity) ||
@@ -222,7 +231,7 @@ export function createCatalogClient({
     async getPublication(input) {
       const expected = parse(publicationRequestSchema, input),
         scope = expected.identity;
-      if (!["station", "handheld"].includes(scope.product)) invalid();
+      assertPublisherScope(scope);
       const result = await request(
         "GET",
         `/publications/${scope.product}/${scope.channel}/${scope.version}`,
@@ -239,11 +248,12 @@ export function createCatalogClient({
       parse(releaseOperationIdSchema, id);
       const result = await request("GET", `/intents/${id}`, undefined, catalogIntentViewSchema);
       if (result.id !== id) invalid();
+      assertPublisherScope(result.identity);
       return result;
     },
     async getChannel(identity) {
       const scope = parse(channelSnapshotSchema.shape.identity, identity);
-      if (!["station", "handheld"].includes(scope.product)) invalid();
+      assertPublisherScope(scope);
       const result = await request(
         "GET",
         `/channels/${scope.product}/${scope.channel}`,
@@ -257,9 +267,9 @@ export function createCatalogClient({
     async uploadFile(input, name, body) {
       const intent = parse(catalogIntentViewSchema, input),
         file = intent.files.find((f) => f.name === name);
+      assertPublisherScope(intent.identity);
       if (
         !file ||
-        !["station", "handheld"].includes(intent.identity.product) ||
         intent.state !== "pending" ||
         Date.parse(intent.expiresAt) <= now() ||
         !(body instanceof Uint8Array) ||
@@ -279,6 +289,7 @@ export function createCatalogClient({
     async commitIntent(input, files) {
       const intent = parse(catalogIntentViewSchema, input),
         commit = parse(publicationCommitRequestSchema, { files });
+      assertPublisherScope(intent.identity);
       if (
         commit.files.length !== intent.files.length ||
         commit.files.some((f) => !intent.files.some((s) => s.name === f.name))
@@ -299,6 +310,8 @@ export function createCatalogClient({
     async changeChannel(identity, input) {
       const scope = parse(channelSnapshotSchema.shape.identity, identity),
         change = parse(channelChangeRequestSchema, input);
+      assertPublisherScope(scope);
+      if (scope.product === "standalone" && change.kind !== "forward") invalid();
       const accepted = verified.get(change.targetPublicationId);
       if (!accepted || accepted.product !== scope.product || accepted.channel !== scope.channel)
         throw new Error("release catalog publication has not been verified");

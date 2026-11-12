@@ -1,15 +1,17 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button } from "@markiro/ui";
+import { Alert, VisuallyHidden } from "@markiro/ui";
 import type { ShiftCloseReasonCode } from "@markiro/domain";
 
 import { shiftProductTitle } from "../../lib/shift-product.js";
 import { closeShift, readCloseSummary, type CloseSummary } from "../close/shift-close.js";
 import { sameSummary, ShiftClosePanel, type CloseNote } from "../close/ShiftClosePanel.js";
+import { FloorFooter } from "../shifts/FloorScreen.js";
+import { SetRecipe } from "../shifts/SetRecipe.js";
 import { readShiftCopy } from "../shifts/shift-copies.js";
 import { sharedCount, sharedParticipation } from "../shifts/shift-participation.js";
 import { formatQuantity } from "../shifts/shift-text.js";
-import { ShiftBand } from "./WorkInstruments.js";
+import { FooterAction, ShiftBand } from "./WorkInstruments.js";
 import type { WorkScreenProps } from "./WorkScreen.js";
 import {
   readLostSets,
@@ -23,6 +25,7 @@ import {
 import { useShiftParticipation } from "./use-shift-participation.js";
 import { playSignalTone } from "./signal-sound.js";
 import { createWorkQueue } from "./work-queue.js";
+import "../print/label-panel.css";
 import "./set-work.css";
 
 type Assembly = Awaited<ReturnType<typeof readSetAssembly>>;
@@ -30,6 +33,8 @@ type Feedback = SetScanResult | "undone" | "failed";
 
 export function SetWorkScreen(props: WorkScreenProps) {
   const { t } = useTranslation();
+  const scanTitleId = useId();
+  const scanHintId = useId();
   const { shift, source, awake, officeClosed, leaving, onLeave } = props;
   const recipe = shift.snapshot.product.setItems ?? [];
   const live = useRef(props);
@@ -211,9 +216,7 @@ export function SetWorkScreen(props: WorkScreenProps) {
               online,
             );
             if (result.kind === "closed") {
-              live.current.onRecorded();
-              setClosed(true);
-              setPanel(null);
+              leaveAfterClose();
               return;
             }
           }
@@ -221,9 +224,7 @@ export function SetWorkScreen(props: WorkScreenProps) {
         } catch {
           const summary = await read().catch(() => null);
           if (summary?.blocker?.kind === "closed") {
-            live.current.onRecorded();
-            setClosed(true);
-            setPanel(null);
+            leaveAfterClose();
           } else {
             setPanel({
               summary: summary ?? panel.summary,
@@ -238,13 +239,24 @@ export function SetWorkScreen(props: WorkScreenProps) {
     );
   }
 
+  function leaveAfterClose() {
+    setClosed(true);
+    live.current.onRecorded();
+    live.current.onLeave();
+  }
+
   const counts = setItemCounts(assembly?.items ?? []);
+  const lastGtin = assembly?.items.at(-1)?.gtin14;
+  const lastName = recipe.find((item) => item.gtin14 === lastGtin)?.productName;
   const target = recipe.reduce((sum, item) => sum + item.quantity, 0);
   const progress = assembly?.items.length ?? 0;
   const productName = shiftProductTitle(shift.snapshot.product);
   const completed = assembly?.completed ?? 0;
   const shared = sharedPart === null ? null : sharedCount(sharedPart, deviceId, completed, lost);
-  const state = progress === target && target > 0 ? "scanSet" : "scanItems";
+  const awaitingSetMark = progress === target && target > 0;
+  const scanTitle = t(
+    awaitingSetMark ? "floor.setAssembly.scanSet" : "floor.setAssembly.scanItems",
+  );
   const accepted = feedback === "assembled" || feedback === "item" || feedback === "undone";
   return (
     <main className="work-screen" aria-label={t("floor.setAssembly.mode")}>
@@ -275,6 +287,7 @@ export function SetWorkScreen(props: WorkScreenProps) {
               onLabel={() => undefined}
               boxless
               ownPart={sharedPart !== null}
+              {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
               onBack={() => {
                 setPanel(null);
                 pausing.current = false;
@@ -285,83 +298,83 @@ export function SetWorkScreen(props: WorkScreenProps) {
               <section className="set-assembly__status">
                 {officeClosed ? (
                   <Alert tone="warn" title={t("floor.work.officeClosed.title")} />
-                ) : closed ? (
-                  <Alert
-                    tone="ok"
-                    title={t(
-                      sharedPart === null
-                        ? "floor.close.done.title"
-                        : "floor.close.part.done.title",
-                      {
-                        number: shift.copy.number,
-                      },
-                    )}
-                  />
                 ) : (
                   <>
-                    <h2>{t(`floor.setAssembly.${state}`)}</h2>
-                    <div
-                      className="set-assembly__progress"
-                      aria-label={t("floor.setAssembly.scanned")}
+                    <section
+                      className={
+                        awaitingSetMark ? "label-panel__stage set-assembly__scan-stage" : undefined
+                      }
+                      aria-labelledby={scanTitleId}
+                      aria-describedby={awaitingSetMark ? scanHintId : undefined}
                     >
-                      {formatQuantity(progress)} / {formatQuantity(target)}
-                    </div>
+                      {awaitingSetMark && (
+                        <div className="label-panel__scanner" aria-hidden="true">
+                          <span />
+                        </div>
+                      )}
+                      <h2 id={scanTitleId}>{scanTitle}</h2>
+                      {awaitingSetMark && (
+                        <p id={scanHintId} className="label-panel__instruction">
+                          {t("floor.setAssembly.scanSetHint")}
+                        </p>
+                      )}
+                      <div
+                        className="set-assembly__progress"
+                        aria-label={t("floor.setAssembly.scanned")}
+                      >
+                        {formatQuantity(progress)} / {formatQuantity(target)}
+                      </div>
+                    </section>
                     <div role="status">
+                      {awaitingSetMark && <VisuallyHidden>{scanTitle}.</VisuallyHidden>}
                       {feedback !== null && (
                         <Alert
                           tone={accepted ? "ok" : "warn"}
                           role="presentation"
-                          title={t(`floor.setAssembly.feedback.${feedback}`)}
+                          title={
+                            feedback === "item" && lastName !== undefined
+                              ? t("floor.setAssembly.lastProduct", { name: lastName })
+                              : t(`floor.setAssembly.feedback.${feedback}`)
+                          }
                         />
                       )}
                     </div>
                   </>
                 )}
               </section>
-              <section
-                className="set-assembly__recipe"
-                aria-label={t("floor.setAssembly.composition")}
-              >
-                <h2>{t("floor.setAssembly.composition")}</h2>
-                <ul>
-                  {recipe.map(({ gtin14, productName: name, quantity }) => (
-                    <li key={gtin14}>
-                      <span>
-                        {name}
-                        <small>{gtin14}</small>
-                      </span>
-                      <strong>
-                        {formatQuantity(counts.get(gtin14) ?? 0)} / {formatQuantity(quantity)}
-                      </strong>
-                    </li>
-                  ))}
-                </ul>
-              </section>
+              <SetRecipe
+                local={props.local}
+                items={recipe}
+                counts={counts}
+                {...(lastGtin === undefined ? {} : { lastGtin })}
+              />
             </div>
           )}
         </div>
       </div>
-      <footer className="station-floor-footer">
-        <Button
-          size="floor"
+      <FloorFooter className="work-footer" ariaLabel={t("floor.work.layout.actions")}>
+        <FooterAction
           variant="secondary"
           disabled={progress === 0 || closed || leaving || panel !== null || busy}
           onClick={undo}
         >
           {t("floor.setAssembly.undo")}
-        </Button>
-        <Button size="floor" variant="secondary" disabled={leaving || busy} onClick={onLeave}>
-          {t(closed ? "floor.close.done.toList" : "floor.work.leave")}
-        </Button>
-        <Button
-          size="floor"
-          className="floor-primary"
+        </FooterAction>
+        <FooterAction
+          variant="warning-outline"
+          disabled={closed || leaving || busy}
+          onClick={onLeave}
+        >
+          {t("floor.setAssembly.pause")}
+        </FooterAction>
+        <FooterAction
+          variant="destructive-outline"
           disabled={closed || leaving || panel !== null || busy || !ready}
           onClick={openClose}
         >
           {t("floor.setAssembly.close")}
-        </Button>
-      </footer>
+        </FooterAction>
+      </FloorFooter>
     </main>
   );
 }

@@ -673,6 +673,10 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::office_sets::list_sets),
         )
         .route(
+            "/v1/office/shifts/{id}/disaggregation-report",
+            get(crate::routes::office_disaggregation_reports::shift_report_data),
+        )
+        .route(
             "/v1/office/shifts/{id}/scans",
             get(crate::routes::office_scan_history::list_scans),
         )

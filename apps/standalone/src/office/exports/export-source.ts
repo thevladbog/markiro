@@ -88,6 +88,11 @@ export interface SetExportRow {
   setCode: { canonical: string };
   items: readonly { canonical: string }[];
   outcome: "accepted" | "conflict";
+  disassembledAt?: string | null | undefined;
+}
+
+export function isAssembledSet(set: Pick<SetExportRow, "outcome" | "disassembledAt">): boolean {
+  return set.outcome === "accepted" && set.disassembledAt == null;
 }
 
 function compareCodeUnits(left: string, right: string): number {
@@ -263,11 +268,11 @@ export function setExportSnapshot(
   rows: ShiftExportRows,
   sets: readonly SetExportRow[],
 ): SourceResult<StandaloneExportSet[]> {
-  const refusal = setExportRefusal(rows, sets);
+  const refusal = setExportRefusal(rows.shift.status, sets);
   if (refusal !== null) return { ok: false, refusal };
   return {
     ok: true,
-    value: sets.map(({ setCode, items }) => ({
+    value: sets.filter(isAssembledSet).map(({ setCode, items }) => ({
       code: setCode.canonical,
       items: items.map((item) => item.canonical),
     })),
@@ -275,12 +280,12 @@ export function setExportSnapshot(
 }
 
 export function setExportRefusal(
-  rows: ShiftExportRows,
+  status: ShiftExportRows["shift"]["status"],
   sets: readonly SetExportRow[],
 ): ExportSourceRefusal | null {
-  if (rows.shift.status !== "closed") return "SHIFT_NOT_CLOSED";
+  if (status !== "closed") return "SHIFT_NOT_CLOSED";
   if (sets.some((set) => set.outcome === "conflict")) return "SET_EXPORT_CONFLICT";
-  if (sets.length === 0) return "SHIFT_HAS_NO_CODES";
+  if (!sets.some(isAssembledSet)) return "SHIFT_HAS_NO_CODES";
   return null;
 }
 

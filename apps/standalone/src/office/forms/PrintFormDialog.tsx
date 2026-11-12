@@ -28,6 +28,8 @@ import { useRefreshStoredFiles } from "../exports/use-refresh-files.js";
 import { storeForm, type FormTarget as StoredFormTarget } from "./store-form.js";
 import { prepareForm, type FormRequest } from "./render-form.js";
 import { taskFormInputs } from "./task-inputs.js";
+import { setFormRequest, type SetFormSources } from "./set-form-data.js";
+import { setExportRefusal } from "../exports/export-source.js";
 
 /** The form a card's button asks for; `label` names its box or pallet in the title. */
 export type FormTarget =
@@ -35,6 +37,7 @@ export type FormTarget =
   | { kind: "pallet"; palletId: string; label: string }
   | { kind: "placard"; palletId: string; label: string }
   | { kind: "placards" }
+  | { kind: "sets" }
   | { kind: "task" };
 
 export interface PrintFormDialogProps {
@@ -60,6 +63,7 @@ function formTarget(target: FormTarget, shiftId: string): StoredFormTarget {
       return { type: "pallet", id: target.palletId };
     case "placards":
     case "task":
+    case "sets":
       return { type: "shift", id: shiftId };
   }
 }
@@ -74,6 +78,7 @@ interface Sources {
   box: BoxReportRows | undefined;
   pallets: PalletReportRows | undefined;
   task: TaskFormInputs | null;
+  sets?: SetFormSources;
 }
 
 /** The office's request for the form from `sources`, or `null` while they lack what it needs. */
@@ -101,6 +106,8 @@ function formRequest(
         : { kind: "placards", rows: sources.pallets, format };
     case "task":
       return sources.task === null ? null : { kind: "task", inputs: sources.task, generatedAt };
+    case "sets":
+      return sources.sets === undefined ? null : setFormRequest(sources.sets, timeZone);
   }
 }
 
@@ -162,7 +169,20 @@ export function PrintFormDialog({
     (api, token) => api.getPalletReportRows(token, shift.id),
     { enabled: ofPallets },
   );
-  const read = target.kind === "box" ? box : ofPallets ? pallets : null;
+  const sets = useOfficeQuery(
+    officeKeys.shiftSetForm(shift.id),
+    async (api, token): Promise<SetFormSources> => {
+      const [freshShift, exportRows, rows] = await Promise.all([
+        api.getShift(token, shift.id),
+        api.getShiftExportSource(token, shift.id),
+        api.listShiftSets(token, shift.id),
+      ]);
+      return { shift: freshShift, exportRows, sets: rows };
+    },
+    { enabled: target.kind === "sets" },
+  );
+  const read =
+    target.kind === "box" ? box : ofPallets ? pallets : target.kind === "sets" ? sets : null;
   const busy = stage !== null;
   // Not the answer of an earlier opening: it is read again, and until it is
   // (our own press reads too, and keeps the buttons where they are) nothing is offered.
@@ -173,16 +193,25 @@ export function PrintFormDialog({
   const prepared = useMemo(() => {
     const asked = formRequest(
       target,
-      { box: box.data, pallets: pallets.data, task: taskInputs },
+      {
+        box: box.data,
+        pallets: pallets.data,
+        task: taskInputs,
+        ...(sets.data === undefined ? {} : { sets: sets.data }),
+      },
       timeZone,
       format,
       new Date(),
     );
     return asked === null ? null : prepareForm(asked);
-  }, [target, box.data, pallets.data, taskInputs, timeZone, format]);
+  }, [target, box.data, pallets.data, sets.data, taskInputs, timeZone, format]);
   const settled = !reading && !failed && !blankUnavailable;
   const refused = settled && prepared === null;
   const drawable = settled && prepared !== null;
+  const setRefusal =
+    target.kind === "sets" && sets.data !== undefined
+      ? setExportRefusal(sets.data.shift.status, sets.data.sets)
+      : null;
 
   /** The sources read at this moment, or `null` when a read failed (the page then says so). */
   async function readAgain(): Promise<Sources | null> {
@@ -200,6 +229,12 @@ export function PrintFormDialog({
         return answer.isError || answer.data === undefined
           ? null
           : { box: undefined, pallets: answer.data, task: null };
+      }
+      case "sets": {
+        const answer = await sets.refetch();
+        return answer.isError || answer.data === undefined
+          ? null
+          : { box: undefined, pallets: undefined, task: null, sets: answer.data };
       }
       case "task": {
         // The blank names the shift, its product, line, counterparty and the organization.
@@ -308,7 +343,8 @@ export function PrintFormDialog({
       setStage(at);
       await paint();
       if (!alive.current) return;
-      const folder = formFolder(shift.number, form.kind, new Date().toISOString(), timeZone);
+      const folderZone = asked?.kind === "sets" ? asked.timeZone : timeZone;
+      const folder = formFolder(shift.number, form.kind, new Date().toISOString(), folderZone);
       const saved = await openInBrowser(
         files,
         { kind: form.kind, html, fileName: form.fileName },
@@ -398,7 +434,11 @@ export function PrintFormDialog({
         )}
         {refused && (
           <Alert tone="warn" role="presentation">
-            {t(`office.forms.refused.${target.kind}`)}
+            {t(
+              setRefusal === null
+                ? `office.forms.refused.${target.kind}`
+                : `office.exports.failures.${setRefusal}`,
+            )}
           </Alert>
         )}
         {outcome?.kind === "opened" && (

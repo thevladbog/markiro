@@ -37,6 +37,8 @@ pub mod constraints {
     pub const RESTORE_HOLD: &str = "restore_hold";
     /// The ЧЗ file of a document that is not applied (plan ДЗГ-О).
     pub const NOT_APPLIED: &str = "document_not_applied";
+    /// The document contains a marked set, for which the SSCC XML is unavailable.
+    pub const SET_XML_UNSUPPORTED: &str = "set_disaggregation_xml_unsupported";
     pub const ALL: &[&str] = &[
         NOT_DRAFT,
         REASON_REQUIRED,
@@ -44,6 +46,7 @@ pub mod constraints {
         INVALID_LINES,
         RESTORE_HOLD,
         NOT_APPLIED,
+        SET_XML_UNSUPPORTED,
     ];
 }
 
@@ -195,8 +198,8 @@ pub struct DisaggregationDocument {
     pub rev: i64,
 }
 
-/// One line: what was typed, the SSCC the domain read (18 digits, `null`
-/// when none, or for a repeat), what it names and its status.
+/// One line: what was typed, its SSCC (18 digits) or set identification code
+/// (AI 01/21), what it names and its status. Repeats keep only the input.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisaggregationLine {
@@ -206,6 +209,10 @@ pub struct DisaggregationLine {
     pub cloud_history: bool,
     pub sscc_input: String,
     pub sscc: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_id: Option<String>,
     pub box_id: Option<String>,
     pub pallet_id: Option<String>,
     /// Warehouse pallets have no production shift.
@@ -298,6 +305,17 @@ pub struct CodeReleaseRecord {
     pub code_count: u32,
 }
 
+/// `data` of a `set_releases` feed item. Its id is the disaggregation line.
+/// Only the component claims of this assembly are released.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetReleaseRecord {
+    pub device_id: String,
+    pub record_id: String,
+    pub shift_id: String,
+    pub set_code_hash: String,
+}
+
 /// What `GET /v1/office/disaggregation/{id}/report-data` reads (plan ДЗГ-О):
 /// `boxes` only the lines, `full` also each box's codes and each pallet's
 /// boxes, as the cloud's `variant=boxes|full`.
@@ -311,7 +329,7 @@ pub enum DisaggregationReportVariant {
 /// `GET /v1/office/disaggregation/{id}/report-data` (plan ДЗГ-О): what
 /// «Акт дезагрегации» prints of a document, in one snapshot of the host, by
 /// the rules of the cloud's `DisaggregationService.reportData`: the lines
-/// with an SSCC, in the order they were added; a line's `codeCount` as the
+/// with an SSCC or set code, in the order they were added; a line's `codeCount` as the
 /// line keeps it; the product's name now; the names of the office users who
 /// made and applied it. `items` and `boxes` are filled only for `full`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -334,14 +352,17 @@ pub struct DisaggregationReportRows {
 /// A line of [`DisaggregationReportRows`]: `sscc` the bare 18 digits; a box's
 /// line names its box, a pallet's its pallet. For `full`, a box's `items` are
 /// its codes not displaced and not taken out, or taken out by its own
-/// disassembly (the rule of «Состав короба»), by GTIN and serial; a pallet's
+/// disassembly (the rule of «Состав короба»), by GTIN and serial; a set's
+/// `items` are its immutable assembly scans in scan order; a pallet's
 /// `boxes` the boxes standing on it not taken apart, closed first, with
 /// their live units.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisaggregationReportLine {
     pub id: String,
-    pub sscc: String,
+    pub sscc: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_code: Option<String>,
     pub box_id: Option<String>,
     pub pallet_id: Option<String>,
     pub product_name: Option<String>,
@@ -358,11 +379,12 @@ pub struct DisaggregationReportBox {
     pub units: u32,
 }
 
-/// The one ЧЗ file a disaggregation document has (plan ДЗГ-О, owner decision
-/// ПР-2): ГИС МТ «Расформирование упаковки», `@markiro/domain`'s
-/// `renderGismtDisaggregationXml`.
+/// The legacy SSCC-only XML for ГИС МТ «Расформирование упаковки».
 pub const DISAGGREGATION_XML_FORMAT_ID: &str = "disaggregation_xml_gismt";
 pub const DISAGGREGATION_XML_FORMAT_VERSION: u32 = 1;
+/// The JSON for ГИС МТ «Расформирование упаковки» accepts SSCC and set codes.
+pub const DISAGGREGATION_JSON_FORMAT_ID: &str = "disaggregation_json_gismt";
+pub const DISAGGREGATION_JSON_FORMAT_VERSION: u32 = 1;
 
 /// `POST /v1/office/disaggregation/{id}/exports` (plan ДЗГ-О): the office
 /// saved the document's ЧЗ file and records it, as `ShiftExportRecord` does

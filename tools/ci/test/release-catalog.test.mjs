@@ -142,6 +142,8 @@ test("every fresh catalog workflow builds the domain dependency before contracts
     "station-stable-release.yml",
     "station-release-reseed.yml",
     "handheld-release.yml",
+    "handheld-stable-release.yml",
+    "standalone-stable-release.yml",
   ]) {
     const workflow = load(readFileSync(`.github/workflows/${file}`, "utf8"));
     for (const [name, job] of Object.entries(workflow.jobs)) {
@@ -165,6 +167,60 @@ test("handheld sync-download builds the compiled catalog verifier before loading
   assert.ok(run >= 0);
   assert.ok(before.includes("pnpm --filter @markiro/domain build"));
   assert.ok(before.includes("pnpm --filter @markiro/platform-contracts build"));
+});
+
+test("stable publishers prepare a verified runtime without publisher credentials", () => {
+  const prepareAction = "./.github/actions/prepare-publisher-runtime";
+  const restoreAction = "./.github/actions/restore-publisher-runtime";
+  for (const product of ["handheld", "standalone"]) {
+    const workflow = load(readFileSync(`.github/workflows/${product}-stable-release.yml`, "utf8"));
+    assert.equal(workflow["cache-mode"], "none");
+    assert.notEqual(workflow.permissions?.["id-token"], "write");
+    const prepare = workflow.jobs["prepare-runtime"];
+    assert.ok(prepare, product);
+    assert.deepEqual(prepare.permissions, { contents: "read" });
+    assert.equal(prepare.environment, undefined);
+    assert.doesNotMatch(JSON.stringify(prepare), /secrets\.|inputs\.|needs\./u);
+    assert.ok(prepare.if.includes(`refs/tags/${product}-publisher-v1`));
+    assert.ok(prepare.if.includes("github.actor == github.repository_owner"));
+    assert.ok(prepare.if.includes("github.triggering_actor == github.repository_owner"));
+    assert.equal(prepare.steps[0].with.ref, "${{ github.sha }}");
+    assert.equal(prepare.steps.at(-1).uses, prepareAction);
+    for (const name of ["publish", "verify"]) {
+      const job = workflow.jobs[name];
+      assert.ok([job.needs].flat().includes("prepare-runtime"));
+      assert.doesNotMatch(JSON.stringify(job), /pnpm install|pnpm --filter|corepack enable/u);
+      const restore = job.steps.find((step) => step.uses === restoreAction);
+      assert.deepEqual(restore?.with, {
+        "artifact-id": "${{ needs.prepare-runtime.outputs.artifact_id }}",
+        sha256: "${{ needs.prepare-runtime.outputs.sha256 }}",
+      });
+      const usesCatalog = job.steps.findIndex((step) =>
+        /node tools\/(?:standalone-release\/publish-catalog|handheld-release\/publish|release-catalog\/verify-stable)\.mjs/u.test(
+          step.run ?? "",
+        ),
+      );
+      assert.ok(usesCatalog > job.steps.indexOf(restore));
+    }
+  }
+
+  const readAction = (name) => load(readFileSync(`${name}/action.yml`, "utf8")).runs.steps;
+  const prepare = readAction(prepareAction);
+  const commands = prepare.map((step) => step.run ?? "").join("\n");
+  assert.match(commands, /install --frozen-lockfile --ignore-scripts/u);
+  assert.match(commands, /@markiro\/domain build[\s\S]*@markiro\/platform-contracts build/u);
+  assert.match(commands, /runtime-archive\.py pack/u);
+  assert.doesNotMatch(JSON.stringify(prepare), /secrets\.|id-token/u);
+  const restore = readAction(restoreAction);
+  assert.doesNotMatch(JSON.stringify(restore), /pnpm|npm install|secrets\./u);
+  const download = restore.find((step) => step.uses?.startsWith("actions/download-artifact@"));
+  assert.equal(download.with["artifact-ids"], "${{ inputs.artifact-id }}");
+  assert.equal(download.with["digest-mismatch"], "error");
+  assert.match(restore.at(-1).run, /runtime-archive\.py restore .*"\$RUNTIME_SHA256"/u);
+  for (const step of [...prepare, ...restore]) {
+    if (step.uses) assert.match(step.uses, /@[0-9a-f]{40}$/u);
+    if (step.run) assert.doesNotMatch(step.run, /\$\{\{/u);
+  }
 });
 
 test("validator packaging test schedules its own build on a clean runner", () => {

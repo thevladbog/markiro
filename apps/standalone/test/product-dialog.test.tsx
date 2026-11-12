@@ -173,6 +173,11 @@ describe("office product dialog", () => {
       printName: null,
       chzProductGroupCode: 35,
     };
+    const cosmetics = "Косметика, бытовая химия и товары личной гигиены";
+    fake.api.listProductGroups.mockResolvedValue([
+      ...GROUPS,
+      { code: 35, alias: "chemistry", name: cosmetics },
+    ]);
     const items = [{ gtin14: cream.gtin14, productName: cream.name, quantity: 2 }];
     fake.api.listProducts.mockResolvedValue([MILK, AYRAN, cream]);
     fake.api.createProduct.mockResolvedValue({
@@ -184,6 +189,7 @@ describe("office product dialog", () => {
     });
     await openProducts(fake);
     fireEvent.click(screen.getByRole("button", { name: "Добавить набор" }));
+    expect(choices("Товарная группа")).toEqual([cosmetics]);
     type("GTIN набора", "4607123456781");
     type("Название набора", "Зимний набор");
     expect(choices("Товар из каталога")).toContain("Крем для рук · 04607123456804");

@@ -180,7 +180,8 @@ async function stationVerdict(
   );
   const [journalled] = rows(db, "SELECT code_hash FROM floor_scans");
   const key = journalled?.["code_hash"];
-  const verdict: Verdict = outcome.kind === "accepted" ? "ok" : outcome.kind;
+  const verdict: Verdict =
+    outcome.kind === "accepted" ? "ok" : outcome.kind === "in_set" ? "duplicate" : outcome.kind;
   return { verdict, key: typeof key === "string" ? key : null };
 }
 

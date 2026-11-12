@@ -10,8 +10,8 @@ import app.markiro.handheld.core.storage.RecoveryBlocked
  * One beat of the link with the host, run by the sync loop at its own pace: `GET /v1/hello` through [HostLinkMonitor] (so the screens' state is
  * real), and what a changed `restoreEpoch` asks of this device (spec 6.5 and 8.5, point 5): tell the restored host every SSCC block this device
  * holds (`POST /v1/device/sscc/blocks/known`, done by the monitor through [HostBlockSupplier.registerKnown] and repeated on the next beat if it
- * failed) and forget the registry's mark so the next walk is a full one. Plan 2b: it also sends owed leaves and refreshes the shared-shift figures, or marks them stale when the host did not answer. Nothing else is re-run: the queue and the reference data stay as they
- * are, and the line is not stopped.
+ * failed) and forget the registry's mark so the next walk is a full one. A successful beat refreshes the device and reference data incrementally,
+ * sends owed leaves and refreshes the shared-shift figures. A failed beat marks the figures stale.
  */
 class HostHeartbeat(
     private val db: HandheldDatabase,
@@ -24,7 +24,7 @@ class HostHeartbeat(
     private val participation: suspend () -> Unit = {},
     /** What a beat that did not reach the host does: marks those figures stale. */
     private val participationStale: suspend () -> Unit = {},
-    /** What a beat that reached the host also does: reads the device's own record again (its line may have been assigned or changed). */
+    /** A beat that reached the host also reads the device's own record and the reference changes. */
     private val device: suspend () -> Unit = {},
 ) {
     suspend fun beat() {

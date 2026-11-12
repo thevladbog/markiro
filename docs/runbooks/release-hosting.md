@@ -113,6 +113,71 @@ gh secret set RELEASES_S3_SECRET_ACCESS_KEY --env station-release < "$secret_key
 Старые `YANDEX_STATION_RELEASE_*` не используются новым publisher. Их удаление
 не заменяет проверку нового хранилища и не должно затрагивать независимые копии.
 
+### Издатели stable с защищённых тегов
+
+Один раз после слияния и CI закрепите проверенный коммит издателей в тегах
+`handheld-publisher-v1` и `standalone-publisher-v1`. В GitHub настройте активный
+[tag ruleset](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository)
+с запретом изменения и удаления тегов издателей без исключений. Создание
+новой версии тега должно быть доступно только владельцу. Проверьте точный
+коммит каждого тега перед добавлением секретов.
+
+| Тег                       | Workflow                        | Окружение                     |
+| ------------------------- | ------------------------------- | ----------------------------- |
+| `handheld-publisher-v1`   | `handheld-stable-release.yml`   | `handheld-stable-publisher`   |
+| `standalone-publisher-v1` | `standalone-stable-release.yml` | `standalone-stable-publisher` |
+
+Для каждого окружения выберите **Selected branches and tags** и разрешите ровно
+один тег из таблицы. Ручной ревьюер для этих двух окружений не требуется.
+Добавьте `RELEASES_S3_BUCKET` и ключ загрузки с `PutObject` только на
+`handheld/_uploads/*` или `standalone/_uploads/*` соответственно. Для ТСД также
+добавьте четыре секрета действующего Android-ключа из
+[инструкции выпуска](handheld-release.md). Подпись Автонома выполняется локально.
+
+В конфигурации каталога добавьте по записи `mode: "pinned-tag"` в
+`RELEASE_CATALOG_PUBLISHERS_JSON`. Укажите соответствующие `product`, `environment`,
+OIDC `subject` и полные `workflowRef` и `jobWorkflowRef` вида
+`thevladbog/markiro/.github/workflows/<файл>@refs/tags/<тег>`. Для `workflowSha`
+и `jobWorkflowSha` задайте один и тот же полный SHA коммита тега. Применяйте
+конфигурацию через штатное развёртывание платформы. Оба издателя могут
+публиковать только в `stable` и двигать указатель вперёд. SHA приложения
+проверяется для каждого артефакта независимо от SHA тега.
+
+Если `upgrade-index.json` указывает на принятое forward recovery, обычный
+`deploy-platform` отклоняет операцию. Сначала нужен поддерживаемый переход от
+этой записи. При расхождении runtime следует связать в плане принятый журнал,
+фактически работающие API, edge и PostgreSQL и новый проверенный артефакт
+платформы. Перед заменой API и edge сверяют журнал миграций работающей базы
+с новым артефактом. Если миграции совпадают, переход сохраняет PostgreSQL,
+данные каталога и его файловые журналы. Текущие `deploy-platform`,
+`upgrade-platform` и `configure-platform-dadata` такой переход не выполняют.
+
+После развёртывания проверьте допуск обоих издателей из их защищённых тегов.
+
+```bash
+gh workflow run handheld-stable-release.yml --ref handheld-publisher-v1 -f mode=verify
+gh workflow run standalone-stable-release.yml --ref standalone-publisher-v1 -f mode=verify
+```
+
+Каждый прогон читает текущую ревизию своего stable через OIDC. Для пустого
+канала результат содержит `status: "empty"` и ревизию `0`. Подпись, загрузка
+файлов и изменение указателя в этом режиме не выполняются.
+
+При обновлении издателя выберите следующий номер тега. До создания тега
+обновите проверки `github.ref` в workflow, параметры `--ref` в командах выпуска
+и проверки допуска, а также тесты, которые закрепляют имя тега.
+
+- Для ТСД обновите `HANDHELD_PUBLISHER_TAG` с полным `refs/tags/...`.
+  [stable-release.mjs](../../tools/handheld-release/stable-release.mjs)
+- Для Автонома обновите `publisherTag` с именем тега. После ротации запускайте
+  локальную подпись из checkout с этой константой.
+  [release-local.mjs](../../tools/standalone-release/release-local.mjs)
+
+После слияния и успешного CI добавьте новый тег в GitHub ruleset и закрепите
+проверенный коммит. Внесите тег в правило соответствующего окружения и замените
+запись допуска каталога. При включении проверьте GitHub ruleset, правила
+окружения, допуск каталога и чтение опубликованного артефакта.
+
 ## История и перенос
 
 Следовать [импорту и recovery](release-catalog-recovery.md). Полный текущий GitHub

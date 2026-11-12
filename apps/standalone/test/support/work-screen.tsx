@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, type RenderResult } from "@testing-library/react";
+import type { ComponentType } from "react";
 import { vi } from "vitest";
 
 import { ThemeProvider, type SignalTone } from "@markiro/ui";
@@ -56,6 +57,7 @@ export function fakeSource() {
 }
 
 export interface WorkOptions {
+  screen?: ComponentType<WorkScreenProps>;
   shell?: ReturnType<typeof fakeHardware>;
   runtime?: PrintRuntime;
   onLeave?: () => void;
@@ -92,6 +94,7 @@ export function renderWork(
   at: { local: LocalExecutor; shift: WorkShift },
   options: WorkOptions = {},
 ): WorkHarness {
+  const Screen = options.screen ?? WorkScreen;
   const gate = createWorkGate();
   const scanner = fakeSource();
   const shell = options.shell ?? fakeHardware();
@@ -132,7 +135,7 @@ export function renderWork(
   };
   const view = render(
     <ThemeProvider>
-      <WorkScreen {...props} />
+      <Screen {...props} />
     </ThemeProvider>,
   );
   return {
@@ -145,7 +148,7 @@ export function renderWork(
     rerender: (next: Partial<WorkScreenProps>) =>
       view.rerender(
         <ThemeProvider>
-          <WorkScreen {...props} {...next} />
+          <Screen {...props} {...next} />
         </ThemeProvider>,
       ),
     settled: () =>
