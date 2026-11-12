@@ -1,0 +1,107 @@
+name: Transfer Android signing secrets to stable publisher
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_sha:
+        description: Reviewed main commit containing this migration
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: handheld-release
+  cancel-in-progress: false
+
+jobs:
+  seal-signing-secrets:
+    if: >-
+      github.repository == 'thevladbog/markiro' &&
+      github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' &&
+      github.actor == github.repository_owner && github.triggering_actor == github.repository_owner &&
+      github.run_attempt == 1 && inputs.reviewed_sha == github.sha
+    environment: handheld-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Prepare the system sealed-box library
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! /usr/bin/python3 -I -c 'import ctypes; ctypes.CDLL("libsodium.so.23")'; then
+            sudo apt-get update -q
+            sudo apt-get install -qy --no-install-recommends libsodium23
+          fi
+
+      - name: Seal the four signing secrets for the target GitHub environment
+        shell: bash
+        env:
+          MARKIRO_HANDHELD_KEYSTORE_BASE64: ${{ secrets.MARKIRO_HANDHELD_KEYSTORE_BASE64 }}
+          MARKIRO_HANDHELD_STORE_PASSWORD: ${{ secrets.MARKIRO_HANDHELD_STORE_PASSWORD }}
+          MARKIRO_HANDHELD_KEY_ALIAS: ${{ secrets.MARKIRO_HANDHELD_KEY_ALIAS }}
+          MARKIRO_HANDHELD_KEY_PASSWORD: ${{ secrets.MARKIRO_HANDHELD_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          ulimit -c 0
+          /usr/bin/python3 -I - <<'PY'
+          import base64
+          import ctypes
+          import json
+          import os
+          from pathlib import Path
+
+          # From GitHub's environments/handheld-stable-publisher/secrets/public-key endpoint.
+          # The destination key is reviewed in this file and cannot be supplied at dispatch.
+          key_id = "3380204578043523366"
+          public_key = base64.b64decode("2ocmq/l5+VeXoS0kXmC9AfO86lh9fFNMSLIH6IDAAjk=", validate=True)
+          names = (
+              "MARKIRO_HANDHELD_KEYSTORE_BASE64",
+              "MARKIRO_HANDHELD_STORE_PASSWORD",
+              "MARKIRO_HANDHELD_KEY_ALIAS",
+              "MARKIRO_HANDHELD_KEY_PASSWORD",
+          )
+
+          sodium = ctypes.CDLL("libsodium.so.23")
+          sodium.sodium_init.restype = ctypes.c_int
+          sodium.crypto_box_publickeybytes.restype = ctypes.c_size_t
+          sodium.crypto_box_sealbytes.restype = ctypes.c_size_t
+          sodium.crypto_box_seal.argtypes = [
+              ctypes.c_void_p, ctypes.c_char_p, ctypes.c_ulonglong, ctypes.c_char_p,
+          ]
+          sodium.crypto_box_seal.restype = ctypes.c_int
+          if sodium.sodium_init() < 0 or len(public_key) != sodium.crypto_box_publickeybytes():
+              raise SystemExit("Could not initialize the destination public key")
+
+          sealed = {}
+          for name in names:
+              value = os.environb.pop(name.encode("ascii"), b"")
+              if not value or len(value) > 48 * 1024:
+                  raise SystemExit(f"Missing or oversized source secret: {name}")
+              ciphertext = ctypes.create_string_buffer(len(value) + sodium.crypto_box_sealbytes())
+              if sodium.crypto_box_seal(ciphertext, value, len(value), public_key) != 0:
+                  raise SystemExit(f"Could not seal {name}")
+              sealed[name] = base64.b64encode(ciphertext.raw).decode("ascii")
+
+          package = {
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "source_environment": "handheld-release",
+              "target_environment": "handheld-stable-publisher",
+              "source_sha": os.environ["GITHUB_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "key_id": key_id,
+              "secrets": sealed,
+          }
+          path = Path(os.environ["RUNNER_TEMP"]) / "handheld-signing-transfer.json"
+          with path.open("x", encoding="utf-8") as output:
+              json.dump(package, output)
+          PY
+
+      - name: Retain the GitHub-encrypted transfer for the repository owner
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: handheld-signing-transfer
+          path: ${{ runner.temp }}/handheld-signing-transfer.json
+          if-no-files-found: error
+          retention-days: 1
