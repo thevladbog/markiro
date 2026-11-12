@@ -244,9 +244,9 @@ export interface ContentsReportDocument {
   tableHeadHtml: string;
   units: ReportUnit[];
   finalBlocksHtml: string;
-  /** The 20-character machine SSCC repeated in the page footer, when there is one. */
-  footerSscc: string | null;
-  /** "Короб" / "Палет" — the footer's subject word. */
+  /** Rendered Code 128 repeated on every page, when the report has an identifier. */
+  footerBarcodeSvg: string | null;
+  /** The footer's subject word, such as "Короб", "Палет" or "Смена". */
   footerSubject: string;
 }
 
@@ -255,9 +255,10 @@ export function renderContentsReportHtml(doc: ContentsReportDocument): string {
   const pages = paginateUnits(doc.units, TABLE_HEAD_MM);
   const totalPages = pages.length;
   const logo = brandLogo(doc.org);
-  const footBarcode = doc.footerSscc
-    ? `<span class="code128-box">${ssccBarcode(doc.footerSscc)}</span>`
-    : "<span></span>";
+  const footBarcode =
+    doc.footerBarcodeSvg === null
+      ? "<span></span>"
+      : `<span class="code128-box">${doc.footerBarcodeSvg}</span>`;
 
   const renderedPages = pages
     .map((pageUnits, index) => {

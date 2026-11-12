@@ -267,6 +267,9 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     getDisaggregationReportRows: vi.fn<HostApi["getDisaggregationReportRows"]>(() =>
       unexpected("getDisaggregationReportRows"),
     ),
+    getShiftDisaggregationReportRows: vi.fn<HostApi["getShiftDisaggregationReportRows"]>(() =>
+      unexpected("getShiftDisaggregationReportRows"),
+    ),
     recordDisaggregationExport: vi.fn<HostApi["recordDisaggregationExport"]>(() =>
       unexpected("recordDisaggregationExport"),
     ),

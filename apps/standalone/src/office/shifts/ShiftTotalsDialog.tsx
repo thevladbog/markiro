@@ -1,10 +1,14 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, DefinitionGrid, Modal } from "@markiro/ui";
+import { Button, DefinitionGrid, Modal, RowActions } from "@markiro/ui";
 
 import type { DeviceRecord, DeviceTotals, OfficeShift } from "../../host/protocol.js";
 import { isKnownTimeZone } from "../../lib/civil-date.js";
+import { useCan } from "../access.js";
+import { DisaggregationActDialog } from "../disaggregation/DisaggregationActDialog.js";
+import { DisaggregationExportDialog } from "../disaggregation/DisaggregationExportDialog.js";
+import type { DisaggregationReportSource } from "../disaggregation/report-source.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { useOfficeSession } from "../office-session.js";
 import { deviceLabel } from "./shift-device-label.js";
@@ -71,6 +75,10 @@ export function ShiftTotalsDialog({ shift, onClose }: ShiftTotalsDialogProps) {
  * zone: what «Итоги» of the dialog and of the shift's drawer show.
  */
 export function ShiftTotalsBody({ shift }: { shift: OfficeShift }) {
+  const { t } = useTranslation();
+  const titleId = useId();
+  const [report, setReport] = useState<"act" | "json" | null>(null);
+  const canExport = useCan("planShifts");
   const isAdmin = useOfficeSession().user.role === "admin";
   const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
   const devices = useOfficeQuery(officeKeys.devices, (api, token) => api.listDevices(token), {
@@ -78,14 +86,50 @@ export function ShiftTotalsBody({ shift }: { shift: OfficeShift }) {
   });
   if (org.isPending || (isAdmin && devices.isPending)) return <PageLoading />;
   const zone = org.isSuccess && isKnownTimeZone(org.data.timeZone) ? org.data.timeZone : null;
+  const timeZone = zone ?? new Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const source: DisaggregationReportSource = { scope: "shift", id: shift.id, number: shift.number };
   return (
-    <ShiftFigures
-      shift={shift}
-      zone={zone}
-      timeNote={zone !== null ? null : org.isSuccess ? "localTimeZone" : "localTime"}
-      devices={isAdmin ? devices.data : undefined}
-      devicesNote={!isAdmin ? "devicesAdminOnly" : devices.isError ? "devicesUnavailable" : null}
-    />
+    <>
+      <ShiftFigures
+        shift={shift}
+        zone={zone}
+        timeNote={zone !== null ? null : org.isSuccess ? "localTimeZone" : "localTime"}
+        devices={isAdmin ? devices.data : undefined}
+        devicesNote={!isAdmin ? "devicesAdminOnly" : devices.isError ? "devicesUnavailable" : null}
+      />
+      {(shift.status === "active" || shift.status === "closed") && (
+        <section aria-labelledby={titleId}>
+          <h3 id={titleId} className="shift-breakdown__title">
+            {t("office.shifts.totals.disaggregation.title")}
+          </h3>
+          <RowActions>
+            <Button variant="secondary" onClick={() => setReport("act")}>
+              {t("office.shifts.totals.disaggregation.act")}
+            </Button>
+            {canExport && (
+              <Button variant="secondary" onClick={() => setReport("json")}>
+                {t("office.disaggregation.detail.json")}
+              </Button>
+            )}
+          </RowActions>
+        </section>
+      )}
+      {report === "act" && (
+        <DisaggregationActDialog
+          source={source}
+          timeZone={timeZone}
+          onClose={() => setReport(null)}
+        />
+      )}
+      {report === "json" && (
+        <DisaggregationExportDialog
+          source={source}
+          format="json"
+          timeZone={timeZone}
+          onClose={() => setReport(null)}
+        />
+      )}
+    </>
   );
 }
 

@@ -685,6 +685,8 @@ pub mod entities {
     /// A box a disaggregation document took apart (plan ДЗГ): a station acts
     /// on it and keeps no copy ([`crate::disaggregation::CodeReleaseRecord`]).
     pub const CODE_RELEASES: &str = "code_releases";
+    /// A marked set whose components an office disaggregation released.
+    pub const SET_RELEASES: &str = "set_releases";
 }
 
 /// The feed id of a category default: `<code>:<purpose>` (`8:box`), the
@@ -2840,7 +2842,7 @@ pub struct SetAssembledFact {
     pub items: Vec<ScannedCode>,
 }
 
-/// Assembly journal row. Only accepted rows may be exported.
+/// Assembly journal row. Only active, accepted rows may be exported.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OfficeSet {
@@ -2850,6 +2852,10 @@ pub struct OfficeSet {
     #[serde(flatten)]
     pub assembly: SetAssembledFact,
     pub outcome: FactOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disassembled_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disaggregation_document_id: Option<String>,
 }
 
 /// `data` of a `scan` fact: every scan of the work screen, accepted or not.
@@ -3291,7 +3297,8 @@ pub struct CodeOwner {
 }
 
 /// `GET /v1/device/codes/{codeHash}` (stage 2a spec §4.6): whether an
-/// accepted scan owns the code. A station asks while the link is `online`,
+/// accepted scan owns the code. `aggregation=true` also checks set membership.
+/// A station asks while the link is `online`,
 /// within 300 ms; without an answer it accepts the scan on its own copy, and
 /// a duplicate shows later as a `conflict` receipt.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3299,6 +3306,7 @@ pub struct CodeOwner {
 pub enum CodeCheck {
     Free,
     Taken { owner: CodeOwner },
+    InSet { owner: CodeOwner },
 }
 
 /// What a station looks up to print a label again (plan СКЛ, pilot spec

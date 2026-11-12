@@ -87,6 +87,52 @@ const BYTES = renderGismtDisaggregationXml({
 }).bytes;
 
 describe("the ЧЗ file of an applied document (plan ДЗГ-О)", () => {
+  it("stores and records a JSON file with all the packages in a mixed document", async () => {
+    const [reportBox] = ROWS.lines;
+    const [box] = APPLIED.lines;
+    if (reportBox === undefined || box === undefined) throw new Error("Missing box fixture");
+    const setCode = "010460712345678121SET0001";
+    const set = {
+      ...box,
+      sscc: null,
+      boxId: null,
+      setCode,
+      setId: "ab000000-0000-4000-8000-000000000001",
+    };
+    const files = fakeOfficeFiles();
+    const session = withHost(
+      { ...APPLIED, lines: [box, set] },
+      { ...ROWS, lines: [reportBox, { ...reportBox, sscc: null, boxId: null, setCode }] },
+    );
+    await openDocument(session, files);
+    expect(screen.queryByRole("button", { name: "Файл для Честного знака" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "[JSON][ГИСМТ] Расформирование упаковки" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "JSON для Честного знака: DSG-26-0007",
+    });
+    expect(await within(dialog).findByText(/True API/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Сформировать файл" }));
+    await within(dialog).findByText(/Файл сохранён в папке:/);
+    const [folder, parts] = files.save.mock.calls[0] ?? [];
+    const file = parts?.[0];
+    expect(folder?.at(-1)).toMatch(/_disaggregation_json_gismt$/u);
+    expect(file?.name).toBe("disaggregation-DSG-26-0007.json");
+    expect(JSON.parse(new TextDecoder().decode(file?.bytes))).toEqual({
+      participant_inn: "7701234567",
+      products_list: [{ uitu: `00${reportBox.sscc}` }, { uitu: setCode }],
+    });
+    expect(session.api.beginExportFile.mock.calls[0]?.[1]).toMatchObject({
+      kind: "disaggregation_xml",
+      formatId: "disaggregation_json_gismt",
+      fileName: file?.name,
+    });
+    expect(session.api.recordDisaggregationExport).toHaveBeenCalledWith(TOKEN, DETAIL.document.id, {
+      formatId: "disaggregation_json_gismt",
+      formatVersion: 1,
+      packingCount: 2,
+    });
+  });
+
   it("has its button only on an applied document", async () => {
     const draft: DisaggregationDetail = {
       document: { ...DETAIL.document, status: "draft", docNo: "DSG-26-0007" },

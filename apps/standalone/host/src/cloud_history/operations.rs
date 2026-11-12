@@ -28,6 +28,7 @@ pub async fn resolve(conn: &mut SqliteConnection, sscc: &str) -> Result<Option<T
             product_id,
             product_name,
             code_count,
+            set: None,
             cloud: true,
         }));
     }
@@ -42,6 +43,7 @@ pub async fn resolve(conn: &mut SqliteConnection, sscc: &str) -> Result<Option<T
             product_id,
             product_name,
             code_count,
+            set: None,
             cloud: true,
         },
     ))

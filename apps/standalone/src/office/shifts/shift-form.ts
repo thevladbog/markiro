@@ -35,6 +35,7 @@ export const shiftFieldsSchema = z
   .object({
     productId: z.string().min(1, "office.shifts.errors.productRequired"),
     mode: shiftModeSchema,
+    setAssembly: z.boolean().optional(),
     lineId: z.string().min(1, "office.shifts.errors.lineRequired"),
     productionDate: productionDateRule,
     /** The working day of the shift («Дата смены»), apart from the production date. */
@@ -45,7 +46,7 @@ export const shiftFieldsSchema = z
     }, "rules.lotNumber"),
     plannedQty: plannedQtyRule,
     boxCapacity: z.string(),
-    boxTemplateId: z.string().min(1, "office.shifts.errors.templateRequired"),
+    boxTemplateId: z.string(),
     palletsEnabled: z.boolean(),
     palletBoxCapacity: z.string(),
     palletTemplateId: z.string(),
@@ -57,6 +58,14 @@ export const shiftFieldsSchema = z
     verificationRequired: z.boolean(),
   })
   .superRefine((values, context) => {
+    if (values.setAssembly === true) return;
+    if (values.boxTemplateId === "") {
+      context.addIssue({
+        code: "custom",
+        path: ["boxTemplateId"],
+        message: "office.shifts.errors.templateRequired",
+      });
+    }
     if (values.mode === "validation") {
       if (values.printDuplicate && values.duplicateTemplateId === "") {
         context.addIssue({
@@ -154,6 +163,7 @@ export function shiftFields(shift: OfficeShift): ShiftFields {
   return {
     productId: shift.productId,
     mode: shift.mode,
+    ...(shift.setItems === undefined ? {} : { setAssembly: true }),
     lineId: shift.lineId,
     productionDate: shift.productionDate,
     plannedDate: shift.plannedDate,
@@ -198,10 +208,12 @@ export function toValidationPrint(values: ShiftFields): ValidationPrint {
  * included, so the host's default never decides it.
  */
 export function toShiftInput(values: ShiftFields): ShiftInput {
-  const validation = values.mode === "validation";
-  const lotNumber = optionalLotNumber(values.lotNumber);
+  const setAssembly = values.setAssembly === true;
+  const mode = setAssembly ? "validation" : values.mode;
+  const validation = mode === "validation";
+  const lotNumber = setAssembly ? null : optionalLotNumber(values.lotNumber);
   const boxCapacity =
-    !validation || shiftBoxCapacityRule.safeParse(values.boxCapacity).success
+    !setAssembly && (!validation || shiftBoxCapacityRule.safeParse(values.boxCapacity).success)
       ? { boxCapacity: Number(values.boxCapacity.trim()) }
       : {};
   return {
@@ -210,12 +222,12 @@ export function toShiftInput(values: ShiftFields): ShiftInput {
     productionDate: values.productionDate,
     plannedDate: values.plannedDate,
     ...(lotNumber === null ? {} : { lotNumber }),
-    boxTemplateId: values.boxTemplateId,
+    ...(setAssembly ? {} : { boxTemplateId: values.boxTemplateId }),
     ...boxCapacity,
     plannedQty: toCount(values.plannedQty),
     counterpartyId: values.counterpartyId === "" ? null : values.counterpartyId,
-    mode: values.mode,
-    validationPrint: toValidationPrint(values),
+    mode,
+    validationPrint: setAssembly ? { mode: "none" } : toValidationPrint(values),
     pallets:
       values.palletsEnabled && !validation
         ? {
@@ -282,12 +294,12 @@ export function toShiftChange(
     productionDate: input.productionDate,
     ...(input.plannedDate === undefined ? {} : { plannedDate: input.plannedDate }),
     ...(status === "planned" && showLotNumber ? { lotNumber: input.lotNumber ?? null } : {}),
-    boxTemplateId: input.boxTemplateId,
+    ...(input.boxTemplateId === undefined ? {} : { boxTemplateId: input.boxTemplateId }),
     ...(input.boxCapacity === undefined ? {} : { boxCapacity: input.boxCapacity }),
     plannedQty: input.plannedQty,
     counterpartyId: input.counterpartyId,
     pallets: input.pallets,
-    mode: values.mode,
+    mode: input.mode ?? values.mode,
     ...(status === "planned" && input.validationPrint !== undefined
       ? { validationPrint: input.validationPrint }
       : {}),

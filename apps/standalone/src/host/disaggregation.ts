@@ -17,6 +17,7 @@ export const DISAGGREGATION_CONSTRAINTS = [
   "invalid_lines",
   "restore_hold",
   "document_not_applied",
+  "set_disaggregation_xml_unsupported",
 ] as const;
 
 export const disaggregationStatusSchema = z.enum(["draft", "applied", "cancelled"]);
@@ -80,6 +81,8 @@ export const disaggregationLineSchema = z.object({
   boxId: z.uuid().nullable(),
   palletId: z.uuid().nullable(),
   warehousePalletId: z.uuid().optional(),
+  setId: z.uuid().optional(),
+  setCode: z.string().min(1).optional(),
   shiftId: z.uuid().nullable(),
   shiftNumber: z.string().nullable(),
   status: disaggregationLineStatusSchema,
@@ -158,6 +161,15 @@ export function disaggregationQuery(filter: DisaggregationFilter = {}): string {
 }
 
 const bareSsccSchema = z.string().regex(/^\d{18}$/u);
+const disaggregationReportLineSchema = z.object({
+  id: z.uuid(),
+  boxId: z.string().nullable(),
+  palletId: z.string().nullable(),
+  productName: z.string().nullable(),
+  codeCount: z.number().int().min(0),
+  items: z.array(z.object({ gtin14: z.string(), serial: z.string(), canonical: z.string() })),
+  boxes: z.array(z.object({ sscc: bareSsccSchema.nullable(), units: z.number().int().min(0) })),
+});
 
 export const disaggregationReportVariantSchema = z.enum(["boxes", "full"]);
 export type DisaggregationReportVariant = z.infer<typeof disaggregationReportVariantSchema>;
@@ -176,28 +188,29 @@ export const disaggregationReportRowsSchema = z.object({
   organization: z.object({ name: z.string(), inn: z.string().nullable() }),
   variant: disaggregationReportVariantSchema,
   lines: z.array(
-    z.object({
-      id: z.uuid(),
-      sscc: bareSsccSchema,
-      boxId: z.string().nullable(),
-      palletId: z.string().nullable(),
-      productName: z.string().nullable(),
-      codeCount: z.number().int().min(0),
-      items: z.array(z.object({ gtin14: z.string(), serial: z.string(), canonical: z.string() })),
-      boxes: z.array(z.object({ sscc: bareSsccSchema.nullable(), units: z.number().int().min(0) })),
-    }),
+    z.union([
+      disaggregationReportLineSchema.extend({
+        sscc: bareSsccSchema,
+        setCode: z.never().optional(),
+      }),
+      disaggregationReportLineSchema.extend({ sscc: z.null(), setCode: z.string().min(1) }),
+    ]),
   ),
 });
 export type DisaggregationReportRows = z.infer<typeof disaggregationReportRowsSchema>;
 
-export const DISAGGREGATION_XML_FORMAT_ID = "disaggregation_xml_gismt";
-export const DISAGGREGATION_XML_FORMAT_VERSION = 1;
+export const DISAGGREGATION_EXPORT_FORMATS = {
+  xml: "disaggregation_xml_gismt",
+  json: "disaggregation_json_gismt",
+} as const;
+export const DISAGGREGATION_EXPORT_FORMAT_VERSION = 1;
+export type DisaggregationExportFormat = keyof typeof DISAGGREGATION_EXPORT_FORMATS;
 
 /** Mirrors `DisaggregationExportRecord`: what the office tells the host about the saved ЧЗ file. */
 export const disaggregationExportRecordSchema = z
   .object({
-    formatId: z.literal(DISAGGREGATION_XML_FORMAT_ID),
-    formatVersion: z.literal(DISAGGREGATION_XML_FORMAT_VERSION),
+    formatId: z.enum([DISAGGREGATION_EXPORT_FORMATS.xml, DISAGGREGATION_EXPORT_FORMATS.json]),
+    formatVersion: z.literal(DISAGGREGATION_EXPORT_FORMAT_VERSION),
     packingCount: z.number().int().min(1),
   })
   .strict();

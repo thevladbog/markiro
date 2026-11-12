@@ -1,6 +1,6 @@
 import { renderCode128Svg, renderDataMatrixSvg } from "../barcodes/svg.js";
 
-/** One unit code inside a disassembled box — feeds `renderDataMatrixSvg` as-is. */
+/** One unit code inside a disassembled box or set. */
 export interface DisaggregationReportCode {
   gtin14: string;
   serial: string;
@@ -17,26 +17,26 @@ export interface DisaggregationReportBox {
 }
 
 /**
- * One document line with a parseable SSCC on the printed report — a box or a
- * pallet.
+ * One package on the printed report: an SSCC for a box or pallet, or the
+ * identification code of a set.
  *
  * Its contents differ by what the line IS, which is why they are two fields
- * rather than one: taking a box apart releases unit CODES, while taking a
+ * rather than one: taking a box or set apart releases unit codes, while taking a
  * pallet apart takes BOXES off a stack without opening any of them (see
  * `applyPalletExceptions`). A pallet line used to carry neither, so it
  * printed with an empty contents block under a correct unit count.
  */
-export interface DisaggregationReportLine {
+export type DisaggregationReportLine = {
   n: number;
-  /** 20-character machine form `00…` — fed to Code128 and to `formatHri` below. */
-  sscc: string;
   productName: string | null;
   codeCount: number;
-  /** A box line's unit codes. Populated only when `includeContents` is true. */
+  /** A box or set line's unit codes. Populated only when `includeContents` is true. */
   codes: DisaggregationReportCode[];
   /** A pallet line's member boxes. Populated only when `includeContents` is true. */
   boxes: DisaggregationReportBox[];
-}
+} &
+  /** 20-character machine form `00…` for the SSCC barcode. */
+  ({ sscc: string; setCode?: never } | { sscc: null; setCode: string });
 
 /**
  * Everything `renderDisaggregationReportHtml` needs to build the printed A4
@@ -45,6 +45,8 @@ export interface DisaggregationReportLine {
  * operations document, not a commercial one.
  */
 export interface DisaggregationReportData {
+  /** A consolidated act across the conducted documents of one shift. */
+  scope?: "shift";
   docNo: string;
   status: "draft" | "applied" | "cancelled";
   createdAt: Date;
@@ -275,6 +277,19 @@ function metadataBlock(data: DisaggregationReportData, timeZone: string): string
     : `<span class="rep-meta-value">—</span>
       <span class="rep-meta-detail">Профиль организации не заполнен</span>`;
 
+  if (data.scope === "shift") {
+    return `<div class="rep-meta">
+    <div class="rep-meta-cell">
+      <span class="rep-meta-label">Организация</span>
+      ${orgBlock}
+    </div>
+    <div class="rep-meta-cell">
+      <span class="rep-meta-label">Последнее проведение</span>
+      <span class="rep-meta-value">${data.appliedAt === null ? "—" : formatDateTime(data.appliedAt, timeZone)}</span>
+    </div>
+  </div>`;
+  }
+
   const performedLabel = data.status === "applied" ? "Операцию провёл" : "Документ составил";
   const performedName =
     (data.status === "applied" ? (data.appliedByName ?? data.createdByName) : data.createdByName) ??
@@ -299,7 +314,7 @@ function metadataBlock(data: DisaggregationReportData, timeZone: string): string
   </div>`;
 }
 
-function finalBlocks(data: DisaggregationReportData): string {
+function finalBlocks(data: DisaggregationReportData, hasSets: boolean): string {
   const totalCodes = data.lines.reduce((sum, line) => sum + line.codeCount, 0);
   const operationNote =
     data.operationNote === undefined
@@ -308,19 +323,25 @@ function finalBlocks(data: DisaggregationReportData): string {
   const performedName =
     (data.status === "applied" ? (data.appliedByName ?? data.createdByName) : data.createdByName) ??
     "ФИО";
+  const shift = data.scope === "shift";
+  const packageLabel = hasSets || shift ? "упаковок" : "коробов";
+  const operationResult =
+    hasSets || shift
+      ? SET_OPERATION_RESULT[data.status]
+      : "Перечисленные короба расформированы: агрегация упаковок аннулирована, коды содержимого возвращены в статус свободных единиц.";
   return `<div class="rep-final-blocks">
     <div class="rep-total">
       <span>Итого по акту:</span>
-      <span class="mono">коробов — ${data.lines.length} · кодов — ${totalCodes}</span>
+      <span class="mono">${packageLabel} — ${data.lines.length} · кодов — ${totalCodes}</span>
     </div>
     <div class="rep-operation">
       <span class="rep-meta-label">Результат операции</span>
-      <span>Перечисленные короба расформированы: агрегация упаковок аннулирована, коды содержимого возвращены в статус свободных единиц.</span>
+      <span>${operationResult}</span>
       <span class="rep-operation-note">${operationNote}</span>
     </div>
     <div class="rep-signatures">
       <div class="rep-signature">
-        <span class="rep-meta-label">Операцию провёл</span>
+        <span class="rep-meta-label">${shift ? "Подготовил" : "Операцию провёл"}</span>
         <span class="signature-line"></span>
         <span class="signature-name">${escapeHtml(performedName)}</span>
       </div>
@@ -332,6 +353,13 @@ function finalBlocks(data: DisaggregationReportData): string {
     </div>
   </div>`;
 }
+
+const SET_OPERATION_RESULT: Record<DisaggregationReportData["status"], string> = {
+  draft: "Упаковки будут расформированы после проведения документа.",
+  applied:
+    "Упаковки расформированы в Маркиро. Коды товаров из коробов и наборов доступны для повторного использования.",
+  cancelled: "Документ отменён.",
+};
 
 // ---- table rows ------------------------------------------------------------
 //
@@ -345,11 +373,12 @@ const BOX_ROW_MM = 13;
 const CODE_ROW_MM = 14.5;
 const EMPTY_NOTE_MM = 8;
 
-function tableHead(includeContents: boolean): string {
+function tableHead(includeContents: boolean, hasSets: boolean): string {
+  const identifier = hasSets ? "Код упаковки (SSCC / КИ набора)" : "Код упаковки (SSCC)";
   return `<thead class="rep-table-head">
     <tr>
       <th>№</th>
-      <th>${includeContents ? "Код упаковки (SSCC) / код маркировки (КМ)" : "Код упаковки (SSCC)"}</th>
+      <th>${identifier}${includeContents ? " / код маркировки (КМ)" : ""}</th>
       <th>Продукт</th>
       <th class="rep-count">Кодов, шт.</th>
       <th class="rep-barcode-heading">${includeContents ? "Штрихкод / DataMatrix" : "Штрихкод SSCC"}</th>
@@ -357,14 +386,17 @@ function tableHead(includeContents: boolean): string {
   </thead>`;
 }
 
-function boxRow(line: DisaggregationReportLine): string {
+function packageRow(line: DisaggregationReportLine): string {
+  const code = line.sscc === null ? `КИ набора ${line.setCode}` : ssccHri(line.sscc);
+  const barcode =
+    line.sscc === null ? "" : `<span class="sscc-box">${ssccBarcode(line.sscc)}</span>`;
   return `
       <tr class="rep-box-row">
         <td class="mono rep-item-number">${line.n}</td>
-        <td class="mono rep-sscc-label">${escapeHtml(ssccHri(line.sscc))}</td>
+        <td class="mono rep-sscc-label">${escapeHtml(code)}</td>
         <td><span class="rep-product-name">${line.productName ? escapeHtml(line.productName) : "—"}</span></td>
         <td class="mono rep-count">${line.codeCount}</td>
-        <td><span class="sscc-box">${ssccBarcode(line.sscc)}</span></td>
+        <td>${barcode}</td>
       </tr>`;
 }
 
@@ -383,7 +415,7 @@ function boxesUnits(data: DisaggregationReportData): ReportUnit[] {
   return data.lines.map((line) => ({
     kind: "row" as const,
     heightMm: BOX_ROW_MM,
-    html: boxRow(line),
+    html: packageRow(line),
   }));
 }
 
@@ -414,7 +446,7 @@ function emptyContentsRow(text: string): ReportUnit {
 function contentsUnits(data: DisaggregationReportData): ReportUnit[] {
   const units: ReportUnit[] = [];
   for (const line of data.lines) {
-    units.push({ kind: "band", heightMm: BOX_ROW_MM, html: boxRow(line) });
+    units.push({ kind: "band", heightMm: BOX_ROW_MM, html: packageRow(line) });
     // A pallet line lists the boxes it carried; a box line lists its codes.
     // `boxes` is only ever non-empty for a pallet, so this needs no extra
     // discriminator on the line.
@@ -456,6 +488,10 @@ export function renderDisaggregationReportHtml(
   const logo = brandLogo(data);
   const metadata = metadataBlock(data, timeZone);
   const docBarcode = renderCode128Svg(data.docNo, { includeText: false });
+  const hasSets = data.lines.some((line) => line.sscc === null);
+  const shift = data.scope === "shift";
+  const title = shift ? "Акт дезагрегации смены" : "Акт дезагрегации";
+  const number = shift ? data.docNo : `№ ${data.docNo}`;
   const variantLabel = data.includeContents
     ? "коды упаковок и содержимого"
     : "только коды упаковок";
@@ -467,26 +503,26 @@ export function renderDisaggregationReportHtml(
       const isLastPage = pageNumber === totalPages;
       const body = `<table class="rep-table">
         <colgroup><col class="col-n"><col class="col-sscc"><col class="col-product"><col class="col-count"><col class="col-barcode"></colgroup>
-        ${tableHead(data.includeContents)}
+        ${tableHead(data.includeContents, hasSets)}
         <tbody>${pageUnits.map((unit) => unit.html).join("")}</tbody>
       </table>`;
       return `<section class="rep-page" data-report-page="${pageNumber}">
     <header class="rep-header">
       <div class="rep-brand">${logo}</div>
       <div class="rep-title">
-        <span class="rep-title-label">Акт дезагрегации</span>
-        <span class="rep-title-doc">№ ${escapeHtml(data.docNo)}</span>
+        <span class="rep-title-label">${title}</span>
+        <span class="rep-title-doc">${escapeHtml(number)}</span>
         <span class="rep-title-detail">от ${formatDateLong(docDate, timeZone)} · ${variantLabel} · статус: <strong>${STATUS_LABEL[data.status]}</strong></span>
       </div>
     </header>
     ${metadata}
     <main class="rep-content">
       ${body}
-      ${isLastPage ? finalBlocks(data) : ""}
+      ${isLastPage ? finalBlocks(data, hasSets) : ""}
     </main>
     <footer class="rep-footer">
       <span class="code128-box">${docBarcode}</span>
-      <span class="rep-footer-copy">Сформировано в Маркиро · Акт № ${escapeHtml(data.docNo)}</span>
+      <span class="rep-footer-copy">Сформировано в Маркиро · ${shift ? "Смена" : "Акт №"} ${escapeHtml(data.docNo)}</span>
       <span class="rep-page-number">стр. ${pageNumber} из ${totalPages}</span>
     </footer>
   </section>`;
@@ -497,7 +533,7 @@ export function renderDisaggregationReportHtml(
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<title>Акт дезагрегации № ${escapeHtml(data.docNo)}</title>
+<title>${title} ${escapeHtml(number)}</title>
 <style>
 @page { size: A4; margin: 0 }
 * { box-sizing: border-box; }

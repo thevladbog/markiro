@@ -504,6 +504,10 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
             shift={current}
             demo={demo}
             setAssembly={setAssembly}
+            onPrintSets={() => {
+              setDialog(null);
+              setForm({ kind: "sets" });
+            }}
             onClose={() => {
               setDialog(null);
               // A finished export wrote a row of the history.

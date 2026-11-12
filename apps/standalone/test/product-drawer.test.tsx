@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as PhotoEncode from "../src/office/products/photo-encode.js";
-import type { OfficeProduct, ProductGroup } from "../src/host/protocol.js";
+import type { OfficeProduct, ProductGroup, ProductPhotoState } from "../src/host/protocol.js";
 import { chooseValue, openSelect } from "./support/select.js";
 import {
   fakeOfficeSession,
@@ -143,6 +143,104 @@ describe("the product's drawer (beta 3)", () => {
     expect(fake.api.putProductPhoto.mock.calls).toEqual([
       ["office-session-token", created.id, ENCODED],
     ]);
+  });
+
+  it("stores a set's staged photo on creation and offers removal when its card opens again", async () => {
+    const fake = session();
+    const cream = {
+      ...MILK,
+      id: "00000000-0000-4000-8000-000000000023",
+      gtin14: "04607123456804",
+      name: "Крем для рук",
+      chzProductGroupCode: 35,
+    };
+    const created: OfficeProduct = {
+      ...cream,
+      id: "00000000-0000-4000-8000-000000000024",
+      gtin14: "04607123456781",
+      name: "Зимний набор",
+      setItems: [{ gtin14: cream.gtin14, productName: cream.name, quantity: 1 }],
+    };
+    const photo = {
+      ...ENCODED,
+      mediaType: "image/jpeg" as const,
+      checksum: "a".repeat(64),
+      updatedAt: "2026-11-12T09:00:00Z",
+    };
+    fake.api.listProducts.mockResolvedValue([MILK, cream]);
+    fake.api.listProductGroups.mockResolvedValue([
+      ...GROUPS,
+      { code: 35, alias: "chemistry", name: "Косметика, бытовая химия и товары личной гигиены" },
+    ]);
+    let finishCreate: (record: OfficeProduct) => void = () => undefined;
+    let finishPhoto: (record: ProductPhotoState) => void = () => undefined;
+    fake.api.createProduct.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishCreate = resolve;
+        }),
+    );
+    fake.api.putProductPhoto.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishPhoto = resolve;
+        }),
+    );
+    fake.api.getProductPhoto.mockResolvedValue({ photo });
+    fake.api.deleteProductPhoto.mockResolvedValue({ photo: null });
+    await openProducts(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Добавить набор" }));
+    expect(screen.getByRole("region", { name: "Фото набора" })).toBeTruthy();
+    pick();
+    expect(await screen.findByRole("img", { name: /^Фото набора/u })).toBeTruthy();
+    expect(fake.api.putProductPhoto).not.toHaveBeenCalled();
+    type("GTIN набора", created.gtin14);
+    type("Название набора", created.name);
+    chooseValue("Товар из каталога", cream.gtin14);
+    fireEvent.click(screen.getByRole("button", { name: "Добавить в состав" }));
+    const creating = screen.getByRole("dialog", { name: "Добавить набор" });
+    const save = within(creating).getByRole("button", { name: "Сохранить" });
+    const cancel = within(creating).getByRole("button", { name: "Отмена" });
+    const form = creating.querySelector("form");
+    if (form === null) throw new Error("set form not found");
+    act(() => {
+      fireEvent.click(save);
+      fireEvent.submit(form);
+    });
+    await waitFor(() => expect(fake.api.createProduct).toHaveBeenCalledTimes(1));
+    expect(cancel).toHaveProperty("disabled", true);
+    fireEvent.keyDown(creating, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "Добавить набор" })).toBe(creating);
+
+    await act(async () => finishCreate(created));
+    await waitFor(() => expect(fake.api.putProductPhoto).toHaveBeenCalledTimes(1));
+    expect(save).toHaveProperty("disabled", true);
+    expect(cancel).toHaveProperty("disabled", true);
+    fireEvent.submit(form);
+    fireEvent.keyDown(creating, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "Добавить набор" })).toBe(creating);
+    expect(fake.api.createProduct).toHaveBeenCalledTimes(1);
+    expect(fake.api.putProductPhoto).toHaveBeenCalledTimes(1);
+
+    await act(async () => finishPhoto({ photo }));
+    const reopen = await screen.findByRole("button", { name: `Изменить товар «${created.name}»` });
+    expect(fake.api.putProductPhoto).toHaveBeenCalledWith(
+      "office-session-token",
+      created.id,
+      ENCODED,
+    );
+    const row = reopen.closest("tr");
+    expect(row?.querySelector(".mk-badge--steel")?.textContent).toBe("Набор");
+    fireEvent.click(reopen);
+    const card = await screen.findByRole("dialog", { name: "Редактировать набор" });
+    expect(
+      await within(card).findByRole("img", { name: `Фото набора ${created.name}` }),
+    ).toBeTruthy();
+    expect(within(card).getByText("Фото сохраняется сразу.")).toBeTruthy();
+    fireEvent.click(within(card).getByRole("button", { name: "Удалить фото" }));
+    await waitFor(() =>
+      expect(fake.api.deleteProductPhoto).toHaveBeenCalledWith("office-session-token", created.id),
+    );
   });
 
   it("says so when the product was saved but its photo was not, and keeps the product", async () => {

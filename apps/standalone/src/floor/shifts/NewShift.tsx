@@ -56,6 +56,7 @@ import {
 } from "../warehouse/warehouse-templates.js";
 import { FloorFooter, FloorScreen } from "./FloorScreen.js";
 import { LotNumberStep } from "./LotNumberStep.js";
+import { SetRecipe } from "./SetRecipe.js";
 import {
   createdCopy,
   createStationShift,
@@ -925,20 +926,7 @@ export function NewShift({
             </div>
           </div>
           {setItems !== undefined ? (
-            <section
-              className="set-assembly__recipe"
-              aria-label={t("floor.setAssembly.composition")}
-            >
-              <strong>{t("floor.setAssembly.mode")}</strong>
-              <ul>
-                {setItems.map(({ gtin14, productName, quantity }) => (
-                  <li key={gtin14}>
-                    <span>{productName}</span>
-                    <strong>{quantity}</strong>
-                  </li>
-                ))}
-              </ul>
-            </section>
+            <SetRecipe local={local} items={setItems} />
           ) : (
             <ModeSegment<ShiftMode>
               label={t("floor.newShift.mode")}

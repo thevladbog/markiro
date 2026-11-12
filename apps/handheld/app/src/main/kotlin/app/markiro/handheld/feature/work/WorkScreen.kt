@@ -420,9 +420,8 @@ private fun LastScanZone(last: LastScan?, duplicate: DuplicateUi?, modifier: Mod
 private fun LastScanStrip(last: LastScan?) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    // A refusal is its own tone, as in `LastScanZone`: a refused scan carries
-    // `Verdict.OK` because it was never judged, and painting it green would
-    // tell the operator the unit went in.
+    // Give refusals their own tone. A blocked scan can carry `Verdict.OK`
+    // before classification, but the operator must still see the warning.
     val colors = last?.let { c.tone(if (it.blocked) Tone.Warn else it.verdict.verdictTone()) }
     Row(
         Modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4).clip(RoundedCornerShape(MarkiroSizes.radiusCard))
@@ -436,6 +435,7 @@ private fun LastScanStrip(last: LastScan?) {
             val label = when (last.blockedBy) {
                 ScanBlock.BOX_FULL -> R.string.work_box_full
                 ScanBlock.DUPLICATE_JOB -> R.string.duplicate_blocked
+                ScanBlock.SET_MEMBERSHIP -> R.string.work_mark_in_set
                 null -> last.verdict.label()
             }
             Text(stringResource(label), style = t.strong.copy(fontSize = 16.sp), color = colors.fg)

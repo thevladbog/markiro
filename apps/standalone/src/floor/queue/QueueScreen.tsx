@@ -86,7 +86,13 @@ export function kindText(t: TFunction, kind: string): string {
 }
 
 export function reasonText(t: TFunction, record: SettledRecord): string {
-  if (record.outcome === "conflict") return t("floor.queue.conflictReason");
+  if (record.outcome === "conflict") {
+    return t(
+      record.setMembership === true
+        ? "floor.queue.setConflictReason"
+        : "floor.queue.conflictReason",
+    );
+  }
   if (record.code !== null && CODES.has(record.code)) return t(`floor.queue.code.${record.code}`);
   return t("floor.queue.code.other", { code: record.code ?? "—" });
 }

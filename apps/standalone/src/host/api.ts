@@ -615,6 +615,11 @@ export interface HostApi {
     id: string,
     variant: DisaggregationReportVariant,
   ) => Promise<DisaggregationReportRows>;
+  getShiftDisaggregationReportRows: (
+    token: string,
+    shiftId: string,
+    variant: DisaggregationReportVariant,
+  ) => Promise<DisaggregationReportRows>;
   /** `204`: the document's ЧЗ file is saved; the host writes its `disaggregation.export` row (plan ДЗГ-О). */
   recordDisaggregationExport: (
     token: string,
@@ -720,7 +725,7 @@ export interface HostApi {
    * `CODE_CHECK_TIMEOUT_MS`: past it the call fails with the transport code
    * `timeout`, and the station decides on its own copy.
    */
-  checkCode: (codeHash: string) => Promise<CodeCheck>;
+  checkCode: (codeHash: string, aggregation?: boolean) => Promise<CodeCheck>;
   /**
    * A product's photo for the station's copy (beta 3): the device key only,
    * `photo: null` without one; `not_found` for an unknown product.
@@ -1282,11 +1287,15 @@ export function createHostApi(client: HostClient): HostApi {
           }),
     requestSsccBlock: (request) =>
       client.request("POST", "/v1/device/sscc/blocks", { body: request, schema: ssccBlockSchema }),
-    checkCode: (codeHash) =>
-      client.request("GET", `/v1/device/codes/${encodeURIComponent(codeHash)}`, {
-        timeoutMs: CODE_CHECK_TIMEOUT_MS,
-        schema: codeCheckSchema,
-      }),
+    checkCode: (codeHash, aggregation) =>
+      client.request(
+        "GET",
+        `/v1/device/codes/${encodeURIComponent(codeHash)}${aggregation ? "?aggregation=true" : ""}`,
+        {
+          timeoutMs: CODE_CHECK_TIMEOUT_MS,
+          schema: codeCheckSchema,
+        },
+      ),
     getDeviceProductPhoto: (productId) =>
       client.request("GET", `/v1/device/products/${encodeURIComponent(productId)}/photo`, {
         schema: productPhotoStateSchema,
@@ -1546,6 +1555,11 @@ export function createHostApi(client: HostClient): HostApi {
       }),
     getDisaggregationReportRows: (token, id, variant) =>
       client.request("GET", `/v1/office/disaggregation/${id}/report-data?variant=${variant}`, {
+        officeToken: token,
+        schema: disaggregationReportRowsSchema,
+      }),
+    getShiftDisaggregationReportRows: (token, id, variant) =>
+      client.request("GET", `/v1/office/shifts/${id}/disaggregation-report?variant=${variant}`, {
         officeToken: token,
         schema: disaggregationReportRowsSchema,
       }),

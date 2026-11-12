@@ -30,6 +30,8 @@ const TOKEN = "office-session-token";
 const DOC_ID = "6a1f3c5e-7b9d-4e2f-8a4c-1d3e5f7a9b0c";
 const BOX_SSCC = "046006820000015000";
 const PALLET_SSCC = "146006820000000409";
+const SET_KI = "010460712345678121K,I;1";
+const RAW_SET = `]d2${SET_KI}\u001d93a;b,c`;
 
 const DAMAGED: DisaggregationReason = {
   id: "d15a0000-0000-4000-8000-000000000003",
@@ -88,6 +90,15 @@ const NOT_FOUND_LINE = line(4, {
   productId: null,
   productName: null,
   codeCount: 0,
+});
+const SET_LINE = line(5, {
+  ssccInput: RAW_SET,
+  sscc: null,
+  boxId: null,
+  setId: "ab000000-0000-4000-8000-000000000001",
+  setCode: SET_KI,
+  productName: "Зимний набор",
+  codeCount: 3,
 });
 
 function header(overrides: Partial<DisaggregationDocument> = {}): DisaggregationDocument {
@@ -172,12 +183,90 @@ function lineRows(): HTMLElement[] {
 }
 
 function paste(text: string): void {
-  fireEvent.change(screen.getByLabelText("SSCC коробов или палетов"), { target: { value: text } });
+  fireEvent.change(screen.getByLabelText("SSCC или КИ набора"), { target: { value: text } });
 }
 
 function pickFile(file: File): void {
   fireEvent.change(screen.getByTestId("file-drop-input"), { target: { files: [file] } });
 }
+
+it.each([false, true])("adds a set and SSCC in one document (file: %s)", async (fromFile) => {
+  const { session, host } = fake();
+  session.api.addDisaggregationLines.mockImplementation(async () => {
+    host.detail = { document: header({ lineCount: 3 }), lines: [...DRAFT.lines, SET_LINE] };
+    return host.detail;
+  });
+  await openDocument(session);
+  const text = `${fromFile ? `"${RAW_SET}"` : RAW_SET}\r\n${BOX_SSCC}\n${SET_KI}`;
+  if (fromFile) {
+    pickFile(new File([text], "codes.csv", { type: "text/csv" }));
+  } else {
+    fireEvent.change(screen.getByLabelText("SSCC или КИ набора"), { target: { value: text } });
+    fireEvent.click(screen.getByRole("button", { name: "Добавить строки" }));
+  }
+  await waitFor(() =>
+    expect(session.api.addDisaggregationLines).toHaveBeenCalledWith(TOKEN, DOC_ID, {
+      import: fromFile,
+      lines: [
+        { input: RAW_SET, sscc: null },
+        { input: BOX_SSCC, sscc: BOX_SSCC },
+        { input: SET_KI, sscc: null },
+      ],
+    }),
+  );
+  const set = await within(linesTable()).findByRole("row", { name: /Зимний набор/ });
+  expect(
+    within(set)
+      .getAllByRole("cell")
+      .map((cell) => cell.textContent),
+  ).toEqual([
+    SET_KI,
+    "Набор",
+    "OCT26-003",
+    "Зимний набор",
+    "3",
+    expect.stringContaining("Готов к проведению"),
+    "Удалить",
+  ]);
+});
+
+it("preserves the GS1 separator from a keyboard wedge in the editable field", async () => {
+  const { session } = fake();
+  await openDocument(session);
+  const field = screen.getByLabelText<HTMLTextAreaElement>("SSCC или КИ набора");
+  const [withoutSeparator, tail] = RAW_SET.split("\u001d");
+  if (withoutSeparator === undefined || tail === undefined) throw new Error("Missing GS1 sample");
+  paste(`${withoutSeparator}${tail}`);
+  field.setSelectionRange(withoutSeparator.length, withoutSeparator.length);
+  fireEvent.keyDown(field, { key: "]", ctrlKey: true });
+  expect(field.value).toBe(RAW_SET);
+});
+
+it("copies the set KI from an applied mixed document and does not offer partial XML", async () => {
+  const { session } = fake({
+    document: header({ status: "applied", lineCount: 2 }),
+    lines: [BOX_LINE, SET_LINE],
+  });
+  const descriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const written: string[] = [];
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: async (text: string) => written.push(text) },
+  });
+  try {
+    await openDocument(session);
+    const setRow = within(linesTable()).getByRole("row", { name: /Зимний набор/ });
+    expect(within(setRow).getByText("Расформирован")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Файл для Честного знака" })).toBeNull();
+    expect(screen.getByText(/XML недоступен, когда в документе есть наборы/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Скопировать КИ наборов" }));
+    await waitFor(() => expect(written).toEqual([SET_KI]));
+  } finally {
+    if (descriptor === undefined) Reflect.deleteProperty(navigator, "clipboard");
+    else Object.defineProperty(navigator, "clipboard", descriptor);
+    cleanup();
+  }
+});
 
 describe("office «Дезагрегация»: a draft document", () => {
   beforeEach(() => {
@@ -212,7 +301,15 @@ describe("office «Дезагрегация»: a draft document", () => {
     const titles = within(linesTable())
       .getAllByRole("columnheader")
       .map((cell) => cell.textContent);
-    expect(titles).toEqual(["SSCC", "Уровень", "Смена", "Товар", "Кодов", "Статус", "Действия"]);
+    expect(titles).toEqual([
+      "Код упаковки",
+      "Уровень",
+      "Смена",
+      "Товар",
+      "Кодов",
+      "Статус",
+      "Действия",
+    ]);
     const cells = lineRows().map((row) =>
       within(row)
         .getAllByRole("cell")
@@ -230,7 +327,7 @@ describe("office «Дезагрегация»: a draft document", () => {
     expect(cells[2]?.[5]).toContain("Смена ещё открыта");
     // What is no SSCC stays as it was typed.
     expect(cells[3]?.slice(0, 5)).toEqual(["MRK-000742", "—", "—", "—", "0"]);
-    expect(cells[3]?.[5]).toContain("Короб или палет не найдены");
+    expect(cells[3]?.[5]).toContain("Упаковка не найдена");
     expect(
       within(lineRows()[0] as HTMLElement).getByRole("link", { name: "OCT26-003" }),
     ).toBeTruthy();
@@ -360,9 +457,7 @@ describe("office «Дезагрегация»: a draft document", () => {
       ],
       import: false,
     });
-    expect((screen.getByLabelText("SSCC коробов или палетов") as HTMLTextAreaElement).value).toBe(
-      "",
-    );
+    expect((screen.getByLabelText("SSCC или КИ набора") as HTMLTextAreaElement).value).toBe("");
     expect(lineRows().length).toBe(4);
   });
 
@@ -422,7 +517,7 @@ describe("office «Дезагрегация»: a draft document", () => {
     pickFile(new File([tokens.join("\n")], "list.txt"));
     // The cause is told too, so the rest is not added blindly again.
     await expectFocusedNotice(
-      "Добавлено 500 из 1200 SSCC. Следующую часть не удалось добавить. Добавьте оставшиеся SSCC ещё раз. На хосте произошла ошибка. Повторите попытку.",
+      "Добавлено 500 из 1200 кодов. Следующую часть не удалось добавить. Добавьте оставшиеся коды ещё раз. На хосте произошла ошибка. Повторите попытку.",
     );
     expect(session.api.addDisaggregationLines).toHaveBeenCalledTimes(2);
     await waitFor(() =>
@@ -442,9 +537,9 @@ describe("office «Дезагрегация»: a draft document", () => {
     paste(tokens.join("\n"));
     fireEvent.click(screen.getByRole("button", { name: "Добавить строки" }));
     await expectFocusedNotice(
-      "Добавлено 500 из 700 SSCC. Следующую часть не удалось добавить. Добавьте оставшиеся SSCC ещё раз. На хосте произошла ошибка. Повторите попытку.",
+      "Добавлено 500 из 700 кодов. Следующую часть не удалось добавить. Добавьте оставшиеся коды ещё раз. На хосте произошла ошибка. Повторите попытку.",
     );
-    const left = (screen.getByLabelText("SSCC коробов или палетов") as HTMLTextAreaElement).value;
+    const left = (screen.getByLabelText("SSCC или КИ набора") as HTMLTextAreaElement).value;
     expect(left.split("\n")).toEqual(tokens.slice(500));
   });
 
@@ -458,7 +553,7 @@ describe("office «Дезагрегация»: a draft document", () => {
     fireEvent.click(screen.getByRole("button", { name: "Добавить строки" }));
     expect(await screen.findByRole("alert")).toBeTruthy();
     expect(screen.queryByText(/Добавлено \d+ из/)).toBeNull();
-    expect((screen.getByLabelText("SSCC коробов или палетов") as HTMLTextAreaElement).value).toBe(
+    expect((screen.getByLabelText("SSCC или КИ набора") as HTMLTextAreaElement).value).toBe(
       "MRK-000001",
     );
   });
@@ -479,7 +574,7 @@ describe("office «Дезагрегация»: a draft document", () => {
     paste("MRK-1");
     fireEvent.click(screen.getByRole("button", { name: "Добавить строки" }));
     await expectFocusedNotice(
-      "Хост не принял одну из строк: SSCC длиннее 64 символов или с управляющим символом. Исправьте её и добавьте снова.",
+      "Хост не принял один из кодов. Проверьте длину и формат, затем добавьте его снова.",
     );
   });
 
@@ -487,7 +582,7 @@ describe("office «Дезагрегация»: a draft document", () => {
     const { session } = fake();
     await openDocument(session);
     pickFile(new File([Array(10_001).fill("1").join("\n")], "list.txt"));
-    await expectFocusedNotice("В файле больше 10 000 SSCC: разделите его на части.");
+    await expectFocusedNotice("В файле больше 10 000 кодов. Разделите его на части.");
     expect(session.api.addDisaggregationLines).not.toHaveBeenCalled();
   });
 
@@ -495,7 +590,7 @@ describe("office «Дезагрегация»: a draft document", () => {
     const { session } = fake();
     await openDocument(session);
     pickFile(new File([" \n;\n"], "list.txt"));
-    await expectFocusedNotice("В файле нет ни одного SSCC.");
+    await expectFocusedNotice("В файле нет кодов.");
     expect(session.api.addDisaggregationLines).not.toHaveBeenCalled();
   });
 
@@ -814,7 +909,7 @@ describe("office «Дезагрегация»: a document that is not a draft", 
     const { session } = fake(APPLIED);
     await openDocument(session);
     expect(screen.queryByLabelText("Комментарий")).toBeNull();
-    expect(screen.queryByLabelText("SSCC коробов или палетов")).toBeNull();
+    expect(screen.queryByLabelText("SSCC или КИ набора")).toBeNull();
     expect(screen.queryByTestId("file-drop-input")).toBeNull();
     expect(screen.queryByRole("button", { name: /Удалить строку/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Провести" })).toBeNull();

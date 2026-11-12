@@ -25,6 +25,7 @@ import {
 
 import { useOfficeSession } from "../office-session.js";
 import { historyFailure } from "../import/history-errors.js";
+import { gs1SeparatorFromKey } from "../../floor/scan-source.js";
 import { HostError } from "../../host/client.js";
 import type {
   DisaggregationDetail,
@@ -37,17 +38,18 @@ import { useCan } from "../access.js";
 import { alertFailure, writeFailure } from "../form-errors.js";
 import { CardFiles } from "../exports/CardFiles.js";
 import { formTimeZone } from "../forms/render-form.js";
+import { copyText } from "../info/clipboard.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading, StaleAlert } from "../page-state.js";
 import {
   byReasonOrder,
   DOCUMENT_STATUS_PHASE,
   LINE_STATUS_PHASE,
-  lineSsccLabel,
+  lineCodeLabel,
 } from "./disaggregation-text.js";
 import { DisaggregationActDialog } from "./DisaggregationActDialog.js";
-import { DisaggregationXmlDialog } from "./DisaggregationXmlDialog.js";
-import { inParts, lineInputs, parsePastedSsccs, readSsccImport } from "./sscc-input.js";
+import { DisaggregationExportDialog } from "./DisaggregationExportDialog.js";
+import { inParts, lineInputs, parsePastedCodes, readCodeImport } from "./code-input.js";
 
 /** The count of a number as Russian writes it: «1 200». */
 const COUNTS = new Intl.NumberFormat("ru");
@@ -59,7 +61,7 @@ const COMMENT_MAX = 500;
 type Status =
   { kind: "text"; tone: "ok" | "warn" | "error"; text: string; focus: boolean } | { kind: "stale" };
 
-type DocumentDialog = "act" | "xml" | "apply" | "cancel";
+type DocumentDialog = "act" | "json" | "xml" | "apply" | "cancel";
 
 /** The header of a draft: the whole of it goes in one request. */
 interface HeaderChange {
@@ -167,11 +169,11 @@ interface AddLinesCardProps {
   onRejected: () => void;
 }
 
-/** SSCCs of boxes and pallets, pasted or scanned into a field, or taken from a .txt or .csv file. */
+/** SSCCs and set codes, pasted, scanned or imported from a .txt or .csv file. */
 function AddLinesCard({ busy, onPaste, onFile, onRejected }: AddLinesCardProps) {
   const { t } = useTranslation();
   const [text, setText] = useState("");
-  const tokens = parsePastedSsccs(text);
+  const tokens = parsePastedCodes(text);
   const add = async () => {
     const added = await onPaste(tokens);
     // What did not go in stays to be added again.
@@ -188,6 +190,14 @@ function AddLinesCard({ busy, onPaste, onFile, onRejected }: AddLinesCardProps) 
           // Held still while the lines go in: what the add leaves is put back into the field.
           readOnly={busy}
           onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            const separator = gs1SeparatorFromKey(event);
+            if (separator === null || busy) return;
+            event.preventDefault();
+            const input = event.currentTarget;
+            input.setRangeText(separator, input.selectionStart, input.selectionEnd, "end");
+            setText(input.value);
+          }}
         />
         <div className="standalone-form__actions">
           <Button disabled={busy || tokens.length === 0} onClick={() => void add()}>
@@ -209,8 +219,8 @@ function AddLinesCard({ busy, onPaste, onFile, onRejected }: AddLinesCardProps) 
   );
 }
 
-/** The level of a line: a box, a pallet, or nothing found. */
-function levelKey(line: DisaggregationLine): "box" | "pallet" | "unknown" {
+function levelKey(line: DisaggregationLine): "box" | "pallet" | "set" | "unknown" {
+  if (line.setCode !== undefined) return "set";
   if (line.boxId !== null) return "box";
   if (line.palletId !== null || line.warehousePalletId !== undefined) return "pallet";
   return "unknown";
@@ -218,7 +228,7 @@ function levelKey(line: DisaggregationLine): "box" | "pallet" | "unknown" {
 
 /**
  * One disaggregation document (plan ДЗГ-О): a draft is edited, filled with
- * SSCCs, applied or cancelled; an applied or cancelled one is read, and the
+ * SSCCs and set codes, applied or cancelled; an applied or cancelled one is read, and the
  * act and the ЧЗ file are made from it. The host holds every rule: the page
  * shows its answers.
  */
@@ -285,6 +295,18 @@ export function DisaggregationDocumentPage() {
   };
   const say = (tone: "ok" | "warn" | "error", text: string, focus = true) =>
     setStatus({ kind: "text", tone, text, focus });
+  const copySetCodes = async (codes: readonly string[]) => {
+    const ok = await copyText(codes.join("\n"));
+    say(
+      ok ? "ok" : "warn",
+      t(
+        ok
+          ? "office.disaggregation.detail.setCodesCopied"
+          : "office.disaggregation.detail.setCodesCopyFailed",
+      ),
+      false,
+    );
+  };
   const saved = (detail: DisaggregationDetail, text: string, focus = true) => {
     store(detail);
     say("ok", text, focus);
@@ -339,7 +361,7 @@ export function DisaggregationDocumentPage() {
         }
       }
       if (error.code === "validation_failed" && error.field?.startsWith("lines.")) {
-        // One token of the part the host cannot take (over 64 characters, or a control character).
+        // One token of the part the host cannot take.
         return {
           stale: false,
           tone: "warn",
@@ -442,7 +464,7 @@ export function DisaggregationDocumentPage() {
     setStatus(null);
     let parsed;
     try {
-      parsed = await readSsccImport(file);
+      parsed = await readCodeImport(file);
     } catch {
       say("error", t("office.disaggregation.detail.importRefused.unreadable"));
       return;
@@ -487,6 +509,17 @@ export function DisaggregationDocumentPage() {
       return;
     }
     setDialog(null);
+    if (kind === "apply") {
+      const setShifts = new Set(
+        detail.lines.flatMap(({ setCode, shiftId }) =>
+          setCode !== undefined && shiftId !== null ? [shiftId] : [],
+        ),
+      );
+      for (const shiftId of setShifts) {
+        void queryClient.invalidateQueries({ queryKey: officeKeys.shiftSets(shiftId) });
+        void queryClient.invalidateQueries({ queryKey: officeKeys.shiftSetForm(shiftId) });
+      }
+    }
     saved(
       detail,
       t(
@@ -517,6 +550,9 @@ export function DisaggregationDocumentPage() {
   }
   const { document: header, lines } = doc.data;
   const draft = header.status === "draft";
+  const setCodes = lines.flatMap(({ setCode }) => (setCode === undefined ? [] : [setCode]));
+  const hasSets = setCodes.length > 0;
+  const canExport = header.status === "applied" && canWrite;
   const cloudLocked = !administrator && lines.some((line) => line.cloudHistory === true);
   const editable = draft && canWrite && !cloudLocked;
   const zone = formTimeZone(org.data);
@@ -587,15 +623,16 @@ export function DisaggregationDocumentPage() {
 
   const columns: TableColumn<DisaggregationLine>[] = [
     {
-      key: "sscc",
-      title: t("office.disaggregation.detail.table.sscc"),
+      key: "code",
+      title: t("office.disaggregation.detail.table.code"),
       mono: true,
+      wrap: true,
       render: (line) =>
         line.warehousePalletId === undefined ? (
-          lineSsccLabel(line)
+          lineCodeLabel(line)
         ) : (
           <Link to={`/codes/warehouse-pallet/${line.warehousePalletId}`}>
-            {lineSsccLabel(line)}
+            {lineCodeLabel(line)}
           </Link>
         ),
     },
@@ -645,7 +682,11 @@ export function DisaggregationDocumentPage() {
       render: (line) => (
         <StatusChip
           phase={LINE_STATUS_PHASE[line.status]}
-          label={t(`office.disaggregation.lineStatuses.${line.status}`)}
+          label={t(
+            header.status === "applied" && line.status === "ok"
+              ? "office.disaggregation.lineStatuses.applied"
+              : `office.disaggregation.lineStatuses.${line.status}`,
+          )}
         />
       ),
     },
@@ -660,7 +701,7 @@ export function DisaggregationDocumentPage() {
           size="compact"
           disabled={working}
           aria-label={t("office.disaggregation.detail.deleteLineNamed", {
-            sscc: lineSsccLabel(line),
+            code: lineCodeLabel(line),
           })}
           onClick={() => void deleteLine(line)}
         >
@@ -685,14 +726,29 @@ export function DisaggregationDocumentPage() {
             <Button variant="secondary" onClick={() => setDialog("act")}>
               {t("office.disaggregation.detail.printAct")}
             </Button>
-            {header.status === "applied" && canWrite && (
+            {canExport && (
+              <Button variant="secondary" onClick={() => setDialog("json")}>
+                {t("office.disaggregation.detail.json")}
+              </Button>
+            )}
+            {canExport && !hasSets && (
               <Button variant="secondary" onClick={() => setDialog("xml")}>
                 {t("office.disaggregation.detail.xml")}
+              </Button>
+            )}
+            {canExport && hasSets && (
+              <Button variant="secondary" onClick={() => void copySetCodes(setCodes)}>
+                {t("office.disaggregation.detail.copySetCodes")}
               </Button>
             )}
           </RowActions>
         }
       />
+      {canExport && hasSets && (
+        <Alert tone="info">
+          {t("office.disaggregation.export.refusals.SET_LINES_UNSUPPORTED")}
+        </Alert>
+      )}
       {status?.kind === "text" && (
         <Alert tone={status.tone} id={noticeId} tabIndex={-1}>
           {status.text}
@@ -777,10 +833,15 @@ export function DisaggregationDocumentPage() {
           <ConfirmDialog
             open={dialog === "apply"}
             title={t("office.disaggregation.detail.applyConfirmTitle")}
-            description={t("office.disaggregation.detail.applyConfirm", {
-              lines: lines.length,
-              codes: lines.reduce((sum, line) => sum + line.codeCount, 0),
-            })}
+            description={t(
+              hasSets
+                ? "office.disaggregation.detail.applySetsConfirm"
+                : "office.disaggregation.detail.applyConfirm",
+              {
+                lines: lines.length,
+                codes: lines.reduce((sum, line) => sum + line.codeCount, 0),
+              },
+            )}
             confirmLabel={t("office.disaggregation.detail.applyConfirmAction")}
             cancelLabel={t("office.disaggregation.detail.dismiss")}
             busy={apply.isPending}
@@ -809,16 +870,15 @@ export function DisaggregationDocumentPage() {
       />
       {dialog === "act" && (
         <DisaggregationActDialog
-          documentId={header.id}
-          docNo={header.docNo}
+          source={{ scope: "document", id: header.id, number: header.docNo }}
           timeZone={zone}
           onClose={() => setDialog(null)}
         />
       )}
-      {dialog === "xml" && (
-        <DisaggregationXmlDialog
-          documentId={header.id}
-          docNo={header.docNo}
+      {(dialog === "json" || (dialog === "xml" && !hasSets)) && (
+        <DisaggregationExportDialog
+          source={{ scope: "document", id: header.id, number: header.docNo }}
+          format={dialog}
           timeZone={zone}
           onClose={() => setDialog(null)}
         />

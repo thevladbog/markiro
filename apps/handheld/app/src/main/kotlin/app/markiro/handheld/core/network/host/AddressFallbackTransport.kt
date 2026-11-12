@@ -36,5 +36,7 @@ class AddressFallbackTransport(
 
     override suspend fun get(path: String): HostResult = attempt { it.get(path) }
 
+    override suspend fun getCancellable(path: String): HostResult = attempt { it.getCancellable(path) }
+
     override suspend fun post(path: String, body: String): HostResult = attempt { it.post(path, body) }
 }

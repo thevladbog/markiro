@@ -21,6 +21,8 @@ export interface ProductPhotoFieldProps {
   productId: string | null;
   /** Names the photo for a screen reader. */
   productName: string;
+  /** Catalog sets share the photo API and have their own label. */
+  set?: boolean;
   /** Tests pass a fake; `encodePhoto` by default. */
   encode?: PhotoEncoder;
   /**
@@ -46,31 +48,46 @@ const PHOTO_ACCEPT = PHOTO_FILE_TYPES.join(",");
 export function ProductPhotoField({
   productId,
   productName,
+  set = false,
   encode = encodePhoto,
   staged = null,
   onStage,
 }: ProductPhotoFieldProps) {
+  const { t } = useTranslation();
+  const title = t(set ? "office.products.photo.setTitle" : "office.products.photo.title");
+  const alt = t(set ? "office.products.photo.setAlt" : "office.products.photo.alt", {
+    name: productName,
+  });
   if (productId === null) {
     return (
       <StagedProductPhoto
-        productName={productName}
+        title={title}
+        alt={alt}
+        note={t(set ? "office.products.photo.setStagedNote" : "office.products.photo.stagedNote")}
         encode={encode}
         staged={staged}
         {...(onStage === undefined ? {} : { onStage })}
       />
     );
   }
-  return <SavedProductPhoto productId={productId} productName={productName} encode={encode} />;
+  return (
+    <SavedProductPhoto
+      productId={productId}
+      title={title}
+      alt={alt}
+      note={t(set ? "office.products.photo.setSavedNote" : "office.products.photo.savedNote")}
+      encode={encode}
+    />
+  );
 }
 
 /** The section «Фото товара», named by its heading. */
-function PhotoSection({ children }: { children: ReactNode }) {
-  const { t } = useTranslation();
+function PhotoSection({ title, children }: { title: string; children: ReactNode }) {
   const titleId = useId();
   return (
     <section className="product-photo-field" aria-labelledby={titleId}>
       <h3 id={titleId} className="product-photo-field__title">
-        {t("office.products.photo.title")}
+        {title}
       </h3>
       {children}
     </section>
@@ -180,26 +197,29 @@ function useEncoder(encode: PhotoEncoder) {
 
 /** A new product: the picture is encoded here and kept by the drawer until the product is saved. */
 function StagedProductPhoto({
-  productName,
+  title,
+  alt,
+  note,
   encode,
   staged,
   onStage,
 }: {
-  productName: string;
+  title: string;
+  alt: string;
+  note: string;
   encode: PhotoEncoder;
   staged: EncodedPhoto | null;
   onStage?: (photo: EncodedPhoto | null) => void;
 }) {
-  const { t } = useTranslation();
   const encoder = useEncoder(encode);
   return (
-    <PhotoSection>
+    <PhotoSection title={title}>
       {encoder.picture !== null && <Alert tone="error">{encoder.picture}</Alert>}
       <PhotoCard
         photo={staged}
-        alt={t("office.products.photo.alt", { name: productName })}
+        alt={alt}
         busy={false}
-        note={t("office.products.photo.stagedNote")}
+        note={note}
         onFile={(file) =>
           void encoder.run(file).then((encoded) => {
             if (encoded !== null) onStage?.(encoded);
@@ -217,11 +237,15 @@ function StagedProductPhoto({
 
 function SavedProductPhoto({
   productId,
-  productName,
+  title,
+  alt,
+  note,
   encode,
 }: {
   productId: string;
-  productName: string;
+  title: string;
+  alt: string;
+  note: string;
   encode: PhotoEncoder;
 }) {
   const { t } = useTranslation();
@@ -268,15 +292,15 @@ function SavedProductPhoto({
   };
 
   return (
-    <PhotoSection>
+    <PhotoSection title={title}>
       {encoder.picture !== null && <Alert tone="error">{encoder.picture}</Alert>}
       <WriteFailureAlert failure={problem?.kind === "write" ? problem.failure : null} />
       {state.isSuccess && (
         <PhotoCard
           photo={photo}
-          alt={t("office.products.photo.alt", { name: productName })}
+          alt={alt}
           busy={busy}
-          note={t("office.products.photo.savedNote")}
+          note={note}
           onFile={(file) => void choose(file)}
           onRejected={encoder.reject}
           onRemove={() => void remove()}

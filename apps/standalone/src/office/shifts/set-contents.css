@@ -1,0 +1,38 @@
+.set-history__groups {
+  display: grid;
+  gap: 12px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.set-history__groups > li {
+  padding-inline-start: 12px;
+  border-inline-start: 2px solid var(--line-strong);
+}
+
+.set-history__groups ul {
+  margin: 4px 0 0;
+  padding-inline-start: 16px;
+}
+
+.set-copy__codes {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.set-copy__codes li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.set-copy__codes code,
+.set-copy__parent {
+  overflow-wrap: anywhere;
+  user-select: text;
+}

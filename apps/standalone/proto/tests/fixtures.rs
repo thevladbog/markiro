@@ -1593,7 +1593,14 @@ fn code_check_fixtures_round_trip_and_name_the_owner_as_a_conflict_does() {
     let receipts: FactReceipts = serde_json::from_value(fixture("facts-response.json")).unwrap();
     let winner: CodeOwner =
         typed(&Value::Object(receipts.receipts[1].details.clone().unwrap())["winner"]);
-    assert_eq!(taken, CodeCheck::Taken { owner: winner });
+    assert_eq!(
+        taken,
+        CodeCheck::Taken {
+            owner: winner.clone()
+        }
+    );
+    let in_set: CodeCheck = round_trip("code-check-in-set.json");
+    assert_eq!(in_set, CodeCheck::InSet { owner: winner });
 }
 
 /// The export source of a shift (plan ЧЗ) round-trips, and its rows hang

@@ -5,8 +5,10 @@
 //! journal rows only. An `invalid` scan keeps no text, only its length and what it
 //! looked like.
 
-use markiro_proto::{receipt_codes, ScanFact, ScanRawKind, ScanVerdict, ShiftMode};
-use serde_json::Value;
+use markiro_proto::{
+    receipt_codes, DuplicateSource, FactOutcome, ScanFact, ScanRawKind, ScanVerdict, ShiftMode,
+};
+use serde_json::{json, Value};
 use sqlx::SqliteConnection;
 
 use super::registry::{self, Claim};
@@ -122,6 +124,19 @@ pub async fn apply(
         }
         _ => None,
     };
+    // The preflight is advisory. The same write lock that owns this fact
+    // protects the live set claim from assembly and disaggregation races.
+    let set_owner = match accepted {
+        Some((code, Some(_))) => {
+            registry::set_owner(&mut *conn, &code.code_hash, context.device_id).await?
+        }
+        _ => None,
+    };
+    let (verdict, duplicate_source, journal_box_id) = if set_owner.is_some() {
+        (ScanVerdict::Duplicate, Some(DuplicateSource::Host), None)
+    } else {
+        (scan.verdict, scan.duplicate_source, scan.box_id.as_deref())
+    };
     let scan_id = uuid::Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO scans (id, record_id, device_id, shift_id, verdict, duplicate_source, \
@@ -132,21 +147,28 @@ pub async fn apply(
     .bind(context.record_id)
     .bind(context.device_id)
     .bind(&context.shift.id)
-    .bind(scan.verdict.as_str())
-    .bind(scan.duplicate_source.map(|source| source.as_str()))
+    .bind(verdict.as_str())
+    .bind(duplicate_source.map(|source| source.as_str()))
     .bind(scan.raw_kind.as_str())
     .bind(scan.raw_length)
     .bind(scan.code.as_ref().map(|code| &code.code_hash))
     .bind(scan.code.as_ref().map(|code| &code.gtin14))
     .bind(scan.code.as_ref().map(|code| &code.serial))
     .bind(scan.code.as_ref().map(|code| &code.canonical))
-    .bind(&scan.box_id)
+    .bind(journal_box_id)
     .bind(context.operator_id)
     .bind(&scan.scanned_at)
     .bind(context.received_at)
     .execute(&mut *conn)
     .await
     .map_err(ApiError::internal)?;
+    if let Some(winner) = set_owner {
+        return Ok(Applied {
+            outcome: FactOutcome::Conflict,
+            details: Some(json!({ "winner": winner, "setMembership": true })),
+            close: None,
+        });
+    }
     match accepted {
         Some((code, box_id)) => Ok(registry::claim(
             conn,

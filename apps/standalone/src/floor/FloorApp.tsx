@@ -129,7 +129,7 @@ export interface FloorAppProps {
   /** `HostApi.createDeviceShift`. */
   create: (create: DeviceShiftCreate) => Promise<DeviceShift>;
   /** `HostApi.checkCode`: the work screen's check of a code on the host. */
-  checkCode: (codeHash: string) => Promise<CodeCheck>;
+  checkCode: (codeHash: string, aggregation?: boolean) => Promise<CodeCheck>;
   /** `HostApi.requestSsccBlock`: the work screen's serials for its boxes. */
   requestBlock: (request: SsccBlockRequest) => Promise<SsccBlock>;
   /** `HostApi.warehouseLookup` (plan СКЛ); none — the list offers no warehouse reprint. */

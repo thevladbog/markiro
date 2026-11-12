@@ -4,40 +4,40 @@ import {
   inParts,
   lineInputs,
   MAX_IMPORT_BYTES,
-  parsePastedSsccs,
-  parseSsccImport,
-  readSsccImport,
-} from "../src/office/disaggregation/sscc-input.js";
+  parsePastedCodes,
+  parseCodeImport,
+  readCodeImport,
+} from "../src/office/disaggregation/code-input.js";
 
-describe("a file's SSCCs (the cloud API's parseSsccImport)", () => {
+describe("a file's SSCCs (the cloud API's parseCodeImport)", () => {
   it("splits on newlines, semicolons and commas; trims; drops empties", () => {
-    expect(parseSsccImport("123;456\n789,abc\r\n\n  042  \n")).toEqual({
+    expect(parseCodeImport("123;456\n789,abc\r\n\n  042  \n")).toEqual({
       ok: true,
       tokens: ["123", "456", "789", "abc", "042"],
     });
   });
 
   it("keeps duplicates: the document shows them as duplicate lines", () => {
-    expect(parseSsccImport("1\n1")).toEqual({ ok: true, tokens: ["1", "1"] });
+    expect(parseCodeImport("1\n1")).toEqual({ ok: true, tokens: ["1", "1"] });
   });
 
   it("refuses over 10 000 tokens and an empty file", () => {
-    expect(parseSsccImport(Array(10_001).fill("1").join("\n"))).toEqual({
+    expect(parseCodeImport(Array(10_001).fill("1").join("\n"))).toEqual({
       ok: false,
       refusal: "too_many_lines",
     });
-    expect(parseSsccImport(Array(10_000).fill("1").join("\n")).ok).toBe(true);
-    expect(parseSsccImport(" ;\n,")).toEqual({ ok: false, refusal: "file_empty" });
+    expect(parseCodeImport(Array(10_000).fill("1").join("\n")).ok).toBe(true);
+    expect(parseCodeImport(" ;\n,")).toEqual({ ok: false, refusal: "file_empty" });
   });
 
   it("keeps a space inside a token, as the cloud does (it is then not found)", () => {
-    expect(parseSsccImport("1460 0703")).toEqual({ ok: true, tokens: ["1460 0703"] });
+    expect(parseCodeImport("1460 0703")).toEqual({ ok: true, tokens: ["1460 0703"] });
   });
 });
 
 describe("pasted SSCCs (the cloud page's splitSsccInput)", () => {
   it("splits on any whitespace, semicolons and commas", () => {
-    expect(parsePastedSsccs(" (00)046007034967000017 \t046007034967000024;\n,x ")).toEqual([
+    expect(parsePastedCodes(" (00)046007034967000017 \t046007034967000024;\n,x ")).toEqual([
       "(00)046007034967000017",
       "046007034967000024",
       "x",
@@ -45,23 +45,30 @@ describe("pasted SSCCs (the cloud page's splitSsccInput)", () => {
   });
 
   it("finds nothing in blanks", () => {
-    expect(parsePastedSsccs(" \n\t ; , ")).toEqual([]);
+    expect(parsePastedCodes(" \n\t ; , ")).toEqual([]);
+  });
+
+  it("trims the edges of a set code while preserving its GS separator and punctuation", () => {
+    const code = "010460712345678121SET,01;A\u001d93AB12";
+    const input = ` \t${code}\t \n046007034967000017`;
+    expect(parsePastedCodes(input)).toEqual([code, "046007034967000017"]);
+    expect(parseCodeImport(input)).toEqual({ ok: true, tokens: [code, "046007034967000017"] });
   });
 });
 
 describe("reading a picked file", () => {
   it("drops the BOM Excel writes, unlike the cloud", async () => {
     const file = { size: 22, text: async () => "\uFEFF046007034967000017;\n" };
-    expect(await readSsccImport(file)).toEqual({ ok: true, tokens: ["046007034967000017"] });
+    expect(await readCodeImport(file)).toEqual({ ok: true, tokens: ["046007034967000017"] });
     const real = new File(["\uFEFF046007034967000017\n"], "list.csv");
-    expect(await readSsccImport(real)).toEqual({ ok: true, tokens: ["046007034967000017"] });
+    expect(await readCodeImport(real)).toEqual({ ok: true, tokens: ["046007034967000017"] });
   });
 
   it("does not read a file over 1 MiB", async () => {
     const text = async () => {
       throw new Error("must not be read");
     };
-    expect(await readSsccImport({ size: MAX_IMPORT_BYTES + 1, text })).toEqual({
+    expect(await readCodeImport({ size: MAX_IMPORT_BYTES + 1, text })).toEqual({
       ok: false,
       refusal: "file_too_large",
     });

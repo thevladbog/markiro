@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Checkbox, Input, Modal, RadioGroup } from "@markiro/ui";
+import { Alert, Button, Checkbox, Input, Modal, RadioGroup, RowActions } from "@markiro/ui";
 
 import {
   isSupportedHistoryTimeZone,
@@ -33,7 +33,8 @@ import {
   type ExportWarning,
 } from "./export-checks.js";
 import { useExportPlan, yieldToUi } from "./export-plan.js";
-import { setExportRefusal } from "./export-source.js";
+import { isAssembledSet, setExportRefusal } from "./export-source.js";
+import { SetClipboardDialog } from "./SetClipboardDialog.js";
 import { OfficeFilesError, type SavedFolder } from "./office-files.js";
 import { storeExportFiles } from "./stored-files.js";
 import { useRefreshStoredFiles } from "./use-refresh-files.js";
@@ -79,6 +80,7 @@ export interface ExportDialogProps {
   shift: Pick<OfficeShift, "id" | "number" | "mode">;
   sourceKind?: "native" | "cloud";
   setAssembly?: boolean;
+  onPrintSets?: (timeZone: string) => void;
   /**
    * Only this pallet's ЧЗ document (plan КРТ, the pallet's card): the dialog
    * shows its row and its «XML палета», not the shift's formats.
@@ -117,6 +119,7 @@ export function ExportDialog({
   onClose,
   sourceKind = "native",
   setAssembly = false,
+  onPrintSets,
 }: ExportDialogProps) {
   const { t } = useTranslation();
   const formId = useId();
@@ -167,6 +170,7 @@ export function ExportDialog({
     api.recordShiftExport(token, shift.id, body),
   );
   const [chosen, setChosen] = useState<string | null>(null);
+  const [clipboardOpen, setClipboardOpen] = useState(false);
   const [split, setSplit] = useState(false);
   const [lineLimit, setLineLimit] = useState(DEFAULT_LINES);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -199,7 +203,7 @@ export function ExportDialog({
 
   const setReady = setMode && rows !== undefined && sets.isSuccess;
   const ready = setMode ? setReady : plan.status === "ready";
-  const setRefusal = setReady ? setExportRefusal(rows, sets.data) : null;
+  const setRefusal = setReady ? setExportRefusal(rows.shift.status, sets.data) : null;
   const checks = setMode
     ? setReady
       ? STANDALONE_SET_EXPORT_FORMATS.map((format) => ({
@@ -614,7 +618,7 @@ export function ExportDialog({
         {setMode && sets.data !== undefined && (
           <p className="office-note">
             {t("office.exports.setCounts", {
-              sets: sets.data.filter((set) => set.outcome === "accepted").length,
+              sets: sets.data.filter(isAssembledSet).length,
             })}
           </p>
         )}
@@ -715,6 +719,26 @@ export function ExportDialog({
               </>
             )}
             <Alert tone="info">{t("office.exports.folderHint")}</Alert>
+            {setReady && (
+              <RowActions>
+                <Button
+                  variant="secondary"
+                  disabled={busy || setRefusal !== null}
+                  onClick={() => setClipboardOpen(true)}
+                >
+                  {t("office.exports.setCopy.title")}
+                </Button>
+                {onPrintSets !== undefined && (
+                  <Button
+                    variant="secondary"
+                    disabled={busy || setRefusal !== null || org.isPending}
+                    onClick={() => onPrintSets(nativeTimeZone)}
+                  >
+                    {t("office.exports.setPrint")}
+                  </Button>
+                )}
+              </RowActions>
+            )}
             {palletId !== undefined && pallets.length === 0 && (
               <Alert tone="warn">{t("office.exports.palletUnavailable")}</Alert>
             )}
@@ -769,6 +793,16 @@ export function ExportDialog({
       </>
     );
   };
+
+  if (clipboardOpen && sets.data !== undefined) {
+    return (
+      <SetClipboardDialog
+        shiftId={shift.id}
+        sets={sets.data.filter(isAssembledSet)}
+        onClose={() => setClipboardOpen(false)}
+      />
+    );
+  }
 
   return (
     <Modal

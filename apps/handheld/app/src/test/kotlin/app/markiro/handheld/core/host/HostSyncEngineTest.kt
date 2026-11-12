@@ -3,10 +3,12 @@ package app.markiro.handheld.core.host
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.markiro.handheld.core.box.BoxDigest
 import app.markiro.handheld.core.host.HostFactsFixtures.KM_A
 import app.markiro.handheld.core.host.HostFactsFixtures.KM_B
 import app.markiro.handheld.core.host.HostFactsFixtures.KM_C
 import app.markiro.handheld.core.network.host.HostApi
+import app.markiro.handheld.core.network.host.FactReceiptDto
 import app.markiro.handheld.core.network.host.HostResult
 import app.markiro.handheld.core.network.host.HostTransport
 import app.markiro.handheld.core.network.host.TransportFailure
@@ -242,6 +244,33 @@ class HostSyncEngineTest {
         assertEquals(app.markiro.handheld.core.km.KmCodec.hash(app.markiro.handheld.core.km.KmCodec.canonicalize(KM_C)), conflict.codeHash)
         assertEquals("2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e", conflict.winningTerminalId)
         assertEquals("2026-10-08T05:58:41.090Z", conflict.winningScannedAt)
+        assertEquals(0, db.outboxDao().countNow())
+    }
+
+    @Test
+    fun aLateSetMembershipConflictKeepsTheClosedBoxDigestAndMarksTheScanLost() = runTest {
+        val box = HostFactsFixtures.closedBox(uuid(20), 1500)
+        val code = HostFactsFixtures.code(KM_C, box.boxId)
+        db.boxDao().insert(box)
+        db.codeDao().insert(code)
+        db.outboxDao().insert(HostFactsFixtures.scanRow(KM_C, boxId = box.boxId))
+        HostRecordFreezer(db).freezeAll()
+        val records = db.hostOutboxDao().queued(10)
+        val scan = records.single { it.kind == "scan" }
+        val frozenBox = records.single { it.kind == "box_closed" }
+        val boxData = Json.parseToJsonElement(frozenBox.body).jsonObject.getValue("data").jsonObject
+        assertEquals(BoxDigest.of(listOf(code.codeHash)), boxData.getValue("membershipDigest").jsonPrimitive.content)
+
+        val details = Json.parseToJsonElement(
+            """{"setMembership":true,"winner":{"deviceId":"owner-device","scannedAt":"2026-10-08T05:58:41.090Z"}}""",
+        ).jsonObject
+        HostAckMapper(db).apply(listOf(scan), listOf(FactReceiptDto(scan.recordId, "conflict", details = details)))
+
+        assertEquals(1, db.codeDao().lostForShift(code.shiftId))
+        assertEquals("owner-device", db.conflictDao().observeAll().first().single().winningTerminalId)
+        assertEquals(code, db.codeDao().get(code.codeHash))
+        assertEquals(1, db.boxDao().itemCount(box.boxId))
+        assertEquals(frozenBox, db.hostOutboxDao().get(frozenBox.recordId))
         assertEquals(0, db.outboxDao().countNow())
     }
 

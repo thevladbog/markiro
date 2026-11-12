@@ -9,10 +9,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { scanRecord } from "../src/floor/facts.js";
 import type { WorkShift } from "../src/floor/shifts/shift-copies.js";
 import { HOST_MAX_SERIAL_BYTES, processScan, readScan } from "../src/floor/work/scan-pipeline.js";
+import { recordSetScan } from "../src/floor/work/set-assembly.js";
 import { createWorkQueue } from "../src/floor/work/work-queue.js";
 import { HostError, TRANSPORT_CODES } from "../src/host/client.js";
 import { factRecordSchema, type CodeCheck } from "../src/host/protocol.js";
 import { LocalDbError, type LocalExecutor } from "../src/local/executor.js";
+import { syncReferences } from "../src/local/reference-sync.js";
 import {
   failingWrites,
   GTIN,
@@ -27,6 +29,7 @@ import {
   SHIFT_ID,
   enteredShift,
   steppingClock,
+  VALIDATION_ENTERED,
 } from "./support/floor-work.js";
 import { openLocalDb, openLocalDbFile } from "./support/local-db.js";
 
@@ -328,11 +331,104 @@ describe("a scan of the work screen", () => {
       scannedAt: "2026-10-08T06:15:00.000Z",
       code: { gtin14: GTIN, serial: "D1" },
     });
-    expect(checkCode).toHaveBeenCalledWith(codeHashOf(raw));
+    expect(checkCode).toHaveBeenCalledWith(codeHashOf(raw), true);
     expect(rows(db, "SELECT verdict, duplicate_source FROM floor_scans")).toEqual([
       { verdict: "duplicate", duplicate_source: "host" },
     ]);
     expect(rows(db, "SELECT count(*) AS n FROM floor_codes")).toEqual([{ n: 0 }]);
+  });
+
+  it("refuses an online set claim even when the same device assembled the set", async () => {
+    const { db, local, shift } = await station();
+    const checkCode = vi.fn(async (): Promise<CodeCheck> => ({
+      status: "in_set",
+      owner: { ...TAKEN.owner, sameDevice: true },
+    }));
+    const raw = km("PACKED-SET");
+    await expect(
+      processScan(scanContext(local, shift, { online: () => true, checkCode }), raw),
+    ).resolves.toMatchObject({ kind: "in_set" });
+    expect(checkCode).toHaveBeenCalledWith(codeHashOf(raw), true);
+    expect(rows(db, "SELECT verdict, duplicate_source, box_id FROM floor_scans")).toEqual([
+      { verdict: "duplicate", duplicate_source: "host", box_id: null },
+    ]);
+    expect(rows(db, "SELECT id FROM floor_boxes")).toEqual([]);
+  });
+
+  it("keeps a flat validation scan outside the set membership check", async () => {
+    const { db, local } = await station();
+    const shift = await enteredShift(local, VALIDATION_ENTERED);
+    const checkCode = vi.fn(async (): Promise<CodeCheck> => ({ status: "free" }));
+    const raw = km("VALIDATION01");
+    await expect(
+      processScan(scanContext(local, shift, { online: () => true, checkCode }), raw),
+    ).resolves.toMatchObject({ kind: "accepted", boxId: null });
+    expect(checkCode).toHaveBeenCalledWith(codeHashOf(raw), false);
+    expect(rows(db, "SELECT id FROM floor_boxes")).toEqual([]);
+  });
+
+  it("blocks a locally completed set's mark offline until the host releases it, even after a resend", async () => {
+    const { db, local, shift } = await station();
+    const setShift = await enteredShift(local, VALIDATION_ENTERED);
+    const setGtin = "04607123456781";
+    const raw = km("PACKED-SET");
+    const parent = km("SET001", { gtin: setGtin });
+    const original = "00000000-0000-4000-8000-000000000701";
+    const retry = "00000000-0000-4000-8000-000000000702";
+    const setContext = {
+      local,
+      pairing: PAIRING,
+      shiftId: setShift.copy.id,
+      setGtin,
+      recipe: [{ gtin14: GTIN, productName: "Молоко", quantity: 1 }],
+      operatorId: OPERATOR_ID,
+      now: () => "2026-10-08T06:00:00.000Z",
+      newId: () => original,
+    };
+    await expect(recordSetScan(setContext, raw)).resolves.toBe("item");
+    await expect(recordSetScan(setContext, parent)).resolves.toBe("assembled");
+    const context = scanContext(local, shift);
+    await expect(processScan(context, raw)).resolves.toMatchObject({ kind: "in_set" });
+    expect(rows(db, "SELECT id FROM floor_boxes")).toEqual([]);
+
+    db.prepare(
+      "UPDATE outbox SET outcome = 'rejected', acked_at = created_at, resent_as = ? WHERE id = ?",
+    ).run(retry, original);
+    db.prepare(
+      "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, outcome, acked_at) " +
+        "SELECT ?, host_id, device_id, kind, shift_id, payload, created_at, 'accepted', created_at FROM outbox WHERE id = ?",
+    ).run(retry, original);
+    await expect(processScan(context, raw)).resolves.toMatchObject({ kind: "in_set" });
+    await syncReferences({
+      ...PAIRING,
+      local,
+      changes: async () => ({
+        hostId: PAIRING.hostId,
+        rev: 1,
+        hasMore: false,
+        items: [
+          {
+            entity: "set_releases",
+            id: "00000000-0000-4000-8000-000000000703",
+            rev: 1,
+            deleted: false,
+            data: {
+              deviceId: PAIRING.deviceId,
+              recordId: retry,
+              shiftId: setShift.copy.id,
+              setCodeHash: codeHashOf(parent),
+            },
+          },
+        ],
+      }),
+    });
+    await expect(processScan(context, raw)).resolves.toMatchObject({
+      kind: "accepted",
+      itemCount: 1,
+    });
+    expect(rows(db, "SELECT code_hash FROM floor_set_marks")).toEqual([
+      { code_hash: codeHashOf(parent) },
+    ]);
   });
 
   it("preserves explicit cloud origin for an online duplicate without creating local ownership", async () => {
@@ -830,7 +926,10 @@ describe("a scan while the host may not answer", () => {
     });
     await processScan(context, km("Q1"));
     await processScan(context, km("Q2"));
-    expect(checkCode.mock.calls).toEqual([[codeHashOf(km("Q1"))], [codeHashOf(km("Q2"))]]);
+    expect(checkCode.mock.calls).toEqual([
+      [codeHashOf(km("Q1")), true],
+      [codeHashOf(km("Q2")), true],
+    ]);
     // A repeat is the station's own duplicate: the host is not asked again.
     await processScan(context, km("Q1", { tail: "bm90aGVy" }));
     expect(checkCode).toHaveBeenCalledTimes(2);

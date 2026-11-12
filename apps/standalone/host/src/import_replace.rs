@@ -25,6 +25,7 @@ pub const BUSINESS_TABLES: &[&str] = &[
     "cloud_history_shifts",
     "cloud_history_parts",
     "cloud_history_batches",
+    "set_releases",
     "disaggregation_document_lines",
     "disaggregation_documents",
     "code_releases",

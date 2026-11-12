@@ -1,18 +1,20 @@
 package app.markiro.handheld.feature.work
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -26,9 +28,11 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,7 +40,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.markiro.handheld.R
 import app.markiro.handheld.core.design.Banner
@@ -73,6 +81,12 @@ fun SetAssemblyScreen(
     val counts = remember(parsed) { parsed.groupingBy { it.gtin14 }.eachCount() }
     val expected = recipe.sumOf { it.quantity }
     val remaining = expected - parsed.size
+    val feedback = assembly.feedback
+    val awaitingPackage = expected > 0 && remaining == 0 && feedback != SetScanStatus.CLOSED
+    val listState = rememberLazyListState()
+    LaunchedEffect(awaitingPackage) {
+        if (awaitingPackage) listState.scrollToItem(0)
+    }
     var menu by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf(false) }
     val connectivity = if (state.reachable) stringResource(R.string.hub_network) else stringResource(R.string.hub_offline_banner)
@@ -111,11 +125,13 @@ fun SetAssemblyScreen(
         }
 
         LazyColumn(
-            Modifier.weight(1f),
+            Modifier.fillMaxWidth(),
+            state = listState,
             contentPadding = PaddingValues(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp2),
             verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2),
         ) {
-            item { Text(shift.productName ?: shift.productId, style = type.strong, color = colors.fg1) }
+            item { Text(shift.productName ?: shift.productId, style = type.title, color = colors.fg1) }
+            if (awaitingPackage) item { PackageScanPrompt() }
             if (!state.reachable) item {
                 Banner(if (assembly.counts.queued > 0) stringResource(R.string.set_offline_queue, assembly.counts.queued) else connectivity,
                     Tone.Warn, Icons.Outlined.WifiOff)
@@ -123,7 +139,6 @@ fun SetAssemblyScreen(
             if (assembly.counts.conflicts > 0) item {
                 Banner(stringResource(R.string.set_conflicts, assembly.counts.conflicts), Tone.Err, Icons.Outlined.ErrorOutline)
             }
-            val feedback = assembly.feedback
             if (feedback == SetScanStatus.CLOSED) item {
                 Banner(
                     stringResource(if (state.reachable) R.string.set_saved else R.string.set_saved_offline),
@@ -141,15 +156,19 @@ fun SetAssemblyScreen(
                 }
                 Banner(label, Tone.Warn, Icons.Outlined.ErrorOutline)
             }
-            if (remaining == 0) item {
-                Banner(stringResource(R.string.set_items_ready), Tone.Ok, Icons.Outlined.CheckCircle)
+            if (!awaitingPackage) item {
+                Banner(stringResource(R.string.set_scan_items), Tone.Neutral, Icons.Outlined.QrCodeScanner)
             }
             item {
-                Row(Modifier.fillMaxWidth().padding(vertical = MarkiroSizes.sp2), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = MarkiroSizes.sp1),
+                    horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     val title = if (feedback == SetScanStatus.CLOSED) R.string.set_next else R.string.set_contents
                     Text(stringResource(title), Modifier.weight(1f), style = type.strong, color = colors.fg1)
-                    Text(stringResource(R.string.set_fraction, parsed.size, expected), style = type.strong,
-                        color = if (remaining == 0) colors.okFg else colors.fg1)
+                    Text(stringResource(R.string.set_fraction, parsed.size, expected), style = type.code,
+                        color = if (awaitingPackage) colors.okFg else colors.fg1)
                 }
             }
             items(recipe, key = { it.gtin14 }) { item ->
@@ -157,7 +176,7 @@ fun SetAssemblyScreen(
                 val complete = filled == item.quantity
                 val color = if (complete) colors.okFg else colors.fg1
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(MarkiroSizes.radiusCard))
+                    Modifier.fillMaxWidth().heightIn(min = MarkiroSizes.controlRow).clip(RoundedCornerShape(MarkiroSizes.radius))
                         .background(colors.surfaceCard).padding(horizontal = MarkiroSizes.sp3, vertical = MarkiroSizes.sp2),
                     horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2),
                     verticalAlignment = Alignment.CenterVertically,
@@ -171,28 +190,24 @@ fun SetAssemblyScreen(
                         }
                         Text(hint, style = type.caption, color = if (complete) colors.okFg else colors.fg2)
                     }
-                    Text(stringResource(R.string.set_fraction, filled, item.quantity), style = type.strong, color = color)
+                    Text(stringResource(R.string.set_fraction, filled, item.quantity), style = type.code, color = color)
                 }
             }
             item {
-                Banner(
-                    stringResource(if (remaining == 0) R.string.set_scan_package else R.string.set_scan_items),
-                    if (remaining == 0) Tone.Ok else Tone.Neutral,
-                    Icons.Outlined.QrCodeScanner,
-                )
-            }
-        }
-        Column(Modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp3)) {
-            HorizontalDivider(color = colors.line)
-            FlowRow(
-                Modifier.fillMaxWidth().padding(top = MarkiroSizes.sp2),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column {
-                    Text(stringResource(R.string.set_shift_total), style = type.caption, color = colors.fg2)
-                    Text(state.total.toString(), style = type.title, color = colors.fg1)
+                Column(Modifier.fillMaxWidth().padding(top = MarkiroSizes.sp1)) {
+                    HorizontalDivider(color = colors.line)
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = MarkiroSizes.sp2),
+                        horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(R.string.set_shift_total), Modifier.weight(1f), style = type.body, color = colors.fg2)
+                        Text(state.total.toString(), style = type.code, color = colors.fg1)
+                    }
+                    if (state.reachable && assembly.counts.queued > 0) {
+                        Text(queue, style = type.caption, color = colors.warnFg)
+                    }
                 }
-                if (assembly.counts.queued > 0) Text(queue, style = type.caption, color = colors.warnFg)
             }
         }
     }
@@ -216,5 +231,38 @@ fun SetAssemblyScreen(
             },
             confirmButton = { TextButton(onClick = { removing = false }) { Text(stringResource(R.string.common_cancel)) } },
         )
+    }
+}
+
+@Composable
+private fun PackageScanPrompt() {
+    val colors = MarkiroTheme.colors
+    val type = MarkiroTheme.type
+    val shape = RoundedCornerShape(MarkiroSizes.radiusCard)
+    Row(
+        Modifier.fillMaxWidth()
+            .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }
+            .clip(shape)
+            .background(colors.okBg)
+            .border(1.dp, colors.okBorder, shape)
+            .padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp5),
+        horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(MarkiroSizes.controlPrimary).clip(RoundedCornerShape(MarkiroSizes.radius)).background(colors.okSolid),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Outlined.QrCodeScanner,
+                contentDescription = null,
+                tint = colors.fgOnOk,
+                modifier = Modifier.size(MarkiroSizes.sp6 + MarkiroSizes.sp3).testTag("set-package-scan-icon"),
+            )
+        }
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(R.string.set_scan_package), style = type.title, color = colors.okFg)
+            Text(stringResource(R.string.set_scan_package_hint), style = type.body, color = colors.fg1)
+        }
     }
 }

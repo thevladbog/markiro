@@ -428,6 +428,7 @@
     <string name="work_close_box_early">Закрыть короб досрочно (%1$d)</string>
     <string name="work_close_box_full">Закрыть короб (%1$d)</string>
     <string name="work_box_full">КОРОБ ПОЛОН</string>
+    <string name="work_mark_in_set">Марка входит в набор</string>
     <!-- Aggregation: pallets (06d) -->
     <string name="pallet_strip">%1$d / %2$d коробов</string>
     <string name="work_close_pallet_early">Закрыть палет досрочно</string>
@@ -1081,13 +1082,13 @@
     <string name="set_wrong_product">Товара нет в составе набора</string>
     <string name="set_invalid">Сканируйте Data Matrix маркировки</string>
     <string name="set_too_large">Набор не сохранился. Обратитесь в офис</string>
-    <string name="set_items_ready">Все вложения отсканированы</string>
     <string name="set_next">Следующий набор</string>
     <string name="set_fraction">%1$d / %2$d</string>
     <string name="set_item_done">Вложено</string>
     <string name="set_item_waiting">Ожидает скана</string>
     <string name="set_item_remaining">Осталось %1$d</string>
-    <string name="set_scan_package">Сканируйте Data Matrix на упаковке набора</string>
+    <string name="set_scan_package">Отсканируйте код набора</string>
+    <string name="set_scan_package_hint">Data Matrix на упаковке</string>
     <string name="set_scan_items">Сканируйте вложения</string>
     <string name="set_shift_total">Собрано за смену</string>
     <string name="set_finish_before_close">Завершите текущий набор или уберите отсканированные вложения.</string>

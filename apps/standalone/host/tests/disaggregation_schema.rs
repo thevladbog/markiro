@@ -3,10 +3,58 @@
 
 mod support;
 
+use sqlx::migrate::Migrator;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, SqliteConnection};
 use support::app::{admin, TestApp};
 use support::disaggregation::{day, pallet_day};
+
+#[tokio::test]
+async fn the_set_migration_preserves_sscc_lines_and_their_rowids() {
+    use markiro_host::db::MIGRATOR;
+
+    let old = Migrator {
+        migrations: MIGRATOR
+            .iter()
+            .filter(|m| m.version <= 62)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into(),
+        ..Migrator::DEFAULT
+    };
+    let mut conn = SqliteConnectOptions::new()
+        .filename(":memory:")
+        .foreign_keys(true)
+        .connect()
+        .await
+        .unwrap();
+    old.run(&mut conn).await.unwrap();
+    sqlx::raw_sql(
+        "INSERT INTO office_users (id, login, name, role, password_phc, created_at, rev)
+         VALUES ('u', 'admin', 'Автор', 'admin', 'test', 'at', 1);
+         INSERT INTO disaggregation_documents (id, seq, doc_no, status, source, created_by, created_at, updated_at, rev)
+         VALUES ('d', 1, 'DSG-26-0001', 'draft', 'manual', 'u', 'at', 'at', 1);
+         INSERT INTO disaggregation_document_lines (rowid, id, document_id, position, sscc_input, sscc, status, validated_at, created_at)
+         VALUES (51, 'l', 'd', 1, '046006820000000013', '046006820000000013', 'not_found', 'at', 'at');",
+    )
+    .execute(&mut conn)
+    .await
+    .unwrap();
+    MIGRATOR.run(&mut conn).await.unwrap();
+
+    let saved: (i64, String, Option<String>) = sqlx::query_as(
+        "SELECT rowid, sscc, set_code FROM disaggregation_document_lines WHERE id = 'l'",
+    )
+    .fetch_one(&mut conn)
+    .await
+    .unwrap();
+    assert_eq!(saved, (51, "046006820000000013".into(), None));
+    assert!(sqlx::query("PRAGMA foreign_key_check")
+        .fetch_all(&mut conn)
+        .await
+        .unwrap()
+        .is_empty());
+}
 
 #[tokio::test]
 async fn the_migration_seeds_five_reasons_and_a_zero_counter() {

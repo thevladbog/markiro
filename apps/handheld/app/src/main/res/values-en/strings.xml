@@ -414,6 +414,7 @@
     <string name="work_close_box_early">Close the box early (%1$d)</string>
     <string name="work_close_box_full">Close the box (%1$d)</string>
     <string name="work_box_full">BOX FULL</string>
+    <string name="work_mark_in_set">Marking code belongs to a set</string>
     <!-- Aggregation: pallets (06d) -->
     <string name="pallet_strip">%1$d / %2$d boxes</string>
     <string name="work_close_pallet_early">Close the pallet early</string>
@@ -1051,13 +1052,13 @@
     <string name="set_wrong_product">This product is outside the set recipe</string>
     <string name="set_invalid">Scan the marking Data Matrix</string>
     <string name="set_too_large">Set could not be saved. Contact the office.</string>
-    <string name="set_items_ready">All items scanned</string>
     <string name="set_next">Next set</string>
     <string name="set_fraction">%1$d / %2$d</string>
     <string name="set_item_done">Complete</string>
     <string name="set_item_waiting">Waiting for scan</string>
     <string name="set_item_remaining">Remaining: %1$d</string>
-    <string name="set_scan_package">Scan the Data Matrix on the set packaging</string>
+    <string name="set_scan_package">Scan the set code</string>
+    <string name="set_scan_package_hint">Data Matrix on the package</string>
     <string name="set_scan_items">Scan the items</string>
     <string name="set_shift_total">Assembled this shift</string>
     <string name="set_finish_before_close">Finish the current set or remove its scanned items.</string>

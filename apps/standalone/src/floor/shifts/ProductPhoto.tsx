@@ -14,13 +14,17 @@ import {
  * again whenever a photo pass stored or dropped one; `null` while it holds
  * none or the read fails.
  */
-export function useStoredProductPhoto(local: LocalExecutor, productId: string): StoredPhoto | null {
+export function useStoredProductPhoto(
+  local: LocalExecutor,
+  product: string,
+  by: "id" | "gtin" = "id",
+): StoredPhoto | null {
   const [photo, setPhoto] = useState<StoredPhoto | null>(null);
   const [version, setVersion] = useState(0);
   useEffect(() => onProductPhotosChanged(() => setVersion((count) => count + 1)), []);
   useEffect(() => {
     let cancelled = false;
-    readProductPhoto(local, productId).then(
+    readProductPhoto(local, product, by).then(
       (next) => {
         if (!cancelled) setPhoto(next);
       },
@@ -31,7 +35,7 @@ export function useStoredProductPhoto(local: LocalExecutor, productId: string): 
     return () => {
       cancelled = true;
     };
-  }, [local, productId, version]);
+  }, [local, product, by, version]);
   return photo;
 }
 

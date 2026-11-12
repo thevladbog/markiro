@@ -5,8 +5,8 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use http_body_util::BodyExt;
 use markiro_host::auth::{AskingDevice, AuthDevice};
-use markiro_host::error::ApiPath;
-use markiro_host::routes::codes::check_code;
+use markiro_host::error::{ApiPath, ApiQuery};
+use markiro_host::routes::codes::{check_code, CodeCheckQuery};
 use markiro_proto::DeviceKind;
 use serde_json::{json, Value};
 use support::app::{
@@ -195,6 +195,7 @@ async fn a_check_never_waits_for_a_batch_being_written() {
                 key_hash: None,
             }),
             ApiPath(code_hash(1)),
+            ApiQuery(CodeCheckQuery::default()),
         ),
     )
     .await

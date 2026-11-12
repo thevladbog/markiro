@@ -14,13 +14,12 @@ import { actFolder, openInBrowser, paint } from "../forms/print-form.js";
 import { storeForm } from "../forms/store-form.js";
 import { prepareForm } from "../forms/render-form.js";
 import { readFormLogo } from "../branding.js";
-import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { useOfficeSession } from "../office-session.js";
 import { LoadError, PageLoading } from "../page-state.js";
+import { useDisaggregationReport, type DisaggregationReportSource } from "./report-source.js";
 
 export interface DisaggregationActDialogProps {
-  documentId: string;
-  docNo: string;
+  source: DisaggregationReportSource;
   /** `formTimeZone(org)`: the act's times are the organization's. */
   timeZone: string;
   onClose: () => void;
@@ -47,8 +46,7 @@ const VARIANTS: readonly DisaggregationReportVariant[] = ["boxes", "full"];
  * press before anything is printed or saved. Every office role prints.
  */
 export function DisaggregationActDialog({
-  documentId,
-  docNo,
+  source,
   timeZone,
   onClose,
 }: DisaggregationActDialogProps) {
@@ -71,15 +69,15 @@ export function DisaggregationActDialog({
     };
   }, []);
 
-  const rows = useOfficeQuery(officeKeys.disaggregationReport(documentId, variant), (api, token) =>
-    api.getDisaggregationReportRows(token, documentId, variant),
-  );
+  const rows = useDisaggregationReport(source, variant);
+  const shift = source.scope === "shift";
   const busy = stage !== null;
   // Not the answer of an earlier opening: it is read again, and until it is (our own
   // press reads too, and keeps the buttons where they are) nothing is offered.
   const reading = rows.isPending || (rows.isFetching && !busy);
   const failed = !reading && rows.isError;
-  const drawable = !reading && !failed;
+  const empty = shift && rows.data?.lines.length === 0;
+  const drawable = !reading && !failed && !empty;
 
   function failureText(error: unknown, at: Stage | null): string {
     if (error instanceof OfficeFilesError) return t(`office.forms.files.${error.code}`);
@@ -100,7 +98,8 @@ export function DisaggregationActDialog({
     setHostCopy(null);
     try {
       const answer = await rows.refetch();
-      if (answer.isError || answer.data === undefined) return;
+      if (answer.isError || answer.data === undefined || (shift && answer.data.lines.length === 0))
+        return;
       // A dialog closed while the rows were read is found out after the paint, before any draw.
       at = "drawing";
       setStage(at);
@@ -109,16 +108,24 @@ export function DisaggregationActDialog({
       // The organization's own logo, when the license allows custom branding; else Markiro's.
       const logo = await readFormLogo(queryClient, session.api, session.call);
       if (!alive.current) return;
-      const form = prepareForm({ kind: "act", rows: answer.data, timeZone, logo });
+      const form = prepareForm({
+        kind: "act",
+        rows: answer.data,
+        timeZone,
+        logo,
+        ...(shift ? { scope: "shift" } : {}),
+      });
       if (form === null) return;
       const html = form.draw();
       // The host keeps the exact HTML first, printed or opened; a host that cannot never stops the act.
-      const kept = await storeForm(
-        session,
-        { kind: form.kind, html, fileName: form.fileName },
-        { type: "disaggregation_document", id: documentId },
-      );
-      refreshFiles();
+      const kept = shift
+        ? null
+        : await storeForm(
+            session,
+            { kind: form.kind, html, fileName: form.fileName },
+            { type: "disaggregation_document", id: source.id },
+          );
+      if (!shift) refreshFiles();
       if (alive.current) setHostCopy(kept === null ? null : t(kept));
       if (how === "print") {
         try {
@@ -136,7 +143,7 @@ export function DisaggregationActDialog({
       setStage(at);
       await paint();
       if (!alive.current) return;
-      const folder = actFolder(docNo, variant, new Date().toISOString(), timeZone);
+      const folder = actFolder(source.number, variant, new Date().toISOString(), timeZone);
       const saved = await openInBrowser(
         files,
         { kind: form.kind, html, fileName: form.fileName },
@@ -166,7 +173,11 @@ export function DisaggregationActDialog({
   return (
     <Modal
       open
-      title={t("office.disaggregation.act.title", { docNo })}
+      title={
+        shift
+          ? t("office.shifts.totals.disaggregation.actTitle", { number: source.number })
+          : t("office.disaggregation.act.title", { docNo: source.number })
+      }
       onClose={onClose}
       closeLabel={t("office.common.close")}
       footer={
@@ -206,6 +217,8 @@ export function DisaggregationActDialog({
         <PageLoading />
       ) : failed ? (
         <LoadError error={rows.error} onRetry={() => void rows.refetch()} />
+      ) : empty ? (
+        <Alert tone="info">{t("office.shifts.totals.disaggregation.empty")}</Alert>
       ) : (
         <p className="office-note">{t("office.disaggregation.act.hint")}</p>
       )}

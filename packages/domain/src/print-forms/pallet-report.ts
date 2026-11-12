@@ -182,7 +182,7 @@ export function renderPalletReportHtml(data: PalletReportData, timeZone = "UTC")
     tableHeadHtml: tableHead(),
     units: contentsUnits(data, timeZone),
     finalBlocksHtml: finalBlocks(data),
-    footerSscc: data.sscc,
+    footerBarcodeSvg: data.sscc ? ssccBarcode(data.sscc) : null,
     footerSubject: "Палет",
   });
 }

@@ -10,12 +10,27 @@ export const MAX_IMPORT_LINES = 10_000;
 /** The cloud's multer limit of an imported file: 1 MiB. */
 export const MAX_IMPORT_BYTES = 1024 * 1024;
 
-/** SSCCs pasted or scanned into the text field: the cloud page's `splitSsccInput`. */
-export function parsePastedSsccs(raw: string): string[] {
-  return raw
-    .split(/[\s;,]+/u)
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0);
+const KM_PREFIX = /^(?:\]d2[\t ]*)?01\d{14}21/u;
+
+function splitCodes(raw: string, ssccSeparators: RegExp): string[] {
+  return raw.split(/[\r\n]+/u).flatMap((line) => {
+    let start = 0;
+    let end = line.length;
+    while (line[start] === " " || line[start] === "\t") start++;
+    while (end > start && (line[end - 1] === " " || line[end - 1] === "\t")) end--;
+    const code = line.slice(start, end);
+    // Commas and semicolons can be part of a set's serial or crypto tail.
+    if (KM_PREFIX.test(code)) return [code];
+    return line
+      .split(ssccSeparators)
+      .map((token) => token.trim())
+      .filter(Boolean);
+  });
+}
+
+/** Pasted SSCCs can use legacy separators; a set code occupies its own line. */
+export function parsePastedCodes(raw: string): string[] {
+  return splitCodes(raw, /[\s;,]+/u);
 }
 
 export type ImportRefusal = "file_too_large" | "file_empty" | "too_many_lines";
@@ -25,11 +40,12 @@ export type ImportParse = { ok: true; tokens: string[] } | { ok: false; refusal:
  * A file's text: the cloud API's `parseSsccImport` (`\r\n;,`, trimmed, empties
  * dropped). Duplicates stay: the document shows them as `duplicate` lines.
  */
-export function parseSsccImport(text: string): ImportParse {
-  const tokens = text
-    .split(/[\r\n;,]+/u)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 0);
+export function parseCodeImport(text: string): ImportParse {
+  const unquoted = text.replace(/^"((?:[^"\r\n]|"")*)"$/gmu, (row, field: string) => {
+    const code = field.replaceAll('""', '"');
+    return KM_PREFIX.test(code) ? code : row;
+  });
+  const tokens = splitCodes(unquoted, /[;,]+/u);
   if (tokens.length > MAX_IMPORT_LINES) return { ok: false, refusal: "too_many_lines" };
   if (tokens.length === 0) return { ok: false, refusal: "file_empty" };
   return { ok: true, tokens };
@@ -40,10 +56,10 @@ export function parseSsccImport(text: string): ImportParse {
  * The BOM Excel writes is dropped here, which the cloud does not do (its first
  * token then carries an invisible U+FEFF and is `not_found`).
  */
-export async function readSsccImport(file: Pick<File, "size" | "text">): Promise<ImportParse> {
+export async function readCodeImport(file: Pick<File, "size" | "text">): Promise<ImportParse> {
   if (file.size > MAX_IMPORT_BYTES) return { ok: false, refusal: "file_too_large" };
   const text = await file.text();
-  return parseSsccImport(text.replace(/^\uFEFF/u, ""));
+  return parseCodeImport(text.replace(/^\uFEFF/u, ""));
 }
 
 /** The wire's lines of tokens: the input as typed and the SSCC the domain reads (plan ДЗГ, Р12). */

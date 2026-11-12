@@ -275,7 +275,11 @@ export {
   InventoryDocumentGenerationError,
   isParticipantInn,
 } from "./inventory/index.js";
-export { GismtDisaggregationError, renderGismtDisaggregationXml } from "./gismt-disaggregation.js";
+export {
+  GismtDisaggregationError,
+  renderGismtDisaggregationJson,
+  renderGismtDisaggregationXml,
+} from "./gismt-disaggregation.js";
 export type {
   GismtDisaggregationErrorCode,
   GismtDisaggregationInput,
@@ -418,6 +422,8 @@ export * from "./offline-grants/budgets.js";
 export type { ReportCode, ReportOrg } from "./print-forms/contents-report.js";
 export { renderBoxReportHtml } from "./print-forms/box-report.js";
 export type { BoxReportCode, BoxReportData } from "./print-forms/box-report.js";
+export { renderSetReportHtml } from "./print-forms/set-report.js";
+export type { SetReportCode, SetReportData } from "./print-forms/set-report.js";
 export { renderPalletReportHtml } from "./print-forms/pallet-report.js";
 export type { PalletReportBox, PalletReportData } from "./print-forms/pallet-report.js";
 export {
