@@ -142,6 +142,8 @@ test("every fresh catalog workflow builds the domain dependency before contracts
     "station-stable-release.yml",
     "station-release-reseed.yml",
     "handheld-release.yml",
+    "handheld-stable-release.yml",
+    "standalone-stable-release.yml",
   ]) {
     const workflow = load(readFileSync(`.github/workflows/${file}`, "utf8"));
     for (const [name, job] of Object.entries(workflow.jobs)) {

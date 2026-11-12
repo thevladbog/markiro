@@ -113,6 +113,41 @@ gh secret set RELEASES_S3_SECRET_ACCESS_KEY --env station-release < "$secret_key
 Старые `YANDEX_STATION_RELEASE_*` не используются новым publisher. Их удаление
 не заменяет проверку нового хранилища и не должно затрагивать независимые копии.
 
+### Издатели stable с защищённых тегов
+
+Один раз после слияния и CI закрепите проверенный коммит издателей в тегах
+`handheld-publisher-v1` и `standalone-publisher-v1`. В GitHub настройте активный
+[tag ruleset](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository)
+с запретом изменения и удаления тегов издателей без исключений. Создание
+новой версии тега должно быть доступно только владельцу. Проверьте точный
+коммит каждого тега перед добавлением секретов.
+
+| Тег                       | Workflow                        | Окружение                     |
+| ------------------------- | ------------------------------- | ----------------------------- |
+| `handheld-publisher-v1`   | `handheld-stable-release.yml`   | `handheld-stable-publisher`   |
+| `standalone-publisher-v1` | `standalone-stable-release.yml` | `standalone-stable-publisher` |
+
+Для каждого окружения выберите **Selected branches and tags** и разрешите ровно
+один тег из таблицы. Ручной ревьюер для этих двух окружений не требуется.
+Добавьте `RELEASES_S3_BUCKET` и ключ загрузки с `PutObject` только на
+`handheld/_uploads/*` или `standalone/_uploads/*` соответственно. Для ТСД также
+добавьте четыре секрета действующего Android-ключа из
+[инструкции выпуска](handheld-release.md). Подпись Автонома выполняется локально.
+
+В конфигурации каталога добавьте по записи `mode: "pinned-tag"` в
+`RELEASE_CATALOG_PUBLISHERS_JSON`. Укажите соответствующие `product`, `environment`,
+OIDC `subject` и полные `workflowRef` и `jobWorkflowRef` вида
+`thevladbog/markiro/.github/workflows/<файл>@refs/tags/<тег>`. Для `workflowSha`
+и `jobWorkflowSha` задайте один и тот же полный SHA коммита тега. Применяйте
+конфигурацию через штатное развёртывание платформы. Оба издателя могут
+публиковать только в `stable` и двигать указатель вперёд. SHA приложения
+проверяется для каждого артефакта независимо от SHA тега.
+
+При изменении самого издателя обновите имя тега в workflow и команде запуска.
+Закрепите новый тег, внесите его в правила окружения и замените запись допуска.
+При включении проверьте GitHub ruleset, правила окружения, допуск каталога и
+чтение опубликованного артефакта.
+
 ## История и перенос
 
 Следовать [импорту и recovery](release-catalog-recovery.md). Полный текущий GitHub

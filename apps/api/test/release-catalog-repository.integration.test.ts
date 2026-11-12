@@ -30,16 +30,16 @@ describe.skipIf(!url)("catalog transactional repository", () => {
     await admin.end();
   });
   let version = 100;
-  async function setup() {
+  async function setup(channel: "stable" | "beta" = "stable") {
     const v = `1.0.${version++}`;
     await pool.query("UPDATE release_catalog_epochs SET enabled=false");
     const epoch = randomUUID();
     await pool.query(
-      "INSERT INTO release_catalog_epochs(id,product,channel,enabled) VALUES($1,'standalone','stable',true)",
-      [epoch],
+      "INSERT INTO release_catalog_epochs(id,product,channel,enabled) VALUES($1,'standalone',$2,true)",
+      [epoch, channel],
     );
     const request = {
-      identity: { product: "standalone", channel: "stable", version: v },
+      identity: { product: "standalone", channel, version: v },
       sourceSha: "b".repeat(40),
       files: [
         {
@@ -103,6 +103,28 @@ describe.skipIf(!url)("catalog transactional repository", () => {
     ).rejects.toMatchObject({ code: "conflict" });
     await expect(repo.getIntent({ fingerprint: "f".repeat(64) }, a.id)).rejects.toMatchObject({
       code: "forbidden",
+    });
+  });
+  it("keeps the publisher token available when an intent is outside its stable scope", async () => {
+    const beta = await setup("beta");
+    const betaIntent = await repo.reserveIntent(principal, randomUUID(), beta.request);
+    const caller = { ...principal, tokenHash: "7".repeat(64) };
+    const scope = { product: "standalone", channel: "stable" } as const;
+    await expect(repo.getIntent(caller, betaIntent.id, scope)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    expect(
+      (
+        await pool.query("SELECT 1 FROM release_catalog_oidc_bindings WHERE token_hash=$1", [
+          caller.tokenHash,
+        ])
+      ).rows,
+    ).toEqual([]);
+
+    const stable = await setup();
+    const stableIntent = await repo.reserveIntent(principal, randomUUID(), stable.request);
+    await expect(repo.getIntent(principal, stableIntent.id, scope)).resolves.toMatchObject({
+      id: stableIntent.id,
     });
   });
   it("commits a complete binding plus audit once, and resolves a lost reply without rebinding", async () => {

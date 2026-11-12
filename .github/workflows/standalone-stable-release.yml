@@ -1,0 +1,70 @@
+name: Publish signed Autonom stable release
+on:
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: Successful main CI run with the Windows installer
+        required: true
+        type: string
+      artifact_id:
+        description: Exact Windows CI artifact ID
+        required: true
+        type: string
+      update_jws:
+        description: Owner-signed compact stable update manifest from the Mac
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: standalone-stable-publisher
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/tags/standalone-publisher-v1' &&
+      github.repository == 'thevladbog/markiro' && github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner
+    environment: standalone-stable-publisher
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Install pinned publisher dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm --filter @markiro/domain build
+          pnpm --filter @markiro/platform-contracts build
+      - name: Verify CI and signature, publish and read back stable
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          ARTIFACT_ID: ${{ inputs.artifact_id }}
+          UPDATE_JWS: ${{ inputs.update_jws }}
+          RELEASES_S3_ENDPOINT: https://s3.twcstorage.ru
+          RELEASES_S3_BUCKET: ${{ vars.RELEASES_S3_BUCKET }}
+          RELEASES_S3_ACCESS_KEY_ID: ${{ secrets.RELEASES_S3_ACCESS_KEY_ID }}
+          RELEASES_S3_SECRET_ACCESS_KEY: ${{ secrets.RELEASES_S3_SECRET_ACCESS_KEY }}
+        run: node tools/standalone-release/publish-catalog.mjs
+      - name: Retain catalog publication receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: standalone-catalog-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/standalone-catalog/
+          if-no-files-found: ignore
+          retention-days: 30

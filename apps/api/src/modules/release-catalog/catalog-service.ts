@@ -9,6 +9,7 @@ import {
   publicationCommitRequestSchema,
   publicationRequestSchema,
   type PublicationRequest,
+  type ChannelSnapshot,
   type ReleaseProduct,
 } from "@markiro/platform-contracts";
 import type { PlatformAuditEvent } from "../../platform-auth/platform-audit.service";
@@ -28,6 +29,7 @@ export interface CatalogCaller {
   principal: CatalogPrincipal;
   product: Exclude<ReleaseProduct, "signer">;
   machine: boolean;
+  publisherMode?: "pinned-tag";
   expiresAt: number;
   actor: Pick<PlatformAuditEvent, "actorPlatformUserId" | "actorRole" | "requestId">;
 }
@@ -98,9 +100,12 @@ export class CatalogService {
   constructor(private readonly options: CatalogServiceOptions) {
     this.now = options.now ?? Date.now;
   }
-  private live(caller: CatalogCaller, product: string) {
+  private live(caller: CatalogCaller, scope: { product: string; channel?: string }) {
     if (
-      caller.product !== product ||
+      caller.product !== scope.product ||
+      (caller.publisherMode === "pinned-tag" &&
+        scope.channel !== undefined &&
+        scope.channel !== "stable") ||
       caller.expiresAt <= this.now() ||
       !Number.isFinite(caller.expiresAt)
     )
@@ -108,12 +113,17 @@ export class CatalogService {
   }
   private async authorize(
     caller: CatalogCaller,
-    product: string,
+    scope: { product: string; channel?: string },
     action: "read" | "publish" | "channel",
   ) {
-    this.live(caller, product);
+    this.live(caller, scope);
     await this.options.authorize(caller, action);
-    this.live(caller, product);
+    this.live(caller, scope);
+  }
+  private intentScope(caller: CatalogCaller): ChannelSnapshot["identity"] | undefined {
+    return caller.publisherMode === "pinned-tag"
+      ? { product: caller.product, channel: "stable" }
+      : undefined;
   }
   private intentView(intent: Awaited<ReturnType<CatalogRepository["getIntent"]>>) {
     return catalogIntentViewSchema.parse({
@@ -129,25 +139,29 @@ export class CatalogService {
   }
   async createIntent(caller: CatalogCaller, idempotencyKey: unknown, input: unknown) {
     const request = parse(publicationRequestSchema, input);
-    await this.authorize(caller, request.identity.product, "publish");
+    await this.authorize(caller, request.identity, "publish");
     return this.intentView(
       await this.options.repository.reserveIntent(caller.principal, idempotencyKey, request),
     );
   }
   async getIntent(caller: CatalogCaller, id: string) {
-    await this.authorize(caller, caller.product, "read");
-    const intent = await this.options.repository.getIntent(caller.principal, id);
-    this.live(caller, intent.product);
+    await this.authorize(caller, { product: caller.product }, "read");
+    const intent = await this.options.repository.getIntent(
+      caller.principal,
+      id,
+      this.intentScope(caller),
+    );
+    this.live(caller, intent);
     return this.intentView(intent);
   }
   async getChannel(caller: CatalogCaller, scope: unknown) {
     const identity = parse(channelSnapshotSchema.shape.identity, scope);
-    await this.authorize(caller, identity.product, "read");
+    await this.authorize(caller, identity, "read");
     return this.options.repository.readChannel(identity);
   }
   async getPublication(caller: CatalogCaller, input: unknown) {
     const identity = parse(releaseIdentitySchema, input);
-    await this.authorize(caller, identity.product, "read");
+    await this.authorize(caller, identity, "read");
     const found = await this.options.repository.publicationByIdentity(identity);
     return found ? this.result(found.publication.id) : null;
   }
@@ -224,11 +238,11 @@ export class CatalogService {
   }
   async commitIntent(caller: CatalogCaller, id: string, input: unknown) {
     const uploaded = parse(publicationCommitRequestSchema, input);
-    await this.authorize(caller, caller.product, "publish");
+    await this.authorize(caller, { product: caller.product }, "publish");
     const { repository, ledger, bucket } = this.options;
-    const intent = await repository.getIntent(caller.principal, id),
+    const intent = await repository.getIntent(caller.principal, id, this.intentScope(caller)),
       request = intent.request;
-    this.live(caller, intent.product);
+    this.live(caller, intent);
     if (
       uploaded.files.length !== request.files.length ||
       request.files.some((f) => !uploaded.files.some((u) => u.name === f.name))
@@ -285,7 +299,7 @@ export class CatalogService {
       sourceSha: request.sourceSha,
       files: objects,
     });
-    await this.authorize(caller, intent.product, "publish");
+    await this.authorize(caller, intent, "publish");
     const result = await repository.commitPublication(
       caller.principal,
       id,
@@ -294,7 +308,7 @@ export class CatalogService {
       receipt,
       caller.actor,
       (registered) => {
-        this.live(caller, intent.product);
+        this.live(caller, intent);
         for (const previous of registered) {
           const old = metadata(previous);
           if (
@@ -321,7 +335,9 @@ export class CatalogService {
   async changeChannel(caller: CatalogCaller, scope: unknown, input: unknown) {
     const identity = parse(channelSnapshotSchema.shape.identity, scope),
       change = parse(channelChangeRequestSchema, input);
-    await this.authorize(caller, identity.product, "channel");
+    await this.authorize(caller, identity, "channel");
+    if (caller.publisherMode === "pinned-tag" && change.kind !== "forward")
+      throw new CatalogFault("forbidden");
     const { repository, ledger } = this.options;
     const epoch = await repository.activeEpoch(identity),
       target = await repository.publication(change.targetPublicationId);
@@ -369,7 +385,7 @@ export class CatalogService {
     if (semantic(accepted) !== semantic(metadata(target.publication)))
       throw new CatalogFault("conflict");
     const validateTransition = (next: PublicationRow, old: PublicationRow | null) => {
-      this.live(caller, identity.product);
+      this.live(caller, identity);
       const n = metadata(next),
         p = old ? metadata(old) : null;
       if (identity.product === "handheld") {
@@ -406,7 +422,7 @@ export class CatalogService {
         contentType: "application/json",
       },
     });
-    await this.authorize(caller, identity.product, "channel");
+    await this.authorize(caller, identity, "channel");
     const result = await repository.commitChannelChange(
       { ...change, identity, epoch, pointer: accepted.pointer },
       receipt,

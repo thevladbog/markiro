@@ -1,0 +1,233 @@
+name: Publish handheld stable from pinned tooling
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Stable version increment
+        required: true
+        type: choice
+        default: patch
+        options: [patch, minor, major]
+
+permissions: {}
+
+# Share the lock with the older workflow while it can still publish.
+concurrency:
+  group: handheld-release
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    if: >-
+      github.repository == 'thevladbog/markiro' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/tags/handheld-publisher-v1' &&
+      github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      version_name: ${{ steps.source.outputs.version_name }}
+      version_code: ${{ steps.source.outputs.version_code }}
+      ci_run_id: ${{ steps.source.outputs.ci_run_id }}
+      ci_run_attempt: ${{ steps.source.outputs.ci_run_attempt }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Freeze main source, require its CI, and resolve the stable version
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUMP: ${{ inputs.bump }}
+        run: node tools/handheld-release/stable-release.mjs authorize
+
+  build:
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.authorize.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+        with:
+          cache-read-only: true
+      - name: Test and build the exact source without signing credentials
+        shell: bash
+        working-directory: apps/handheld
+        env:
+          SOURCE_SHA: ${{ needs.authorize.outputs.source_sha }}
+          VERSION_NAME: ${{ needs.authorize.outputs.version_name }}
+          VERSION_CODE: ${{ needs.authorize.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease \
+            "-Pmarkiro.versionName=$VERSION_NAME" "-Pmarkiro.versionCode=$VERSION_CODE"
+          test ! -e app/build/outputs/apk/release/app-release.apk
+          mkdir "$RUNNER_TEMP/handheld-unsigned"
+          cp app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/handheld-unsigned/unsigned.apk"
+          if [[ -f CHANGELOG.md ]]; then
+            cp CHANGELOG.md "$RUNNER_TEMP/handheld-unsigned/CHANGELOG.md"
+          else
+            touch "$RUNNER_TEMP/handheld-unsigned/CHANGELOG.md"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        id: unsigned
+        with:
+          name: handheld-unsigned-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/handheld-unsigned/
+          if-no-files-found: error
+          retention-days: 7
+    outputs:
+      artifact_id: ${{ steps.unsigned.outputs.artifact-id }}
+
+  publish:
+    if: >-
+      github.repository == 'thevladbog/markiro' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/tags/handheld-publisher-v1' &&
+      github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner
+    needs: [authorize, build]
+    environment: handheld-stable-publisher
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION_NAME: ${{ needs.authorize.outputs.version_name }}
+      VERSION_CODE: ${{ needs.authorize.outputs.version_code }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install publisher dependencies from the pinned checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm --filter @markiro/domain build
+          pnpm --filter @markiro/platform-contracts build
+      - name: Require the immutable build artifact ID
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}
+        run: '[[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          digest-mismatch: error
+          path: ${{ runner.temp }}/handheld-unsigned
+      - name: Check unsigned APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$RUNNER_TEMP/handheld-unsigned/unsigned.apk"
+          sdk="$ANDROID_HOME/build-tools/35.0.0"
+          node tools/handheld-release/stable-release.mjs check-apk \
+            "$apk" "$VERSION_NAME" "$VERSION_CODE" "$sdk/aapt" \
+            "$RUNNER_TEMP/handheld-unsigned/CHANGELOG.md"
+          if "$sdk/apksigner" verify "$apk" >/dev/null 2>&1; then
+            echo "Expected an unsigned release APK." >&2
+            exit 1
+          fi
+          "$sdk/zipalign" -P 16 4 "$apk" "$RUNNER_TEMP/handheld-aligned.apk"
+      - name: Sign and verify APK
+        id: sign
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.MARKIRO_HANDHELD_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.MARKIRO_HANDHELD_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.MARKIRO_HANDHELD_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.MARKIRO_HANDHELD_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          keystore="$(mktemp "$RUNNER_TEMP/handheld-key.XXXXXX")"
+          trap 'rm -f -- "$keystore"' EXIT
+          test -n "$KEYSTORE_BASE64"
+          test -n "$STORE_PASSWORD"
+          test -n "$KEY_ALIAS"
+          test -n "$KEY_PASSWORD"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          test -s "$keystore"
+          mkdir "$RUNNER_TEMP/handheld-signed"
+          signed="$RUNNER_TEMP/handheld-signed/markiro-tsd-$VERSION_NAME.apk"
+          sdk="$ANDROID_HOME/build-tools/35.0.0"
+          "$sdk/apksigner" sign --ks "$keystore" --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:STORE_PASSWORD --key-pass env:KEY_PASSWORD --v4-signing-enabled false \
+            --out "$signed" "$RUNNER_TEMP/handheld-aligned.apk"
+          certificate_sha256="$(node tools/handheld-release/stable-release.mjs check-certificate "$sdk/apksigner" "$signed")"
+          node tools/handheld-release/stable-release.mjs check-apk \
+            "$signed" "$VERSION_NAME" "$VERSION_CODE" "$sdk/aapt" \
+            "$RUNNER_TEMP/handheld-unsigned/CHANGELOG.md"
+          printf 'certificate_sha256=%s\n' "$certificate_sha256" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: markiro-tsd-${{ needs.authorize.outputs.version_name }}
+          path: ${{ runner.temp }}/handheld-signed/markiro-tsd-${{ needs.authorize.outputs.version_name }}.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish to stable
+        shell: bash
+        env:
+          HANDHELD_SOURCE_SHA: ${{ needs.authorize.outputs.source_sha }}
+          CI_RUN_ID: ${{ needs.authorize.outputs.ci_run_id }}
+          CI_RUN_ATTEMPT: ${{ needs.authorize.outputs.ci_run_attempt }}
+          CERTIFICATE_SHA256: ${{ steps.sign.outputs.certificate_sha256 }}
+          RELEASES_S3_ENDPOINT: https://s3.twcstorage.ru
+          RELEASES_S3_BUCKET: ${{ vars.RELEASES_S3_BUCKET }}
+          RELEASES_S3_ACCESS_KEY_ID: ${{ secrets.RELEASES_S3_ACCESS_KEY_ID }}
+          RELEASES_S3_SECRET_ACCESS_KEY: ${{ secrets.RELEASES_S3_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          apk="$RUNNER_TEMP/handheld-signed/markiro-tsd-$VERSION_NAME.apk"
+          export HANDHELD_CHANGELOG_FILE="$RUNNER_TEMP/handheld-unsigned/CHANGELOG.md"
+          node tools/handheld-release/publish.mjs "$apk" "$VERSION_NAME" "$VERSION_CODE" stable \
+            | tee "$RUNNER_TEMP/handheld-published.txt"
+          {
+            printf '### Markiro ТСД %s (%s)\n\n' "$VERSION_NAME" "$VERSION_CODE"
+            printf -- '- Source SHA: `%s`\n- Publisher SHA: `%s`\n- CI: %s/attempts/%s\n' \
+              "$HANDHELD_SOURCE_SHA" "$GITHUB_SHA" \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" "$CI_RUN_ATTEMPT"
+            printf -- '- APK SHA-256: `%s`\n- Signing certificate SHA-256: `%s`\n\n' \
+              "$(sha256sum "$apk" | cut -d ' ' -f 1)" "$CERTIFICATE_SHA256"
+            cat "$RUNNER_TEMP/handheld-published.txt"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain catalog publication receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: handheld-catalog-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/handheld-catalog/
+          if-no-files-found: ignore
+          retention-days: 30

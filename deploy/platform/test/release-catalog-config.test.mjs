@@ -76,6 +76,53 @@ test("writer activation needs immutable publisher identity pins, not moving refs
     validateCatalogConfig({ ...env(), RELEASE_CATALOG_PUBLISHERS_JSON: JSON.stringify(p) }),
   );
 });
+test("platform accepts only matching, immutable stable publisher tag policies", () => {
+  for (const product of ["handheld", "standalone"]) {
+    const repository = "thevladbog/markiro";
+    const workflowRef = `${repository}/.github/workflows/${product}-stable-release.yml@refs/tags/${product}-publisher-v1`;
+    const environment = `${product}-stable-publisher`;
+    const workflow = {
+      mode: "pinned-tag",
+      product,
+      environment,
+      workflowRef,
+      workflowSha: "a".repeat(40),
+      subject: `repo:${repository}:environment:${environment}`,
+      jobWorkflowRef: workflowRef,
+      jobWorkflowSha: "a".repeat(40),
+    };
+    const configured = (w) => ({
+      ...env(),
+      RELEASE_CATALOG_WRITERS_ENABLED: "true",
+      RELEASE_CATALOG_PUBLISHERS_JSON: JSON.stringify({
+        repository,
+        repositoryId: "1",
+        ownerId: "2",
+        workflows: [w],
+      }),
+    });
+    assert.equal(validateCatalogConfig(configured(workflow)), true);
+    for (const patch of [
+      { mode: undefined },
+      { product: "station" },
+      { workflowRef: workflowRef.replace("thevladbog/markiro", "other/repo") },
+      { workflowRef: workflowRef.replace("v1", "v01") },
+      { environment: "release" },
+      { subject: `repo:other/repo:environment:${environment}` },
+      { jobWorkflowRef: workflowRef.replace("v1", "v2") },
+      { jobWorkflowSha: "b".repeat(40) },
+      { jobWorkflowSha: undefined },
+    ]) {
+      assert.throws(() => validateCatalogConfig(configured({ ...workflow, ...patch })));
+    }
+    const duplicate = configured(workflow);
+    const policy = JSON.parse(duplicate.RELEASE_CATALOG_PUBLISHERS_JSON);
+    const nextSha = "b".repeat(40);
+    policy.workflows.push({ ...workflow, workflowSha: nextSha, jobWorkflowSha: nextSha });
+    duplicate.RELEASE_CATALOG_PUBLISHERS_JSON = JSON.stringify(policy);
+    assert.throws(() => validateCatalogConfig(duplicate));
+  }
+});
 test("host mount proof requires exact canonical private directories owned by API uid", () => {
   const stat = {
     isDirectory: () => true,
