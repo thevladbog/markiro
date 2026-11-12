@@ -2,17 +2,23 @@ name: Publish signed Autonom stable release
 on:
   workflow_dispatch:
     inputs:
-      ci_run_id:
-        description: Successful main CI run with the Windows installer
+      mode:
+        description: Publish a release or verify stable OIDC access without publication
         required: true
+        type: choice
+        default: publish
+        options: [publish, verify]
+      ci_run_id:
+        description: Successful main CI run with the Windows installer (required for publish)
+        required: false
         type: string
       artifact_id:
-        description: Exact Windows CI artifact ID
-        required: true
+        description: Exact Windows CI artifact ID (required for publish)
+        required: false
         type: string
       update_jws:
-        description: Owner-signed compact stable update manifest from the Mac
-        required: true
+        description: Owner-signed compact stable update manifest from the Mac (required for publish)
+        required: false
         type: string
 
 permissions:
@@ -25,7 +31,8 @@ concurrency:
 jobs:
   publish:
     if: >-
-      github.event_name == 'workflow_dispatch' && github.ref == 'refs/tags/standalone-publisher-v1' &&
+      inputs.mode == 'publish' && github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/tags/standalone-publisher-v1' &&
       github.repository == 'thevladbog/markiro' && github.actor == github.repository_owner &&
       github.triggering_actor == github.repository_owner
     environment: standalone-stable-publisher
@@ -40,6 +47,12 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Require publication inputs
+        env:
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          ARTIFACT_ID: ${{ inputs.artifact_id }}
+          UPDATE_JWS: ${{ inputs.update_jws }}
+        run: 'test -n "$CI_RUN_ID" && test -n "$ARTIFACT_ID" && test -n "$UPDATE_JWS"'
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
@@ -68,3 +81,33 @@ jobs:
           path: ${{ runner.temp }}/standalone-catalog/
           if-no-files-found: ignore
           retention-days: 30
+
+  verify:
+    if: >-
+      inputs.mode == 'verify' && github.repository == 'thevladbog/markiro' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/tags/standalone-publisher-v1' &&
+      github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner
+    environment: standalone-stable-publisher
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Install pinned publisher dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm --filter @markiro/domain build
+          pnpm --filter @markiro/platform-contracts build
+      - name: Verify stable catalog access
+        run: node tools/release-catalog/verify-stable.mjs standalone

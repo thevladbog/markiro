@@ -22,18 +22,53 @@ const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 test("stable workflow accepts only owner-signed public metadata on the fixed publisher tag", async () => {
   const workflow = load(await readFile(".github/workflows/standalone-stable-release.yml", "utf8"));
   assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
-  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), [
-    "ci_run_id",
-    "artifact_id",
-    "update_jws",
-  ]);
+  const inputs = workflow.on.workflow_dispatch.inputs;
+  assert.deepEqual(Object.keys(inputs), ["mode", "ci_run_id", "artifact_id", "update_jws"]);
+  assert.equal(inputs.mode.default, "publish");
+  assert.deepEqual(inputs.mode.options, ["publish", "verify"]);
+  for (const key of ["ci_run_id", "artifact_id", "update_jws"]) {
+    assert.equal(inputs[key].required, false);
+  }
   const job = workflow.jobs.publish;
+  assert.match(job.if, /inputs\.mode == 'publish'/u);
   assert.match(job.if, /github\.ref == 'refs\/tags\/standalone-publisher-v1'/u);
   assert.match(job.if, /github\.actor == github\.repository_owner/u);
   assert.match(job.if, /github\.triggering_actor == github\.repository_owner/u);
   assert.equal(job.environment, "standalone-stable-publisher");
   assert.deepEqual(job.permissions, { actions: "read", contents: "read", "id-token": "write" });
   assert.deepEqual(job.steps[0].with, { ref: "${{ github.sha }}", "persist-credentials": false });
+  const validate = job.steps.find((step) => step.name === "Require publication inputs");
+  assert.ok(validate);
+  assert.deepEqual(validate.env, {
+    CI_RUN_ID: "${{ inputs.ci_run_id }}",
+    ARTIFACT_ID: "${{ inputs.artifact_id }}",
+    UPDATE_JWS: "${{ inputs.update_jws }}",
+  });
+  assert.equal(
+    validate.run,
+    'test -n "$CI_RUN_ID" && test -n "$ARTIFACT_ID" && test -n "$UPDATE_JWS"',
+  );
+  assert.ok(
+    job.steps.indexOf(validate) <
+      job.steps.findIndex((step) => step.env?.RELEASES_S3_ACCESS_KEY_ID),
+  );
+  const { verify } = workflow.jobs;
+  assert.match(verify.if, /inputs\.mode == 'verify'/u);
+  assert.match(verify.if, /github\.event_name == 'workflow_dispatch'/u);
+  assert.match(verify.if, /github\.ref == 'refs\/tags\/standalone-publisher-v1'/u);
+  assert.match(verify.if, /github\.actor == github\.repository_owner/u);
+  assert.match(verify.if, /github\.triggering_actor == github\.repository_owner/u);
+  assert.equal(verify.environment, job.environment);
+  assert.deepEqual(verify.permissions, { contents: "read", "id-token": "write" });
+  assert.deepEqual(verify.steps[0].with, {
+    ref: "${{ github.sha }}",
+    "persist-credentials": false,
+  });
+  assert.doesNotMatch(
+    JSON.stringify(verify),
+    /secrets\.|RELEASES_S3_|UPDATE_JWS|upload-artifact/iu,
+  );
+  assert.equal(verify.steps.at(-1).run, "node tools/release-catalog/verify-stable.mjs standalone");
 });
 
 function ciProof() {

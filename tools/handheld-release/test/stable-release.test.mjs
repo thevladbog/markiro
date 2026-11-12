@@ -110,10 +110,15 @@ test("stable tag publication records product SHA independently of the publisher 
 test("the stable workflow isolates the key and OIDC from the product checkout", () => {
   const workflow = load(readFileSync(".github/workflows/handheld-stable-release.yml", "utf8"));
   assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
-  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), ["bump"]);
+  const inputs = workflow.on.workflow_dispatch.inputs;
+  assert.deepEqual(Object.keys(inputs), ["mode", "bump"]);
+  assert.equal(inputs.mode.default, "publish");
+  assert.deepEqual(inputs.mode.options, ["publish", "verify"]);
   assert.equal(workflow.concurrency.group, "handheld-release");
   assert.equal(workflow.concurrency["cancel-in-progress"], false);
-  const { authorize, build, publish } = workflow.jobs;
+  const { authorize, build, publish, verify } = workflow.jobs;
+  assert.match(authorize.if, /inputs\.mode == 'publish'/u);
+  assert.match(publish.if, /inputs\.mode == 'publish'/u);
   assert.match(authorize.if, /refs\/tags\/handheld-publisher-v1/);
   assert.match(authorize.if, /github\.actor == github\.repository_owner/);
   assert.match(authorize.if, /github\.triggering_actor == github\.repository_owner/);
@@ -151,6 +156,19 @@ test("the stable workflow isolates the key and OIDC from the product checkout", 
     "${{ needs.authorize.outputs.source_sha }}",
   );
   assert.match(publish.steps[publishIndex].run, /publish\.mjs[\s\S]*stable/);
+  assert.match(verify.if, /inputs\.mode == 'verify'/u);
+  assert.match(verify.if, /github\.event_name == 'workflow_dispatch'/u);
+  assert.match(verify.if, /github\.ref == 'refs\/tags\/handheld-publisher-v1'/u);
+  assert.match(verify.if, /github\.actor == github\.repository_owner/u);
+  assert.match(verify.if, /github\.triggering_actor == github\.repository_owner/u);
+  assert.equal(verify.environment, publish.environment);
+  assert.deepEqual(verify.permissions, { contents: "read", "id-token": "write" });
+  assert.deepEqual(verify.steps[0].with, {
+    ref: "${{ github.sha }}",
+    "persist-credentials": false,
+  });
+  assert.doesNotMatch(JSON.stringify(verify), /secrets\.|RELEASES_S3_|KEYSTORE|upload-artifact/iu);
+  assert.equal(verify.steps.at(-1).run, "node tools/release-catalog/verify-stable.mjs handheld");
   for (const job of Object.values(workflow.jobs)) {
     for (const step of job.steps) {
       if (step.run) assert.doesNotMatch(step.run, /\$\{\{/);

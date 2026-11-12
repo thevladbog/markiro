@@ -3,6 +3,12 @@ name: Publish handheld stable from pinned tooling
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: Publish a release or verify stable OIDC access without publication
+        required: true
+        type: choice
+        default: publish
+        options: [publish, verify]
       bump:
         description: Stable version increment
         required: true
@@ -20,7 +26,7 @@ concurrency:
 jobs:
   authorize:
     if: >-
-      github.repository == 'thevladbog/markiro' &&
+      inputs.mode == 'publish' && github.repository == 'thevladbog/markiro' &&
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/tags/handheld-publisher-v1' &&
       github.actor == github.repository_owner &&
@@ -101,7 +107,7 @@ jobs:
 
   publish:
     if: >-
-      github.repository == 'thevladbog/markiro' &&
+      inputs.mode == 'publish' && github.repository == 'thevladbog/markiro' &&
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/tags/handheld-publisher-v1' &&
       github.actor == github.repository_owner &&
@@ -197,6 +203,7 @@ jobs:
           path: ${{ runner.temp }}/handheld-signed/markiro-tsd-${{ needs.authorize.outputs.version_name }}.apk
           if-no-files-found: error
           retention-days: 30
+
       - name: Publish to stable
         shell: bash
         env:
@@ -231,3 +238,33 @@ jobs:
           path: ${{ runner.temp }}/handheld-catalog/
           if-no-files-found: ignore
           retention-days: 30
+
+  verify:
+    if: >-
+      inputs.mode == 'verify' && github.repository == 'thevladbog/markiro' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/tags/handheld-publisher-v1' &&
+      github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner
+    environment: handheld-stable-publisher
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Install pinned publisher dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm --filter @markiro/domain build
+          pnpm --filter @markiro/platform-contracts build
+      - name: Verify stable catalog access
+        run: node tools/release-catalog/verify-stable.mjs handheld
