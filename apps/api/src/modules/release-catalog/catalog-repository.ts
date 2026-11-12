@@ -226,7 +226,7 @@ export class CatalogRepository {
       return view(row);
     });
   }
-  async getIntent(principal: CatalogPrincipal, id: unknown) {
+  async getIntent(principal: CatalogPrincipal, id: unknown, expectedScope?: Scope) {
     return this.transaction(async (tx) => {
       const [row] = await tx
         .select()
@@ -234,11 +234,16 @@ export class CatalogRepository {
         .where(eq(intents.id, parse(releaseOperationIdSchema, id)));
       if (!row) throw new CatalogFault("not_found");
       owner(principal, row);
-      await this.epoch(
-        tx,
-        parse(channelSnapshotSchema.shape.identity, { product: row.product, channel: row.channel }),
-        row.epochId,
-      );
+      const scope = parse(channelSnapshotSchema.shape.identity, {
+        product: row.product,
+        channel: row.channel,
+      });
+      if (
+        expectedScope &&
+        (scope.product !== expectedScope.product || scope.channel !== expectedScope.channel)
+      )
+        throw new CatalogFault("forbidden");
+      await this.epoch(tx, scope, row.epochId);
       await this.bindToken(tx, principal, row.id);
       return view(row);
     });

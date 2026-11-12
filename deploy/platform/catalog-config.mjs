@@ -61,19 +61,45 @@ export function validateCatalogConfig(env) {
         p.workflows.length > 16
       )
         fail();
-      for (const w of p.workflows)
+      const taggedRefs = new Set();
+      for (const w of p.workflows) {
         if (
-          !["station", "handheld"].includes(w.product) ||
           typeof w.environment !== "string" ||
           !w.environment ||
           typeof w.workflowRef !== "string" ||
           !w.workflowRef.startsWith(`${p.repository}/.github/workflows/`) ||
-          !w.workflowRef.endsWith("@refs/heads/main") ||
           !/^[a-f0-9]{40}$/.test(w.workflowSha) ||
           typeof w.subject !== "string" ||
           !w.subject.endsWith(`:environment:${w.environment}`)
         )
           fail();
+        if (w.mode === "pinned-tag") {
+          const prefix = `${p.repository}/.github/workflows/${w.product}-stable-release.yml@refs/tags/${w.product}-publisher-v`;
+          const [owner, repo] = p.repository.split("/");
+          const subjects = [
+            `repo:${p.repository}:environment:${w.environment}`,
+            `repo:${owner}@${p.ownerId}/${repo}@${p.repositoryId}:environment:${w.environment}`,
+          ];
+          if (
+            !["handheld", "standalone"].includes(w.product) ||
+            w.environment !== `${w.product}-stable-publisher` ||
+            w.workflowRef.length > 512 ||
+            taggedRefs.has(w.workflowRef) ||
+            !w.workflowRef.startsWith(prefix) ||
+            !/^[1-9][0-9]*$/.test(w.workflowRef.slice(prefix.length)) ||
+            w.jobWorkflowRef !== w.workflowRef ||
+            w.jobWorkflowSha !== w.workflowSha ||
+            !subjects.includes(w.subject)
+          )
+            fail();
+          taggedRefs.add(w.workflowRef);
+        } else if (
+          w.mode !== undefined ||
+          !["station", "handheld"].includes(w.product) ||
+          !w.workflowRef.endsWith("@refs/heads/main")
+        )
+          fail();
+      }
     } catch {
       fail();
     }
