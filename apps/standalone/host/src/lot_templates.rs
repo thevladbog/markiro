@@ -151,12 +151,15 @@ pub(crate) async fn add_sheet_variants(conn: &mut SqliteConnection, at: &str) ->
 
 /// Upgrade only exact stock specs. A planned shift still refers to live templates.
 /// Active and closed shifts and previously prepared print jobs have their own snapshots.
-async fn update_stock_labels(conn: &mut SqliteConnection) -> Result<(), Error> {
+async fn update_stock_labels(
+    conn: &mut SqliteConnection,
+    revision: Option<i64>,
+) -> Result<Option<i64>, Error> {
     let initialized: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM org_profile)")
         .fetch_one(&mut *conn)
         .await?;
     if !initialized {
-        return Ok(());
+        return Ok(revision);
     }
     let variants = variants()?.labels;
     let existing: Vec<(String, String, String, String, bool, bool)> = sqlx::query_as(
@@ -201,9 +204,12 @@ async fn update_stock_labels(conn: &mut SqliteConnection) -> Result<(), Error> {
         })
         .collect::<Vec<_>>();
     if updates.is_empty() && additions.is_empty() {
-        return Ok(());
+        return Ok(revision);
     }
-    let rev = next_revision(conn).await?;
+    let rev = match revision {
+        Some(rev) => rev,
+        None => next_revision(conn).await?,
+    };
     for (id, spec) in updates {
         sqlx::query("UPDATE label_templates SET spec = ?, rev = ? WHERE id = ?")
             .bind(spec.to_string())
@@ -225,14 +231,21 @@ async fn update_stock_labels(conn: &mut SqliteConnection) -> Result<(), Error> {
         .execute(&mut *conn)
         .await?;
     }
-    Ok(())
+    Ok(Some(rev))
+}
+
+pub(crate) async fn register_labels(
+    conn: &mut SqliteConnection,
+    revision: Option<i64>,
+) -> Result<(), Error> {
+    let rev = update_stock_labels(conn, revision).await?;
+    add_label_variants(conn, rev).await
 }
 
 /// Called before the host starts serving, including after a restored database is opened.
 pub(crate) async fn register(pool: &SqlitePool, at: &str) -> Result<(), Error> {
     let mut tx = begin_write(pool).await?;
-    update_stock_labels(&mut tx).await?;
-    add_label_variants(&mut tx, None).await?;
+    register_labels(&mut tx, None).await?;
     add_sheet_variants(&mut tx, at).await?;
     tx.commit().await
 }
@@ -279,6 +292,7 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
+        assert_eq!(rev, 1, "publish base and lot templates in one revision");
         register(&pool, at).await.unwrap();
         let count: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM label_templates WHERE purpose = 'product_duplicate' AND json_extract(spec, '$.widthMm') = 75",

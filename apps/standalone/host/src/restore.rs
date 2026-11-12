@@ -2537,6 +2537,9 @@ async fn raise_in(
     // station that saw a later one sees the host go back (`rev < since`) and
     // starts its copies again from zero.
     let revision = db::next_revision(&mut *tx).await?;
+    // Publish stock label upgrades with the restore, so the first start
+    // serves exactly the revision announced by the restore report.
+    crate::lot_templates::register_labels(tx, Some(revision)).await?;
     // The audit row's own id is the next one: above every id either database
     // issued.
     let audit_sequence = audit_floor(
