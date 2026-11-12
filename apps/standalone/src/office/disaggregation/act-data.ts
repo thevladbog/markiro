@@ -29,7 +29,7 @@ export function actData(
     includeContents: rows.variant === "full",
     lines: rows.lines.map((line, index) => ({
       n: index + 1,
-      sscc: `00${line.sscc}`,
+      ...(line.sscc === null ? { sscc: null, setCode: line.setCode } : { sscc: `00${line.sscc}` }),
       productName: line.productName,
       codeCount: line.codeCount,
       codes: line.items.map((item) => ({

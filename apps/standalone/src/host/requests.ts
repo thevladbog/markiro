@@ -459,7 +459,7 @@ export interface ShiftInput {
   /** The shift's own date (beta 3); left out, the host takes the production date. */
   plannedDate?: string;
   lotNumber?: string | null;
-  boxTemplateId: string;
+  boxTemplateId?: string;
   /** Left out only by a validation shift whose hidden capacity the form refuses: the product's. */
   boxCapacity?: number;
   plannedQty: number | null;
@@ -485,7 +485,7 @@ export function shiftCreate(shift: ShiftInput): ShiftCreate {
     productionDate: shift.productionDate,
     ...(shift.plannedDate === undefined ? {} : { plannedDate: shift.plannedDate }),
     ...(shift.lotNumber == null ? {} : { lotNumber: shift.lotNumber }),
-    boxTemplateId: shift.boxTemplateId,
+    ...(shift.boxTemplateId === undefined ? {} : { boxTemplateId: shift.boxTemplateId }),
     ...(shift.boxCapacity === undefined ? {} : { boxCapacity: shift.boxCapacity }),
     plannedQty: shift.plannedQty,
     counterpartyId: shift.counterpartyId,

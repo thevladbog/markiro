@@ -11,7 +11,7 @@ import {
 import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Checkbox, DatePicker, Input, RadioGroup, Select } from "@markiro/ui";
+import { Alert, Badge, Checkbox, DatePicker, Input, RadioGroup, Select } from "@markiro/ui";
 
 import {
   shiftModeSchema,
@@ -36,6 +36,7 @@ import { useTemplateDefaults, useTemplates } from "../catalog-queries.js";
 import { searchableSelect } from "../select-search.js";
 import { alertFailure, useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
 import { EntityDrawer } from "../EntityDrawer.js";
+import { OfficeIcon } from "../OfficeIcon.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { PageLoading, StaleAlert, WriteFailureAlert } from "../page-state.js";
 import { activeFirstByName } from "../records.js";
@@ -227,7 +228,8 @@ function useShiftEditor({
   // must not put a note under, or take one from, a date that did not change.
   const [{ today, dateNote }] = useState(() => ({ today: todayAtOpen, dateNote: dateNoteAtOpen }));
   const [lotsEnabledAtOpen] = useState(useLotNumbers);
-  const showLotNumber = lotsEnabledAtOpen || useLotNumbers || (shift?.lotNumber ?? null) !== null;
+  const lotNumbersEnabled =
+    lotsEnabledAtOpen || useLotNumbers || (shift?.lotNumber ?? null) !== null;
   const ids = useId();
   const rereadIfLost = useRereadShiftsOnLostAnswer();
   const fieldId = (name: (typeof SHIFT_FIELD_ORDER)[number]) => `${ids}-${name}`;
@@ -285,7 +287,9 @@ function useShiftEditor({
   const lineId = watch("lineId");
   const counterpartyId = watch("counterpartyId");
   const palletsEnabled = watch("palletsEnabled");
-  const validation = watch("mode") === "validation";
+  const setAssembly = watch("setAssembly") === true;
+  const showLotNumber = !setAssembly && lotNumbersEnabled;
+  const validation = setAssembly || watch("mode") === "validation";
   const printDuplicate = watch("printDuplicate");
   const verificationRequired = watch("verificationRequired");
   const duplicateTitleId = `${ids}-duplicate-title`;
@@ -341,7 +345,7 @@ function useShiftEditor({
   };
   // A product in use: active and not archived, by name, its GTIN beside it.
   const productOptions = activeFirstByName(products.data ?? [])
-    .filter((each) => !each.archived && each.status === "active" && each.setItems === undefined)
+    .filter((each) => !each.archived && each.status === "active")
     .map((each) => ({
       value: each.id,
       label: t("office.shifts.productOption", { name: shiftProductTitle(each), gtin: each.gtin14 }),
@@ -464,11 +468,22 @@ function useShiftEditor({
     onChange(id);
     const chosen = products.data?.find((each) => each.id === id);
     if (chosen === undefined) return;
+    const choosingSet = chosen.setItems !== undefined;
+    if (choosingSet !== setAssembly) {
+      setValue("setAssembly", choosingSet, { shouldDirty: true });
+      setValue("mode", choosingSet ? "validation" : "aggregation", { shouldDirty: true });
+    }
     // The capacity and the template follow the product whenever it changes.
-    setValue("boxCapacity", chosen.boxCapacity === null ? "" : String(chosen.boxCapacity), {
-      shouldDirty: true,
-    });
-    const suggested = suggestBoxTemplate(chosen, templates.data ?? [], defaults.data ?? null);
+    setValue(
+      "boxCapacity",
+      choosingSet || chosen.boxCapacity === null ? "" : String(chosen.boxCapacity),
+      {
+        shouldDirty: true,
+      },
+    );
+    const suggested = choosingSet
+      ? null
+      : suggestBoxTemplate(chosen, templates.data ?? [], defaults.data ?? null);
     setValue("boxTemplateId", suggested ?? "", { shouldDirty: true });
     // A refusal of the earlier values does not outlive them.
     clearErrors(["boxCapacity", "boxTemplateId"]);
@@ -485,6 +500,21 @@ function useShiftEditor({
         setValue("counterpartyId", next, { shouldDirty: true });
         clearErrors("counterpartyId");
       }
+    }
+    if (choosingSet) {
+      setValue("lotNumber", "", { shouldDirty: true });
+      setValue("palletsEnabled", false, { shouldDirty: true });
+      setValue("printDuplicate", false, { shouldDirty: true });
+      setValue("duplicateTemplateId", "", { shouldDirty: true });
+      setValue("verificationRequired", false, { shouldDirty: true });
+      clearErrors([
+        "lotNumber",
+        "palletBoxCapacity",
+        "palletTemplateId",
+        "palletSheetTemplateId",
+        "duplicateTemplateId",
+      ]);
+      return;
     }
     // So do the pallets', when they are on; a product without a pallet capacity turns them off.
     if (palletsEnabled && chosen.palletBoxCapacity === null) {
@@ -548,7 +578,7 @@ function useShiftEditor({
   const submit = handleSubmit(
     async (entered) => {
       setFailure(null);
-      const lotNumber = optionalLotNumber(entered.lotNumber);
+      const lotNumber = entered.setAssembly === true ? null : optionalLotNumber(entered.lotNumber);
       const values: ShiftFields =
         lotNumber === null
           ? entered
@@ -691,25 +721,34 @@ function useShiftEditor({
           )}
         />
       )}
-      <Controller
-        control={control}
-        name="mode"
-        render={({ field }) => (
-          <RadioGroup
-            label={t("office.shifts.fields.mode")}
-            // The cloud's order: «Проверка», then «Агрегация».
-            options={[
-              { value: "validation", label: t("office.shifts.modes.validation") },
-              { value: "aggregation", label: t("office.shifts.modes.aggregation") },
-            ]}
-            value={field.value}
-            onValueChange={(value) => chooseMode(value, field.onChange)}
-            id={fieldId("mode")}
-            disabled={locked || modeFixed}
-          />
-        )}
-      />
-      {validation && (
+      {setAssembly ? (
+        <div role="group" aria-label={t("office.shifts.fields.mode")}>
+          <Badge tone="steel">
+            <OfficeIcon name="package" size={14} />
+            {t("office.shiftCard.sets.mode")}
+          </Badge>
+        </div>
+      ) : (
+        <Controller
+          control={control}
+          name="mode"
+          render={({ field }) => (
+            <RadioGroup
+              label={t("office.shifts.fields.mode")}
+              // The cloud's order: «Проверка», then «Агрегация».
+              options={[
+                { value: "validation", label: t("office.shifts.modes.validation") },
+                { value: "aggregation", label: t("office.shifts.modes.aggregation") },
+              ]}
+              value={field.value}
+              onValueChange={(value) => chooseMode(value, field.onChange)}
+              id={fieldId("mode")}
+              disabled={locked || modeFixed}
+            />
+          )}
+        />
+      )}
+      {validation && !setAssembly && (
         <Controller
           control={control}
           name="printDuplicate"
@@ -803,7 +842,9 @@ function useShiftEditor({
         />
       )}
       <Input
-        label={t("office.shifts.fields.plannedQty")}
+        label={t(
+          setAssembly ? "office.shifts.fields.setPlannedQty" : "office.shifts.fields.plannedQty",
+        )}
         hint={t("office.shifts.fields.optional")}
         inputMode="numeric"
         mono
@@ -859,7 +900,7 @@ function useShiftEditor({
           />
         )}
       />
-      {validation && printDuplicate && (
+      {validation && !setAssembly && printDuplicate && (
         <section className="shift-duplicate" aria-labelledby={duplicateTitleId}>
           <h3 id={duplicateTitleId}>{t("office.shifts.duplicate.title")}</h3>
           <Controller
@@ -916,52 +957,54 @@ function useShiftEditor({
           </p>
         </section>
       )}
-      <Controller
-        control={control}
-        name="boxTemplateId"
-        render={({ field }) => (
-          <Select
-            {...searchableSelect(t)}
-            label={t("office.shifts.fields.boxTemplate")}
-            placeholder={t(
-              product === undefined && shift === null
-                ? "office.shifts.fields.templateAfterProduct"
-                : "office.shifts.fields.templatePlaceholder",
-            )}
-            // «Не выбран» is no choice here: a shift prints with a template. Before a
-            // product is chosen there is nothing to fit; a changed shift's own template
-            // stays a choice, marked when it no longer fits (the host keeps it unchanged).
-            options={
-              product === undefined
-                ? ownTemplate
-                : templateOptions(
-                    templatesFor("box", templateWithLot(field.value, "box", hasLot)),
-                    "box",
-                    product.chzProductGroupCode,
-                    [
-                      templateWithLot(shift?.boxTemplateId ?? "", "box", hasLot),
-                      templateWithLot(field.value, "box", hasLot),
-                    ],
-                    t,
-                  ).filter((option) => option.value !== "")
-            }
-            value={templateWithLot(field.value, "box", hasLot)}
-            onValueChange={field.onChange}
-            id={fieldId("boxTemplateId")}
-            disabled={locked || !templates.isSuccess || product === undefined}
-            {...(templates.isError
-              ? { hint: t("office.shifts.fields.templatesUnavailable") }
-              : shift !== null && product === undefined && products.isError
-                ? { hint: t("office.shifts.fields.productsUnavailable") }
-                : shift === null && defaults.isError
-                  ? { hint: t("office.shifts.fields.defaultsUnavailable") }
-                  : validation
-                    ? { hint: t("office.shifts.fields.boxTemplateValidationHint") }
-                    : {})}
-            {...fieldError(errors.boxTemplateId?.message)}
-          />
-        )}
-      />
+      {!setAssembly && (
+        <Controller
+          control={control}
+          name="boxTemplateId"
+          render={({ field }) => (
+            <Select
+              {...searchableSelect(t)}
+              label={t("office.shifts.fields.boxTemplate")}
+              placeholder={t(
+                product === undefined && shift === null
+                  ? "office.shifts.fields.templateAfterProduct"
+                  : "office.shifts.fields.templatePlaceholder",
+              )}
+              // «Не выбран» is no choice here: a shift prints with a template. Before a
+              // product is chosen there is nothing to fit; a changed shift's own template
+              // stays a choice, marked when it no longer fits (the host keeps it unchanged).
+              options={
+                product === undefined
+                  ? ownTemplate
+                  : templateOptions(
+                      templatesFor("box", templateWithLot(field.value, "box", hasLot)),
+                      "box",
+                      product.chzProductGroupCode,
+                      [
+                        templateWithLot(shift?.boxTemplateId ?? "", "box", hasLot),
+                        templateWithLot(field.value, "box", hasLot),
+                      ],
+                      t,
+                    ).filter((option) => option.value !== "")
+              }
+              value={templateWithLot(field.value, "box", hasLot)}
+              onValueChange={field.onChange}
+              id={fieldId("boxTemplateId")}
+              disabled={locked || !templates.isSuccess || product === undefined}
+              {...(templates.isError
+                ? { hint: t("office.shifts.fields.templatesUnavailable") }
+                : shift !== null && product === undefined && products.isError
+                  ? { hint: t("office.shifts.fields.productsUnavailable") }
+                  : shift === null && defaults.isError
+                    ? { hint: t("office.shifts.fields.defaultsUnavailable") }
+                    : validation
+                      ? { hint: t("office.shifts.fields.boxTemplateValidationHint") }
+                      : {})}
+              {...fieldError(errors.boxTemplateId?.message)}
+            />
+          )}
+        />
+      )}
       {!validation && (
         <Input
           label={t("office.shifts.fields.boxCapacity")}

@@ -2731,7 +2731,8 @@ const QUEUE_UNSENT: &str =
 /// conflicting records, numbered in one sort; only those are looked up and joined.
 const QUEUE_SETTLED: &str =
     "SELECT o.id, o.seq, o.kind, o.shift_id, s.number AS shift_number, o.created_at, o.outcome, \
-     o.outcome_code AS code, coalesce(o.payload ->> '$.data.sscc', b.sscc, p.sscc) AS sscc \
+     o.outcome_code AS code, coalesce(o.payload ->> '$.data.sscc', b.sscc, p.sscc) AS sscc, \
+     o.outcome_details -> '$.setMembership' AS set_membership \
      FROM (SELECT seq, row_number() OVER (PARTITION BY shift_id, outcome ORDER BY seq) AS place \
      FROM outbox WHERE host_id = ? AND device_id = ? AND outcome IN ('rejected', 'conflict') \
      AND resolved_at IS NULL) AS f JOIN outbox o ON o.seq = f.seq \

@@ -6,16 +6,23 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.network.CredentialDto
 import app.markiro.handheld.core.network.DeviceDto
 import app.markiro.handheld.core.network.PairResponse
+import app.markiro.handheld.core.network.host.FactReceiptDto
 import app.markiro.handheld.core.network.host.HostApi
 import app.markiro.handheld.core.network.host.HostApiError
 import app.markiro.handheld.core.network.host.HostFailure
 import app.markiro.handheld.core.network.host.HostResult
 import app.markiro.handheld.core.network.host.HostTransport
 import app.markiro.handheld.core.storage.HandheldDatabase
+import app.markiro.handheld.core.storage.HostOutboxEntity
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.storage.DeviceRecovery
 import app.markiro.handheld.core.storage.HostPairing
 import app.markiro.handheld.core.storage.InMemoryCredentialStore
+import app.markiro.handheld.core.storage.SetAssemblyClaimEntity
+import app.markiro.handheld.core.storage.SetAssemblyEntity
+import app.markiro.handheld.core.sets.SET_ASSEMBLED
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -30,6 +37,12 @@ import org.junit.runner.RunWith
 class HostReferenceSyncTest {
     private lateinit var db: HandheldDatabase
     private val hostId = "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f"
+    private val deviceId = "d0000000-0000-4000-8000-000000000001"
+    private val setId = "a0000000-0000-4000-8000-000000000001"
+    private val setShift = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+    private val eventId = "236c5a6a-9b89-4489-8be4-1ee2ee568588"
+    private val parent = "0123456789abcdef".repeat(4)
+    private val child = "b".repeat(64)
 
     private class FeedTransport(val pages: ArrayDeque<String>) : HostTransport {
         val asked = mutableListOf<String>()
@@ -46,7 +59,7 @@ class HostReferenceSyncTest {
             val recovery = DeviceRecovery(db, InMemoryCredentialStore()).also { it.initialize() }
             val origin = "https://192.168.1.10:45710"
             recovery.restore(
-                PairResponse(DeviceDto("d1", "ТСД", "handheld", hostId, "", null), CredentialDto("k1", origin), emptyList()),
+                PairResponse(DeviceDto(deviceId, "ТСД", "handheld", hostId, "", null), CredentialDto("k1", origin), emptyList()),
                 origin,
                 HostPairing("ab".repeat(32), hostId, listOf("192.168.1.10")),
             )
@@ -236,6 +249,107 @@ class HostReferenceSyncTest {
         assertNull(db.boxRegistryDao().bySscc(external.sscc));assertNull(db.boxDao().get("external-box"))
         assertEquals(known,db.boxRegistryDao().bySscc(known.sscc));assertEquals(1,db.boxDao().itemCount(known.boxId))
         assertEquals(60L,db.deviceConfigDao().get()?.hostRev)
+    }
+
+    private suspend fun seedSet(status: String) {
+        db.setAssemblyDao().insert(SetAssemblyEntity(setId, setShift, status))
+        db.setAssemblyDao().claim(listOf(SetAssemblyClaimEntity(parent, setId), SetAssemblyClaimEntity(child, setId)))
+    }
+
+    private fun setReleaseData(
+        device: String = deviceId, record: String = setId, shift: String = setShift, hash: String = parent,
+    ) = """{"deviceId":"$device","recordId":"$record","shiftId":"$shift","setCodeHash":"$hash"}"""
+
+    private fun setRelease(data: String = setReleaseData(), id: String = eventId, deleted: Boolean = false) =
+        """{"entity":"set_releases","id":"$id","rev":80,"deleted":$deleted,"data":$data}"""
+
+    @Test
+    fun setReleasesReplayTheFeedOnceAndNeverRetireTheParentOrAReusedChild() = runTest {
+        seedSet("accepted")
+        val device = checkNotNull(db.deviceConfigDao().get())
+        db.deviceConfigDao().upsert(device.copy(hostRev = 75))
+        val (reference, transport) = sync(releasePage(80, setRelease()), releasePage(81, setRelease()))
+
+        reference.sync().getOrThrow()
+        assertEquals(listOf(parent), db.setAssemblyDao().claimed(listOf(parent, child)))
+        assertEquals(1, db.setAssemblyDao().countFinished(setShift))
+
+        val next = "c5181465-f76a-49d0-9b5b-42bab801872a"
+        db.setAssemblyDao().insert(SetAssemblyEntity(next, setShift, "queued"))
+        db.setAssemblyDao().claim(listOf(SetAssemblyClaimEntity(child, next)))
+        reference.sync().getOrThrow()
+        assertEquals(setOf(parent, child), db.setAssemblyDao().claimed(listOf(parent, child)).toSet())
+        assertEquals(listOf("/v1/changes?since=0&limit=500", "/v1/changes?since=80&limit=500"), transport.asked)
+    }
+
+    @Test
+    fun releaseCanPrecedeTheReceiptAndNeverChangesTheFrozenOutbox() = runTest {
+        seedSet("queued")
+        val row = HostOutboxEntity(
+            recordId = setId, target = "facts", kind = SET_ASSEMBLED, sourceKind = SET_ASSEMBLED,
+            sourceKey = setId, body = """{"id":"$setId","data":"original bytes"}""",
+            state = "queued", reason = null, createdAt = "2026-11-12T08:00:00.000Z",
+        )
+        db.hostOutboxDao().insert(row)
+        val frozen = checkNotNull(db.hostOutboxDao().get(setId))
+        sync(fixture("changes-set-releases.json")).first.sync().getOrThrow()
+        assertEquals(frozen, db.hostOutboxDao().get(setId))
+        assertEquals(listOf(parent), db.setAssemblyDao().claimed(listOf(parent, child)))
+        HostAckMapper(db).apply(listOf(frozen), listOf(FactReceiptDto(setId, "accepted")))
+        assertNull(db.hostOutboxDao().get(setId))
+        assertEquals(listOf(parent), db.setAssemblyDao().claimed(listOf(parent, child)))
+        assertEquals(1, db.setAssemblyDao().countFinished(setShift))
+    }
+
+    @Test
+    fun malformedForeignAndMismatchedSetReleasesKeepLocalClaims() = runTest {
+        seedSet("accepted")
+        val invalid = listOf(
+            setRelease(id = "not-a-uuid"),
+            setRelease(deleted = true),
+            setRelease(data = "null"),
+            setRelease(data = setReleaseData().replace("\"$deviceId\"", "123")),
+            setRelease(data = setReleaseData(device = hostId)),
+            setRelease(data = setReleaseData(record = hostId)),
+            setRelease(data = setReleaseData(shift = hostId)),
+            setRelease(data = setReleaseData(hash = "c".repeat(64))),
+            setRelease(data = setReleaseData(hash = parent.uppercase())),
+        )
+        sync(releasePage(80, invalid.joinToString(","))).first.sync().getOrThrow()
+        assertEquals("Healthy 80", db.deviceConfigDao().get()?.lineName)
+        assertEquals(setOf(parent, child), db.setAssemblyDao().claimed(listOf(parent, child)).toSet())
+        db.setAssemblyDao().settle(setId, "conflict")
+        sync(releasePage(81, setRelease())).first.sync().getOrThrow()
+        assertEquals(setOf(parent, child), db.setAssemblyDao().claimed(listOf(parent, child)).toSet())
+    }
+
+    @Test
+    fun aConcurrentReplayCannotRewindTheCursorAfterAnotherSyncCompletes() = runTest {
+        val requested = CompletableDeferred<Unit>()
+        val unblock = CompletableDeferred<Unit>()
+        val asked = mutableListOf<String>()
+        val delayed = object : HostTransport {
+            override suspend fun get(path: String): HostResult {
+                asked += path
+                if (asked.size == 1) {
+                    requested.complete(Unit)
+                    unblock.await()
+                    return HostResult.Ok(200, releasePage(80, setRelease()), null)
+                }
+                return HostResult.Ok(200, """{"hostId":"$hostId","rev":82,"hasMore":false,"items":[]}""", null)
+            }
+            override suspend fun post(path: String, body: String): HostResult = error("read only")
+        }
+        val slow = HostReferenceSync(db, db.deviceConfigDao(), MetaStore(db), HostApi(delayed))
+        val inFlight = async { slow.sync().getOrThrow() }
+        requested.await()
+        sync(releasePage(82, setRelease())).first.sync().getOrThrow()
+        unblock.complete(Unit)
+        inFlight.await()
+
+        assertEquals(82L, db.deviceConfigDao().get()?.hostRev)
+        assertEquals("Healthy 82", db.deviceConfigDao().get()?.lineName)
+        assertEquals(listOf("/v1/changes?since=0&limit=500", "/v1/changes?since=82&limit=500"), asked)
     }
 
 }

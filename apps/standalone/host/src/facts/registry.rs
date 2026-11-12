@@ -41,6 +41,38 @@ impl Owner {
     }
 }
 
+/// A current set claim. Released components no longer have a claim, while
+/// the outer mark remains reserved after disaggregation.
+pub(crate) async fn set_owner(
+    conn: &mut SqliteConnection,
+    code_hash: &str,
+    asking_device: &str,
+) -> Result<Option<CodeOwner>, ApiError> {
+    let found: Option<(String, String, i64, String, String, String)> = sqlx::query_as(
+        "SELECT s.id, s.number_month_key, s.number_seq, s.number_origin, a.device_id, a.assembled_at
+         FROM set_codes c
+         JOIN set_assemblies a ON a.device_id = c.device_id AND a.record_id = c.record_id
+         JOIN shifts s ON s.id = a.shift_id
+         WHERE c.code_hash = ?",
+    )
+    .bind(code_hash)
+    .fetch_optional(conn)
+    .await
+    .map_err(ApiError::internal)?;
+    found
+        .map(|(shift_id, month, seq, origin, device_id, scanned_at)| {
+            let origin: ShiftOrigin = origin.parse().map_err(ApiError::internal)?;
+            Ok(CodeOwner {
+                shift_id,
+                shift_number: shifts::format_number(&month, seq, origin),
+                scanned_at,
+                same_device: device_id == asking_device,
+                device_id,
+            })
+        })
+        .transpose()
+}
+
 /// The owner of `code_hash`, or `None` while the code is free.
 pub async fn owner(
     conn: &mut SqliteConnection,

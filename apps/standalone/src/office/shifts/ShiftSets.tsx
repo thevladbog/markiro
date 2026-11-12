@@ -1,19 +1,18 @@
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 
 import { Card, StatusChip, type TableColumn } from "@markiro/ui";
 
-import type { OfficeShift, OfficeShiftSets, ScannedCode } from "../../host/protocol.js";
+import type { OfficeShift, OfficeShiftSets } from "../../host/protocol.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { OVERVIEW_POLL_MS } from "../overview/use-overview-data.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import { LoadError, PageLoading } from "../page-state.js";
+import { groupSetContents, setIdentificationCode } from "./set-contents.js";
+import "./set-contents.css";
 
 const count = new Intl.NumberFormat("ru");
-
-function identificationCode({ gtin14, serial }: ScannedCode): string {
-  return `01${gtin14}21${serial}`;
-}
 
 export function ShiftSets({ shift, at }: { shift: OfficeShift; at: (instant: string) => string }) {
   const { t } = useTranslation();
@@ -28,7 +27,8 @@ export function ShiftSets({ shift, at }: { shift: OfficeShift; at: (instant: str
       key: "code",
       title: t("office.shiftCard.sets.code"),
       mono: true,
-      render: ({ setCode }) => identificationCode(setCode),
+      wrap: true,
+      render: ({ setCode }) => setIdentificationCode(setCode),
     },
     {
       key: "items",
@@ -39,10 +39,26 @@ export function ShiftSets({ shift, at }: { shift: OfficeShift; at: (instant: str
           <summary>
             {t("office.shiftCard.sets.items", { count: count.format(items.length) })}
           </summary>
-          <ul>
-            {items.map((item) => (
-              <li key={item.codeHash}>
-                <code>{identificationCode(item)}</code>
+          <ul className="set-history__groups">
+            {groupSetContents(items, shift.setItems).map(({ gtin14, productName, codes }) => (
+              <li key={gtin14}>
+                <div className="shift-cell">
+                  <strong>{productName ?? t("office.shiftCard.sets.unnamedProduct")}</strong>
+                  <span className="shift-cell__quiet">
+                    <span>{t("office.shiftCard.sets.gtin", { gtin14 })}</span>
+                    {" · "}
+                    <span>
+                      {t("office.shiftCard.sets.quantity", { count: count.format(codes.length) })}
+                    </span>
+                  </span>
+                </div>
+                <ul>
+                  {codes.map((code) => (
+                    <li key={code.codeHash}>
+                      <code>{setIdentificationCode(code)}</code>
+                    </li>
+                  ))}
+                </ul>
               </li>
             ))}
           </ul>
@@ -59,12 +75,27 @@ export function ShiftSets({ shift, at }: { shift: OfficeShift; at: (instant: str
     {
       key: "status",
       title: t("office.shiftCard.sets.status"),
-      render: ({ outcome }) => (
-        <StatusChip
-          phase={outcome === "accepted" ? "done" : "attention"}
-          label={t(`office.shiftCard.sets.${outcome}`)}
-        />
-      ),
+      render: ({ outcome, disassembledAt, disaggregationDocumentId }) => {
+        if (disassembledAt != null) {
+          return (
+            <div className="shift-cell">
+              <StatusChip phase="dismantled" label={t("office.shiftCard.sets.disassembled")} />
+              <span className="shift-cell__quiet">{at(disassembledAt)}</span>
+              {disaggregationDocumentId != null && (
+                <Link to={`/disaggregation/${disaggregationDocumentId}`}>
+                  {t("office.shiftCard.sets.disaggregationDocument")}
+                </Link>
+              )}
+            </div>
+          );
+        }
+        return (
+          <StatusChip
+            phase={outcome === "accepted" ? "done" : "attention"}
+            label={t(`office.shiftCard.sets.${outcome}`)}
+          />
+        );
+      },
     },
   ];
 

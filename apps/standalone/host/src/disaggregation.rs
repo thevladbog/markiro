@@ -13,6 +13,8 @@ use sqlx::SqliteConnection;
 
 use crate::error::ApiError;
 
+pub(crate) mod sets;
+
 /// `DSG-YY-NNNN` (the cloud's `formatDocNo`): the year of creation in UTC,
 /// the number padded to four digits and never cut.
 pub fn format_doc_no(seq: i64, year: i32) -> String {
@@ -30,7 +32,7 @@ pub async fn next_seq(conn: &mut SqliteConnection) -> Result<i64, ApiError> {
     .map_err(ApiError::internal)
 }
 
-/// What an SSCC names now and the line's status for it.
+/// What a package code names now and the line's status for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Target {
     pub box_id: Option<String>,
@@ -41,6 +43,7 @@ pub struct Target {
     pub cloud: bool,
     pub product_name: Option<String>,
     pub code_count: i64,
+    pub(crate) set: Option<sets::SetTarget>,
 }
 
 /// The first rule that holds (the cloud's order): an open box or pallet,
@@ -230,6 +233,7 @@ pub async fn resolve(conn: &mut SqliteConnection, sscc: &str) -> Result<Option<T
             cloud: false,
             product_name: None,
             code_count,
+            set: None,
         }));
     }
     let found: Option<Row> = sqlx::query_as(PALLET_SQL)
@@ -250,6 +254,7 @@ pub async fn resolve(conn: &mut SqliteConnection, sscc: &str) -> Result<Option<T
                 cloud: false,
                 product_name: None,
                 code_count,
+                set: None,
             }));
         }
         return crate::cloud_history::operations::resolve(conn, sscc).await;
@@ -264,6 +269,7 @@ pub async fn resolve(conn: &mut SqliteConnection, sscc: &str) -> Result<Option<T
             cloud: false,
             product_name: None,
             code_count,
+            set: None,
         },
     ))
 }

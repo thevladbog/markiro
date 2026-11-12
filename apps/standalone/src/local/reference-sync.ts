@@ -288,22 +288,27 @@ const SYNC_SCHEMA_VERSION = 7;
 
 /**
  * The feed entities this build acts on but keeps no copy of (plan ДЗГ):
- * `code_releases`, a box a document took apart, whose codes this station
- * stops counting as its own. Part of `ENTITY_SET`: a build that starts
+ * `code_releases` and `set_releases`, boxes and sets a document took apart.
+ * Part of `ENTITY_SET`: a build that starts
  * acting on one syncs from zero once and meets every release it skipped.
  */
 const CODE_RELEASES = "code_releases";
-const ACTION_ENTITIES = [CODE_RELEASES] as const;
+const SET_RELEASES = "set_releases";
+const ACTION_ENTITIES = [CODE_RELEASES, SET_RELEASES] as const;
+const setReleaseSchema = z.object({
+  deviceId: z.uuid(),
+  recordId: z.uuid(),
+  shiftId: z.uuid(),
+  setCodeHash: z.string().regex(/^[0-9a-f]{64}$/u),
+});
 
-/** A release's box id, read once per module and not once per item. */
-const releaseBoxId = z.uuid();
+const releaseId = z.uuid();
 
 /**
  * This build's copies and actions, in `sync_state.entity_set`: the feed
  * entities it keeps (derived from `ENTITIES`, so a new entity cannot update
  * that map and forget this value, or the reverse), the ones it only acts on
- * (`ACTION_ENTITIES`) and `SYNC_SCHEMA_VERSION`; nine entities and `v7`
- * today (`test/reference-sync.test.ts` pins the text). A build that keeps
+ * (`ACTION_ENTITIES`) and `SYNC_SCHEMA_VERSION`. A build that keeps
  * other entities, or reads them differently, finds another value there and
  * syncs from zero: records the old build skipped or quarantined would never
  * come otherwise.
@@ -329,6 +334,24 @@ export const APPLY_CODE_RELEASES_SQL =
   "(SELECT b.id FROM json_each(?) AS r JOIN floor_boxes AS b ON b.id = r.value ->> 'id' " +
   "WHERE +b.host_id = ? AND +b.device_id = ? AND +b.shift_id = r.value ->> 'shiftId' " +
   "AND b.closed_at IS NOT NULL)";
+
+// Match the original parent even if its local receipt has not arrived. Replaying
+// a release cannot touch a draft or a component already claimed by a newer set.
+const APPLY_SET_RELEASES_SQL =
+  "DELETE FROM floor_set_marks WHERE seq IN (" +
+  "WITH RECURSIVE attempts(host_id, device_id, shift_id, assembly_id, record_id, released_id) AS (" +
+  "SELECT parent.host_id, parent.device_id, parent.shift_id, parent.assembly_id, " +
+  "parent.assembly_id, r.value ->> 'recordId' FROM json_each(?) AS r JOIN floor_set_marks AS parent " +
+  "ON parent.host_id = ? AND parent.device_id = ? AND parent.code_hash = r.value ->> 'setCodeHash' " +
+  "AND parent.shift_id = r.value ->> 'shiftId' AND parent.is_set = 1 " +
+  "UNION ALL SELECT a.host_id, a.device_id, a.shift_id, a.assembly_id, o.resent_as, a.released_id " +
+  "FROM attempts a JOIN outbox o ON o.id = a.record_id AND o.host_id = a.host_id " +
+  "AND o.device_id = a.device_id AND o.shift_id = a.shift_id " +
+  "WHERE a.record_id <> a.released_id AND o.resent_as IS NOT NULL) " +
+  "SELECT child.seq FROM attempts a JOIN floor_set_marks AS child " +
+  "ON child.host_id = a.host_id AND child.device_id = a.device_id " +
+  "AND child.shift_id = a.shift_id AND child.assembly_id = a.assembly_id AND child.is_set = 0 " +
+  "WHERE a.record_id = a.released_id)";
 
 /**
  * Deletes the rows that the page's tombstones and quarantined records are
@@ -578,7 +601,23 @@ function pageStatements(page: ChangesResponse, pairing: Pairing, seenAt: number)
   }
   // The feed entities this build acts on without a copy (`ACTION_ENTITIES`).
   const releases: Array<{ id: string; shiftId: string }> = [];
+  const setReleases: z.infer<typeof setReleaseSchema>[] = [];
   for (const item of page.items) {
+    if (item.entity === SET_RELEASES) {
+      const key = { entity: item.entity, id: item.id, rev: item.rev };
+      const release = setReleaseSchema.safeParse(item.data);
+      if (item.deleted) {
+        settled.push(key);
+      } else if (!releaseId.safeParse(item.id).success) {
+        quarantined.push({ ...key, reason: "id: invalid_format" });
+      } else if (!release.success) {
+        quarantined.push({ ...key, reason: quarantineReason(release.error) });
+      } else {
+        if (release.data.deviceId === pairing.deviceId) setReleases.push(release.data);
+        settled.push(key);
+      }
+      continue;
+    }
     if (item.entity !== CODE_RELEASES) continue;
     const key = { id: item.id, rev: item.rev };
     // The host never deletes a release; a tombstone would only settle.
@@ -587,7 +626,7 @@ function pageStatements(page: ChangesResponse, pairing: Pairing, seenAt: number)
       continue;
     }
     const record = codeReleaseRecordSchema.safeParse(item.data);
-    const id = releaseBoxId.safeParse(item.id);
+    const id = releaseId.safeParse(item.id);
     if (!record.success) {
       quarantined.push({ entity: item.entity, ...key, reason: quarantineReason(record.error) });
     } else if (!id.success) {
@@ -607,6 +646,12 @@ function pageStatements(page: ChangesResponse, pairing: Pairing, seenAt: number)
         pairing.hostId,
         pairing.deviceId,
       ],
+    });
+  }
+  if (setReleases.length > 0) {
+    statements.push({
+      sql: APPLY_SET_RELEASES_SQL,
+      values: [JSON.stringify(setReleases), pairing.hostId, pairing.deviceId],
     });
   }
   if (quarantined.length > 0) {

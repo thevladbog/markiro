@@ -1,5 +1,4 @@
-.set-assembly__status,
-.set-assembly__recipe {
+.set-assembly__status {
   min-height: 0;
   padding: var(--sp-4);
   border: 1px solid var(--line);
@@ -8,8 +7,7 @@
   overflow: auto;
 }
 
-.set-assembly__status h2,
-.set-assembly__recipe h2 {
+.set-assembly__status h2 {
   margin: 0 0 var(--sp-3);
   font: var(--floor-title);
 }
@@ -20,31 +18,24 @@
   font-variant-numeric: tabular-nums;
 }
 
-.set-assembly__recipe ul {
+.set-assembly__scan-stage {
+  width: 100%;
+  margin-bottom: var(--sp-3);
+  padding: clamp(var(--sp-3), 3vh, var(--sp-6));
+  gap: var(--sp-2);
+  font: var(--floor-body);
+  text-align: center;
+}
+
+.set-assembly__scan-stage h2 {
   margin: 0;
-  padding: 0;
-  list-style: none;
+  text-wrap: balance;
 }
 
-.set-assembly__recipe li {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--sp-3);
-  padding-block: var(--sp-2);
-  border-bottom: 1px solid var(--line);
-  overflow-wrap: anywhere;
-}
-
-.set-assembly__recipe strong {
-  flex: none;
-  font-variant-numeric: tabular-nums;
-}
-
-.set-assembly__recipe small {
-  display: block;
-  color: var(--muted);
-  font-family: var(--font-mono);
+.set-assembly__scan-stage .set-assembly__progress {
+  margin: 0;
+  color: var(--ok-fg);
+  font-size: clamp(1.375rem, 3vw, 2rem);
 }
 
 @media (max-width: 760px) {

@@ -163,6 +163,20 @@ describe("the queue screen", () => {
     expect(screen.queryByText(/остались неотправленные записи/)).toBeNull();
   });
 
+  it("explains a late conflict when the mark was already in a set", async () => {
+    const { db, local } = await station();
+    const [conflict = ""] = await unsentScans(local, 1);
+    refuse(db, conflict, "conflict", null);
+    db.prepare("UPDATE outbox SET outcome_details = ? WHERE id = ?").run(
+      JSON.stringify({ setMembership: true }),
+      conflict,
+    );
+    view(local);
+    expect(
+      await screen.findByText("Марка входит в набор. Проверьте содержимое короба."),
+    ).toBeTruthy();
+  });
+
   it("shows the link, also when the host is away, and what is refused all the same", async () => {
     const { db, local } = await station();
     const [refused = ""] = await unsentScans(local, 1);

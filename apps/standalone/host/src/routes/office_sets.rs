@@ -1,11 +1,23 @@
 //! The immutable assembly journal used to review a shift and prepare its exports.
 
 use axum::{extract::State, Json};
-use markiro_proto::{OfficeSet, SetAssembledFact};
+use markiro_proto::OfficeSet;
 
 use crate::auth::OfficeContext;
+use crate::disaggregation::sets;
 use crate::error::{ApiError, ApiPath};
 use crate::server::AppState;
+
+#[derive(sqlx::FromRow)]
+struct SetRow {
+    record_id: String,
+    device_id: String,
+    operator_id: Option<String>,
+    data: String,
+    outcome: String,
+    disassembled_at: Option<String>,
+    disaggregation_document_id: Option<String>,
+}
 
 pub async fn list_sets(
     State(state): State<AppState>,
@@ -21,23 +33,29 @@ pub async fn list_sets(
     if !exists {
         return Err(ApiError::not_found("no such shift"));
     }
-    type Row = (String, String, Option<String>, String, String);
-    let rows: Vec<Row> = sqlx::query_as(
-        "SELECT record_id, device_id, operator_id, data, outcome FROM set_assemblies          WHERE shift_id = ? ORDER BY assembled_at, device_id, record_id",
+    let rows: Vec<SetRow> = sqlx::query_as(
+        "SELECT a.record_id, a.device_id, a.operator_id, a.data, a.outcome,
+                d.applied_at AS disassembled_at, d.id AS disaggregation_document_id
+         FROM set_assemblies a
+         LEFT JOIN set_releases r ON r.device_id = a.device_id AND r.record_id = a.record_id
+         LEFT JOIN disaggregation_document_lines l ON l.id = r.line_id
+         LEFT JOIN disaggregation_documents d ON d.id = l.document_id
+         WHERE a.shift_id = ? ORDER BY a.assembled_at, a.device_id, a.record_id",
     )
     .bind(&id)
     .fetch_all(&mut *tx)
     .await
     .map_err(ApiError::internal)?;
     rows.into_iter()
-        .map(|(id, device_id, operator_id, data, outcome)| {
+        .map(|row| {
             Ok(OfficeSet {
-                id,
-                device_id,
-                operator_id,
-                assembly: serde_json::from_str::<SetAssembledFact>(&data)
-                    .map_err(ApiError::internal)?,
-                outcome: outcome.parse().map_err(ApiError::internal)?,
+                id: row.record_id,
+                device_id: row.device_id,
+                operator_id: row.operator_id,
+                assembly: sets::read_assembly(&row.data)?,
+                outcome: row.outcome.parse().map_err(ApiError::internal)?,
+                disassembled_at: row.disassembled_at,
+                disaggregation_document_id: row.disaggregation_document_id,
             })
         })
         .collect::<Result<_, _>>()

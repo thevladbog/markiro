@@ -35,6 +35,7 @@ use flate2::write::DeflateEncoder;
 use flate2::Compression;
 use markiro_proto::codes;
 use markiro_proto::disaggregation::{
+    DISAGGREGATION_JSON_FORMAT_ID, DISAGGREGATION_JSON_FORMAT_VERSION,
     DISAGGREGATION_XML_FORMAT_ID, DISAGGREGATION_XML_FORMAT_VERSION,
 };
 use markiro_proto::export_files::{
@@ -158,6 +159,9 @@ pub async fn files_of_batches(
 /// host does not store.
 fn media_type_of(file_name: &str, kind: ExportFileKind, format_id: &str) -> Option<&'static str> {
     let extension = file_name.rsplit_once('.')?.1.to_ascii_lowercase();
+    if kind == ExportFileKind::DisaggregationXml && format_id == DISAGGREGATION_JSON_FORMAT_ID {
+        return (extension == "json").then_some("application/json; charset=utf-8");
+    }
     let standalone = standalone_export_extension(format_id);
     if standalone.is_some_and(|expected| expected != extension) {
         return None;
@@ -203,7 +207,9 @@ fn target_fits(begin: &ExportFileBegin) -> bool {
                 begin.target_type,
                 ExportTargetType::Pallet | ExportTargetType::WarehousePallet
             ),
-            "form_placards" | "form_task" => begin.target_type == ExportTargetType::Shift,
+            "form_placards" | "form_task" | "form_sets" => {
+                begin.target_type == ExportTargetType::Shift
+            }
             "form_act" => begin.target_type == ExportTargetType::DisaggregationDocument,
             _ => false,
         },
@@ -216,13 +222,16 @@ fn format_known(begin: &ExportFileBegin) -> bool {
     match begin.kind {
         ExportFileKind::ShiftExport => SHIFT_FORMATS.contains(&format),
         ExportFileKind::PalletExport => PALLET_FORMATS.contains(&format),
-        ExportFileKind::DisaggregationXml => {
-            format
-                == (
-                    DISAGGREGATION_XML_FORMAT_ID,
-                    DISAGGREGATION_XML_FORMAT_VERSION,
-                )
-        }
+        ExportFileKind::DisaggregationXml => matches!(
+            format,
+            (
+                DISAGGREGATION_XML_FORMAT_ID,
+                DISAGGREGATION_XML_FORMAT_VERSION
+            ) | (
+                DISAGGREGATION_JSON_FORMAT_ID,
+                DISAGGREGATION_JSON_FORMAT_VERSION
+            )
+        ),
         ExportFileKind::Form => FORM_FORMATS.contains(&format.0) && format.1 == 1,
     }
 }
@@ -633,6 +642,7 @@ async fn finish(
     row: &FileRow,
     at: &str,
 ) -> Result<(), ApiError> {
+    check_disaggregation_export(conn, &row.format_id, &row.target_id).await?;
     let digest = digest_of(conn, row).await?;
     let size = u64::try_from(row.size_bytes).map_err(ApiError::internal)?;
     if digest.as_ref() != Some(&(row.sha256.clone(), size)) {
@@ -670,6 +680,22 @@ async fn finish(
     let removed = sweep(conn, at, days).await?;
     audit_purge(conn, context, at, removed, days).await?;
     Ok(())
+}
+
+async fn check_disaggregation_export(
+    conn: &mut SqliteConnection,
+    format_id: &str,
+    target_id: &str,
+) -> Result<(), ApiError> {
+    match format_id {
+        DISAGGREGATION_XML_FORMAT_ID => {
+            super::office_disaggregation_reports::require_xml_eligible(conn, target_id).await
+        }
+        DISAGGREGATION_JSON_FORMAT_ID => {
+            super::office_disaggregation_reports::require_applied_document(conn, target_id).await
+        }
+        _ => Ok(()),
+    }
 }
 
 fn file_details(row: &FileRow) -> serde_json::Value {
@@ -763,6 +789,7 @@ pub async fn begin(
             "no such shift, pallet, box or document",
         ));
     };
+    check_disaggregation_export(&mut tx, &begin.format_id, &begin.target_id).await?;
     if let Some(shift_id) = &shift_id {
         crate::demo::refuse_gismt(&mut tx, shift_id, &begin.format_id).await?;
     }
@@ -879,7 +906,7 @@ pub async fn put_chunk(
             "the file is stored already",
         ));
     }
-    if row.kind == "disaggregation_xml" {
+    if row.kind == ExportFileKind::DisaggregationXml.as_str() {
         context.require_disaggregation_in(&mut tx).await?;
     }
     let seq = u64::from(path.seq);
@@ -916,6 +943,9 @@ pub async fn complete(
         let answer = progress(&row, held)?;
         tx.commit().await.map_err(ApiError::internal)?;
         return Ok(Json(answer));
+    }
+    if row.kind == ExportFileKind::DisaggregationXml.as_str() {
+        context.require_disaggregation_in(&mut tx).await?;
     }
     let held = received_chunks(&mut tx, &id).await?;
     if i64::from(held) != row.chunk_count {

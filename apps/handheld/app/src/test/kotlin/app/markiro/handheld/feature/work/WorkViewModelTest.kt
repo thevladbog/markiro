@@ -22,6 +22,7 @@ import app.markiro.handheld.core.duplicate.DuplicateReason
 import app.markiro.handheld.core.box.CloseResult
 import app.markiro.handheld.core.box.ServerRange
 import app.markiro.handheld.core.box.SsccPool
+import app.markiro.handheld.core.km.KmCodec
 import app.markiro.handheld.core.km.Verdict
 import app.markiro.handheld.core.label.LabelRenderer
 import app.markiro.handheld.core.label.RasterResult
@@ -141,7 +142,12 @@ class WorkViewModelTest {
         }
     }
 
-    private fun vm(team: TeamRefresher = TeamRefresher { null }, repository: ShiftRepository? = null, hostReachability: kotlinx.coroutines.flow.Flow<Boolean?> = flowOf(null)): WorkViewModel {
+    private fun vm(
+        team: TeamRefresher = TeamRefresher { null },
+        repository: ShiftRepository? = null,
+        hostReachability: kotlinx.coroutines.flow.Flow<Boolean?> = flowOf(null),
+        hostSetLookup: suspend (String) -> Boolean = { false },
+    ): WorkViewModel {
         val engine = SyncEngine(
             db, MetaStore(db), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
             NetworkModule.strictJson(), engineScope,
@@ -165,7 +171,8 @@ class WorkViewModelTest {
                 boxes, CloseBox(db, boxes, pool, pallets, closePallet, palletLock),
                 BoxPrinter(db, boxes, LabelRenderer(rasterize), transport),
                 DuplicateJobs(db, LabelRenderer(rasterize), transport),
-                pallets, closePallet, palletPrinter, ExceptionEngine(db), flowOf(Unit), hostReachability = hostReachability,
+                pallets, closePallet, palletPrinter, ExceptionEngine(db), flowOf(Unit),
+                hostReachability = hostReachability, hostSetLookup = hostSetLookup,
             ),
         )
     }
@@ -180,6 +187,45 @@ class WorkViewModelTest {
         model.state.first { it.hostMode && !it.reachable }
         link.value = true
         model.state.first { it.hostMode && it.reachable }
+    }
+
+    @Test fun aggregationRefusesLocalAndOnlineSetMembersBeforeOpeningABox() = runTest {
+        aggregating(withPrinter = false)
+        val config = checkNotNull(db.deviceConfigDao().get())
+        db.deviceConfigDao().upsert(config.copy(backend = "host"))
+        val localHash = KmCodec.hash(KmCodec.canonicalize("010460068200001321local"))
+        db.setAssemblyDao().insert(app.markiro.handheld.core.storage.SetAssemblyEntity("set-1", "set-shift", "accepted"))
+        db.setAssemblyDao().claim(listOf(app.markiro.handheld.core.storage.SetAssemblyClaimEntity(localHash, "set-1")))
+        val lookedUp = mutableListOf<String>()
+        var remoteInSet = true
+        val link = kotlinx.coroutines.flow.MutableStateFlow<Boolean?>(true)
+        val model = vm(hostReachability = link, hostSetLookup = { hash ->
+            lookedUp += hash
+            remoteInSet
+        })
+        model.state.first { it.hostMode && it.reachable }
+
+        scan("local")
+        assertEquals(ScanBlock.SET_MEMBERSHIP, model.state.first { it.last?.tail == "local" }.last?.blockedBy)
+        assertTrue(lookedUp.isEmpty())
+        scan("remote")
+        assertEquals(ScanBlock.SET_MEMBERSHIP, model.state.first { it.last?.tail == "remote" }.last?.blockedBy)
+        assertEquals(listOf(KmCodec.hash(KmCodec.canonicalize("010460068200001321remote"))), lookedUp)
+        assertNull(db.boxDao().open("s1"))
+        assertEquals(listOf("duplicate" to null, "duplicate" to null), db.outboxDao().head(10).map { it.verdict to it.boxId })
+        assertEquals(listOf(SignalKind.ERROR, SignalKind.ERROR), played)
+
+        remoteInSet = false
+        scan("remote")
+        assertEquals(Verdict.OK, model.state.first { it.last?.tail == "remote" && it.last.verdict == Verdict.OK }.last?.verdict)
+        assertEquals(1, model.state.first { it.box?.filled == 1 }.box?.filled)
+
+        link.value = false
+        model.state.first { !it.reachable }
+        scan("offline")
+        assertEquals(Verdict.OK, model.state.first { it.last?.tail == "offline" }.last?.verdict)
+        assertEquals(2, lookedUp.size)
+        assertEquals(2, model.state.first { it.box?.filled == 2 }.box?.filled)
     }
 
     @Test

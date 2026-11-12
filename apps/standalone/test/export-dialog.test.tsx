@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 
+import { renderCode128Svg } from "@markiro/domain";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -202,6 +203,162 @@ describe("office shifts: an export (plan ЧЗ)", () => {
     expect(session.api.listShiftSets).toHaveBeenCalledTimes(2);
     expect(files.save).not.toHaveBeenCalled();
     expect(session.api.recordShiftExport).not.toHaveBeenCalled();
+  });
+
+  it("copies the selected parent, all item identifiers, and a single item separately", async () => {
+    const files = fakeFiles();
+    const shift: OfficeShift = {
+      ...CLOSED_PALLETS,
+      mode: "validation",
+      palletsEnabled: false,
+      setItems: [{ gtin14: "04607123456804", productName: "Крем для рук", quantity: 2 }],
+    };
+    const code = (gtin14: string, serial: string) => ({
+      gtin14,
+      serial,
+      codeHash: serial,
+      canonical: `01${gtin14}21${serial}\u001d93Ab12`,
+    });
+    const chosen: OfficeShiftSets[number] = {
+      id: DOCUMENT,
+      deviceId: DOCUMENT,
+      operatorId: null,
+      assembledAt: FORMED_AT,
+      setCode: code("04607123456781", "SET001"),
+      items: [code("04607123456804", "ITEM01"), code("04607123456804", "ITEM02")],
+      outcome: "accepted",
+    };
+    const sets: OfficeShiftSets = [
+      {
+        ...chosen,
+        id: PALLET_ID,
+        setCode: code("04607123456781", "SET000"),
+        items: [code("04607123456804", "OTHER1"), code("04607123456804", "OTHER2")],
+      },
+      chosen,
+    ];
+    const written: string[] = [];
+    const clipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (value: string) => {
+          written.push(value);
+        },
+      },
+    });
+    try {
+      const session = await openExport(shift, rows(), files, undefined, [], (prepared) => {
+        prepared.api.listShiftSets.mockResolvedValue(sets);
+      });
+      fireEvent.click(
+        within(dialog()).getByRole("button", { name: "Копирование для Честного знака" }),
+      );
+      const copy = await screen.findByRole("dialog", { name: "Копирование для Честного знака" });
+      fireEvent.click(await within(copy).findByRole("combobox", { name: "КИ набора" }));
+      fireEvent.click(await screen.findByRole("option", { name: "010460712345678121SET001" }));
+      fireEvent.click(await within(copy).findByRole("button", { name: "Скопировать КИ набора" }));
+      await waitFor(() => expect(written).toEqual(["010460712345678121SET001"]));
+      fireEvent.click(within(copy).getByRole("button", { name: "Скопировать КИ вложений" }));
+      await waitFor(() =>
+        expect(written[1]).toBe("010460712345680421ITEM01\n010460712345680421ITEM02"),
+      );
+      fireEvent.click(
+        within(copy).getByRole("button", { name: "Скопировать КИ 010460712345680421ITEM02" }),
+      );
+      await waitFor(() => expect(written[2]).toBe("010460712345680421ITEM02"));
+      session.api.listShiftSets.mockResolvedValue(
+        sets.map((set) => ({ ...set, outcome: "conflict" })),
+      );
+      fireEvent.click(within(copy).getByRole("button", { name: "Скопировать КИ набора" }));
+      await within(copy).findByText("Выгрузка недоступна из-за конфликтов кодов в наборах.");
+      expect(written).toHaveLength(3);
+      expect(files.save).not.toHaveBeenCalled();
+    } finally {
+      if (clipboard === undefined) Reflect.deleteProperty(navigator, "clipboard");
+      else Object.defineProperty(navigator, "clipboard", clipboard);
+    }
+  });
+
+  it("opens and saves the standard printable set composition even when the host does not know the new form", async () => {
+    const files = fakeFiles();
+    const shift: OfficeShift = {
+      ...CLOSED_PALLETS,
+      mode: "validation",
+      palletsEnabled: false,
+      setItems: [{ gtin14: "04607123456804", productName: "Крем для рук", quantity: 1 }],
+    };
+    const sets: OfficeShiftSets = [
+      {
+        id: DOCUMENT,
+        deviceId: DOCUMENT,
+        operatorId: null,
+        assembledAt: FORMED_AT,
+        setCode: {
+          gtin14: "04607123456781",
+          serial: "SET001",
+          codeHash: "parent",
+          canonical: "010460712345678121SET001\u001d93Ab12",
+        },
+        items: [
+          {
+            gtin14: "04607123456804",
+            serial: "ITEM01",
+            codeHash: "child",
+            canonical: "010460712345680421ITEM01\u001d93Ab12",
+          },
+        ],
+        outcome: "accepted",
+      },
+    ];
+    const session = await openExport(shift, rows(), files, undefined, [], (prepared) => {
+      prepared.api.listShiftSets.mockResolvedValue([
+        ...sets,
+        ...sets.map((set) => ({
+          ...set,
+          id: "8a000000-0000-4000-8000-000000000001",
+          disassembledAt: FORMED_AT,
+          setCode: {
+            ...set.setCode,
+            serial: "RETIRED",
+            canonical: "010460712345678121RETIRED\u001d93Ab12",
+          },
+        })),
+      ]);
+      prepared.api.beginExportFile.mockRejectedValue(new Error("unsupported format"));
+      prepared.api.getOrg.mockResolvedValue({ ...ORG_PROFILE, timeZone: "Asia/Vladivostok" });
+    });
+    fireEvent.click(
+      within(dialog()).getByRole("button", { name: "Печатная форма состава наборов" }),
+    );
+    const print = await screen.findByRole("dialog", {
+      name: `Состав наборов смены ${shift.number}`,
+    });
+    fireEvent.click(await within(print).findByRole("button", { name: "Открыть в браузере" }));
+    await waitFor(() => expect(files.openFile).toHaveBeenCalledTimes(1));
+    const html = new TextDecoder().decode(files.save.mock.calls[0]?.[1][0]?.bytes);
+    const parent = html.indexOf("010460712345678121SET001");
+    const product = html.indexOf("Крем для рук");
+    expect(parent).toBeGreaterThan(-1);
+    expect(product).toBeGreaterThan(parent);
+    expect(html.indexOf("010460712345680421ITEM01")).toBeGreaterThan(product);
+    expect(html).not.toContain("010460712345678121RETIRED");
+    expect(html).not.toContain("93Ab12");
+    expect(html).toContain("Смена закрыта 09.10.2026 00:00");
+    const footer = html.slice(
+      html.indexOf('<footer class="rep-footer">'),
+      html.indexOf("</footer>"),
+    );
+    expect(footer).toContain(
+      `<span class="code128-box">${renderCode128Svg(shift.number, { includeText: false })}</span>`,
+    );
+    expect(files.save.mock.calls[0]?.[0].at(-1)).toBe("2026-10-09_19-00-00_sets");
+    expect(session.api.beginExportFile.mock.calls[0]?.[1]).toMatchObject({
+      kind: "form",
+      formatId: "form_sets",
+      targetType: "shift",
+      targetId: shift.id,
+    });
   });
 
   it("forms the chosen format of fresh rows, saves the domain's bytes into the export's own folder, then records it, for both roles", async () => {

@@ -22,6 +22,7 @@ export const FORM_FORMATS = [
   "form_placard",
   "form_placards",
   "form_task",
+  "form_sets",
   "form_act",
 ] as const;
 export type FormFormat = (typeof FORM_FORMATS)[number];

@@ -4,6 +4,7 @@ import { useLocation, useSearchParams } from "react-router";
 
 import {
   Alert,
+  Badge,
   Button,
   Input,
   PageHeader,
@@ -129,7 +130,10 @@ export function ProductsPage() {
             <span className="product-name__full">{product.name}</span>
             {product.demo === true && <DemoBadge />}
             {product.setItems !== undefined && (
-              <StatusChip phase="active" label={t("office.products.sets.type")} />
+              <Badge tone="steel" className="product-name__set">
+                <OfficeIcon name="package" size={14} />
+                {t("office.products.sets.type")}
+              </Badge>
             )}
             {product.printName !== null && product.printName !== product.name && (
               <span className="product-name__print">
@@ -377,11 +381,19 @@ export function ProductsPage() {
             key={dialog.kind === "edit" ? dialog.product.id : "create-set"}
             product={dialog.kind === "edit" ? dialog.product : null}
             products={products.data ?? []}
+            groups={groups.data ?? []}
             onClose={() => setDialog(null)}
-            onSaved={(product) => {
+            onSaved={(product, photoFailed) => {
               store(product);
               setDialog(null);
-              setNotice({ tone: "ok", text: t("office.common.saved") });
+              setNotice(
+                photoFailed
+                  ? {
+                      tone: "warn",
+                      text: t("office.products.sets.photoFailed", { name: product.name }),
+                    }
+                  : { tone: "ok", text: t("office.common.saved") },
+              );
             }}
             onReload={() => {
               setDialog(null);

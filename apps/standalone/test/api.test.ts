@@ -1258,6 +1258,19 @@ describe("HostApi floor work", () => {
   const RECORDS = factBatchSchema.parse(fixture("facts-request.json")).records;
   const CODE_HASH = "3f6c0f1e2d8b4a5c9e7f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f";
 
+  it("requests set membership only for a box scan and reads the owning set", async () => {
+    const { owner } = fixture("code-check-taken.json") as { owner: unknown };
+    const check = recording({ status: "in_set", owner });
+    await expect(check.api.checkCode(CODE_HASH, true)).resolves.toEqual({
+      status: "in_set",
+      owner,
+    });
+    expect(check.sent[0]).toMatchObject({
+      path: `/v1/device/codes/${CODE_HASH}?aggregation=true`,
+      timeoutMs: 300,
+    });
+  });
+
   it("asks for a block, checks a code within 300 ms and sends facts, with the device key only", async () => {
     const block = recording(fixture("sscc-block.json"));
     await expect(block.api.requestSsccBlock(BLOCK_REQUEST)).resolves.toEqual(

@@ -82,6 +82,7 @@ describe("the limits are markiro_proto::export_files'", () => {
       "form_placard",
       "form_placards",
       "form_task",
+      "form_sets",
       "form_act",
     ]);
   });

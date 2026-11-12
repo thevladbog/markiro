@@ -30,6 +30,7 @@ import app.markiro.handheld.core.duplicate.Verification
 import app.markiro.handheld.core.km.Verdict
 import app.markiro.handheld.core.km.feedTail
 import app.markiro.handheld.core.network.ReachabilityTracker
+import app.markiro.handheld.core.network.host.HostApi
 import app.markiro.handheld.core.scan.ScanEvents
 import app.markiro.handheld.core.scan.ScanOutcome
 import app.markiro.handheld.core.scan.ScanRecorder
@@ -73,13 +74,15 @@ fun interface SignalPort {
     fun play(kind: SignalKind)
 }
 
-/** Why a scan was refused before it was judged at all. */
+/** Why the work screen refused a scan. */
 enum class ScanBlock {
     /** Another unit's duplicate label is unresolved; see `routeDuplicateScan`. */
     DUPLICATE_JOB,
 
     /** The open box is at capacity and its close was refused; see `handleScan`. */
     BOX_FULL,
+
+    SET_MEMBERSHIP,
 }
 
 data class LastScan(
@@ -88,7 +91,7 @@ data class LastScan(
     val firstSeenAt: String?,
     val at: String,
     /**
-     * Set when the scan was REFUSED rather than judged.
+     * Set when a work rule refused the scan.
      *
      * Reusing `Verdict.INVALID` told the operator «НЕВЕРНЫЙ КОД» for a perfectly
      * good code whose only problem was that another unit's label was still
@@ -253,6 +256,7 @@ class WorkViewModel(
     },
     private val scannerLabel: () -> String = { "" },
     hostReachability: Flow<Boolean?> = kotlinx.coroutines.flow.flowOf(null),
+    private val hostSetLookup: suspend (String) -> Boolean = { false },
 ) : ViewModel() {
     @Inject
     constructor(
@@ -276,11 +280,13 @@ class WorkViewModel(
         exceptions: ExceptionEngine,
         scannerLabel: app.markiro.handheld.core.scan.ScannerLabel,
         hostLink: app.markiro.handheld.core.host.HostLinkMonitor,
+        hostApi: HostApi,
     ) : this(
         handle, db, recorder, scans, { signaller.play(it) }, sync, session, reachability, team, repository,
         boxes, closer, boxPrinter, duplicates, pallets, closePallet, palletPrinter, exceptions,
         scannerLabel = { scannerLabel() },
         hostReachability = hostLink.state.map { it.reachable },
+        hostSetLookup = hostApi::aggregationCodeInSet,
     )
 
     val shiftId: String = checkNotNull(handle["shiftId"])
@@ -551,11 +557,22 @@ class WorkViewModel(
         // anything else looks at it. Getting this wrong means an operator scans
         // a sticker and the app counts it as a new unit.
         if (shift.validationPrintMode == "duplicate_dm" && routeDuplicateScan(raw)) return
+        val aggregating = shift.mode == "aggregation"
+        val operatorId = session.state.value.operator?.operatorId
+        if (aggregating) {
+            val lookup = hostSetLookup.takeIf { state.value.reachable }
+            val refusal = recorder.rejectAggregationSetMember(shift, raw, operatorId, lookup)
+            if (refusal != null) {
+                last.value = refusal.toLastScan(raw)
+                sync.nudge()
+                signals.play(SignalKind.ERROR)
+                return
+            }
+        }
         // A scan arriving while the close screen is up belongs to the NEXT box, and
         // `currentBox` gives it exactly that: the closed row is no longer open. It
         // is deliberately not dropped -- an operator whose unit vanished with no
         // sound and no count has no way to know it needs scanning again.
-        val aggregating = shift.mode == "aggregation"
         val capacity = shift.boxCapacity ?: 0
         var box = if (aggregating) boxes.currentBox(shiftId) else null
         // A box already at capacity is one whose close was refused -- no
@@ -576,7 +593,7 @@ class WorkViewModel(
             }
             box = boxes.currentBox(shiftId)
         }
-        val outcome = recorder.record(shift, raw, session.state.value.operator?.operatorId, box?.boxId)
+        val outcome = recorder.record(shift, raw, operatorId, box?.boxId)
         last.value = outcome.toLastScan(raw)
         sync.nudge()
 
@@ -587,7 +604,7 @@ class WorkViewModel(
             closeAndPrint(shift, signalBoxDone = true)
             return
         }
-        signals.play(Signaller.forVerdict(outcome.verdict))
+        signals.play(if (outcome.blockedBySet) SignalKind.ERROR else Signaller.forVerdict(outcome.verdict))
         // Only an ACCEPTED unit gets a label. A duplicate of a code this device
         // already holds would put a second sticker on one physical item.
         if (shift.validationPrintMode == "duplicate_dm" && outcome.verdict == Verdict.OK) {
@@ -905,6 +922,7 @@ class WorkViewModel(
         tail = feedTail(raw),
         firstSeenAt = firstSeenAt,
         at = scannedAt,
+        blockedBy = ScanBlock.SET_MEMBERSHIP.takeIf { blockedBySet },
         refusal = refusal,
     )
 

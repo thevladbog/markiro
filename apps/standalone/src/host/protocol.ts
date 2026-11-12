@@ -1643,6 +1643,7 @@ export type CodeOwner = z.infer<typeof codeOwnerSchema>;
 export const codeCheckSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("free") }),
   z.object({ status: z.literal("taken"), owner: codeOwnerSchema }),
+  z.object({ status: z.literal("in_set"), owner: codeOwnerSchema }),
 ]);
 export type CodeCheck = z.infer<typeof codeCheckSchema>;
 
@@ -2367,6 +2368,8 @@ export const officeShiftSetsSchema = z.array(
     deviceId: z.uuid(),
     operatorId: z.uuid().nullable(),
     outcome: z.enum(["accepted", "conflict"]),
+    disassembledAt: z.iso.datetime().nullable().optional(),
+    disaggregationDocumentId: z.uuid().nullable().optional(),
   }),
 );
 export type OfficeShiftSets = z.infer<typeof officeShiftSetsSchema>;

@@ -235,7 +235,7 @@ export interface WorkScreenProps {
   /** The floor's scanner: the keyboard and the COM scanners. */
   source: ScanSource;
   /** `HostApi.checkCode` (300 ms). */
-  checkCode: (codeHash: string) => Promise<CodeCheck>;
+  checkCode: (codeHash: string, aggregation?: boolean) => Promise<CodeCheck>;
   /** `HostApi.requestSsccBlock`. */
   requestBlock: (request: SsccBlockRequest) => Promise<SsccBlock>;
   /** A failed host call the shell may act on: a refused key, another certificate. */
@@ -465,6 +465,8 @@ function lastText(last: Last, t: TFunction, capacity: number): string {
           );
     case "wrong_gtin":
       return t("floor.work.last.wrongGtin", { gtin: last.gtin14 });
+    case "in_set":
+      return t("floor.work.last.inSet");
     case "invalid":
       return t(`floor.work.last.invalid.${last.rawKind}`);
     case "paused":
@@ -491,6 +493,7 @@ function lastWord(last: Last | null, t: TFunction): string {
     case "duplicate":
       return t("floor.work.hero.duplicate");
     case "wrong_gtin":
+    case "in_set":
     case "invalid":
     case "unit_refused":
       return t("floor.work.hero.error");
@@ -514,6 +517,7 @@ function lastTone(last: Last | null): LastTone {
     case "duplicate":
       return "duplicate";
     case "wrong_gtin":
+    case "in_set":
     case "invalid":
     case "unit_refused":
       return "error";
@@ -541,7 +545,7 @@ interface Live {
   isLeaving: (() => boolean) | undefined;
   touch: () => void;
   track: <T>(work: Promise<T>) => Promise<T>;
-  checkCode: (codeHash: string) => Promise<CodeCheck>;
+  checkCode: (codeHash: string, aggregation?: boolean) => Promise<CodeCheck>;
   requestBlock: (request: SsccBlockRequest) => Promise<SsccBlock>;
   onHostError: (error: unknown) => void;
   onRecorded: () => void;
@@ -1575,6 +1579,8 @@ export function WorkScreen(props: WorkScreenProps) {
       }
       if (outcome.kind === "duplicate") {
         show("duplicate", say("floor.work.signal.duplicate"), text);
+      } else if (outcome.kind === "in_set") {
+        show("error", text, null);
       } else {
         show(
           "error",

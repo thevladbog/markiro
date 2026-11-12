@@ -1,5 +1,7 @@
 package app.markiro.handheld.core.network.host
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -82,6 +84,18 @@ class HostApi(private val transport: HostTransport, private val json: Json = Jso
     }
 
     suspend fun device(): Result<DeviceInfoDto> = parse(transport.get("/v1/device"), DeviceInfoDto.serializer())
+
+    /** A positive response can stop a scan; the outbox reconciles when the host does not answer promptly. */
+    suspend fun aggregationCodeInSet(codeHash: String): Boolean = try {
+        withTimeoutOrNull(AGGREGATION_CODE_CHECK_MS) {
+            val response = transport.getCancellable("/v1/device/codes/$codeHash?aggregation=true")
+            parse(response, JsonObject.serializer()).getOrNull().text("status") == "in_set"
+        } == true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        false
+    }
 
     suspend fun changes(since: Long, limit: Int = 500): Result<ChangesDto> =
         parse(transport.get("/v1/changes?since=$since&limit=$limit"), ChangesDto.serializer())
@@ -185,6 +199,7 @@ class HostApi(private val transport: HostTransport, private val json: Json = Jso
     }
 
     companion object {
+        private const val AGGREGATION_CODE_CHECK_MS = 300L
         const val CAPABILITY = "handheld-host-v1"
 
         /** A validation shift without duplicate printing is a plain scan flow of this app; the duplicate (`validation-dm-duplicate-v1`) is not named, so the host refuses that shift with `station_update`. */

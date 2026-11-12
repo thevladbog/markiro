@@ -1,4 +1,6 @@
 import { compareText } from "./document-text-encoding.js";
+import { canonicalizeKm, kmKey } from "./gs1/km.js";
+import { formatSsccWithAi } from "./gs1/sscc.js";
 
 /**
  * ГИС МТ «Расформирование упаковки» (`<disaggregation action_id="31" version="2">`):
@@ -11,7 +13,7 @@ import { compareText } from "./document-text-encoding.js";
  */
 
 export type GismtDisaggregationErrorCode =
-  "INVALID_ORGANIZATION_INN" | "INVALID_SSCC" | "EMPTY_SOURCE";
+  "INVALID_ORGANIZATION_INN" | "INVALID_SSCC" | "INVALID_SET_CODE" | "EMPTY_SOURCE";
 
 export class GismtDisaggregationError extends Error {
   constructor(readonly code: GismtDisaggregationErrorCode) {
@@ -74,6 +76,44 @@ export function renderGismtDisaggregationXml(
   return {
     bytes: encoder.encode(`${lines.join("\n")}\n`),
     physicalLineCount: lines.length,
+    packingCount: packings.length,
+  };
+}
+
+export interface GismtDisaggregationJsonInput {
+  organizationInn: string;
+  packings: readonly ({ sscc: string } | { setCode: string })[];
+}
+
+function disaggregationIdentifier(packing: GismtDisaggregationJsonInput["packings"][number]) {
+  if ("sscc" in packing) {
+    if (!/^\d{18}$/u.test(packing.sscc)) throw new GismtDisaggregationError("INVALID_SSCC");
+    return formatSsccWithAi(packing.sscc);
+  }
+  const { setCode } = packing;
+  try {
+    if (kmKey(canonicalizeKm(setCode)) === setCode) return setCode;
+  } catch {
+    // The input must already be a normalized KI.
+  }
+  throw new GismtDisaggregationError("INVALID_SET_CODE");
+}
+
+/** True API document body for `DISAGGREGATION_DOCUMENT` (format MANUAL). */
+export function renderGismtDisaggregationJson(
+  input: GismtDisaggregationJsonInput,
+): Pick<RenderedGismtDisaggregation, "bytes" | "packingCount"> {
+  if (!isParticipantInn(input.organizationInn)) {
+    throw new GismtDisaggregationError("INVALID_ORGANIZATION_INN");
+  }
+  const packings = [...new Set(input.packings.map(disaggregationIdentifier))].sort(compareText);
+  if (packings.length === 0) throw new GismtDisaggregationError("EMPTY_SOURCE");
+  const document = {
+    participant_inn: input.organizationInn,
+    products_list: packings.map((uitu) => ({ uitu })),
+  };
+  return {
+    bytes: encoder.encode(`${JSON.stringify(document, null, 2)}\n`),
     packingCount: packings.length,
   };
 }

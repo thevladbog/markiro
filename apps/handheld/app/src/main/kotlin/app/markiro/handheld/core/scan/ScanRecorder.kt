@@ -23,6 +23,7 @@ data class ScanOutcome(
     val firstSeenAt: String?,
     val scannedAt: String,
     val refusal: ValidationRefusal? = null,
+    val blockedBySet: Boolean = false,
 )
 
 /**
@@ -32,6 +33,28 @@ data class ScanOutcome(
  */
 class ScanRecorder(private val db: HandheldDatabase, private val clock: () -> Long = System::currentTimeMillis) {
     private val mutex = Mutex()
+
+    /** Checks membership before the work screen opens or closes a transport box. */
+    suspend fun rejectAggregationSetMember(
+        shift: ShiftEntity,
+        raw: String,
+        operatorId: String?,
+        hostLookup: (suspend (String) -> Boolean)?,
+    ): ScanOutcome? {
+        if (!usesSetMembership(shift)) return null
+        val expectedGtin = shift.productGtin14 ?: return null
+        val code = ShiftValidator.classify(raw, expectedGtin) as? Classification.Km ?: return null
+        if (db.setAssemblyDao().isActiveClaim(code.hash)) {
+            val refusal = db.recovery.commit {
+                if (db.setAssemblyDao().isActiveClaim(code.hash)) {
+                    refuseSetMember(shift, raw, operatorId, code, Iso.format(clock()))
+                } else null
+            }
+            if (refusal != null) return refusal
+        }
+        if (hostLookup?.invoke(code.hash) != true) return null
+        return db.recovery.commit { refuseSetMember(shift, raw, operatorId, code, Iso.format(clock())) }
+    }
 
     /**
      * `boxId` names the transport box this scan belongs to, or null outside an
@@ -65,6 +88,9 @@ class ScanRecorder(private val db: HandheldDatabase, private val clock: () -> Lo
                     ScanOutcome(Verdict.WRONG_GTIN, c.km, null, null, scannedAt)
                 }
                 is Classification.Km -> {
+                    if (usesSetMembership(shift) && db.setAssemblyDao().isActiveClaim(c.hash)) {
+                        return@commit refuseSetMember(shift, raw, operatorId, c, scannedAt)
+                    }
                     var verdict = Verdict.OK
                     var firstSeen: String? = null
                     val existing = db.codeDao().get(c.hash)
@@ -100,6 +126,20 @@ class ScanRecorder(private val db: HandheldDatabase, private val clock: () -> Lo
                 }
             }
         }
+    }
+
+    private suspend fun usesSetMembership(shift: ShiftEntity): Boolean =
+        shift.mode == "aggregation" && db.deviceConfigDao().get()?.backend == "host"
+
+    private suspend fun refuseSetMember(
+        shift: ShiftEntity,
+        raw: String,
+        operatorId: String?,
+        code: Classification.Km,
+        scannedAt: String,
+    ): ScanOutcome {
+        write(shift.id, raw, Verdict.DUPLICATE, scannedAt, operatorId, null, null, null)
+        return ScanOutcome(Verdict.DUPLICATE, code.km, code.hash, null, scannedAt, blockedBySet = true)
     }
 
     private suspend fun write(

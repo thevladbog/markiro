@@ -62,6 +62,7 @@ import { ShiftSourceLinks } from "./CloudShifts.js";
 import { ShiftMarks } from "./ShiftMarks.js";
 import { isSharedShift } from "./participation.js";
 import { shiftOutput } from "./shift-text.js";
+import { PrintFormDialog } from "../forms/PrintFormDialog.js";
 
 /**
  * The export dialog comes with the domain's renderers, the source rules and the
@@ -96,6 +97,7 @@ type ShiftsDialog =
   | { kind: "close"; shift: OfficeShift }
   | { kind: "reason"; shift: OfficeShift }
   | { kind: "totals"; shift: OfficeShift }
+  | { kind: "sets_form"; shift: OfficeShift; timeZone: string }
   | { kind: "export"; shift: OfficeShift };
 
 /**
@@ -811,9 +813,23 @@ export function ShiftsPage() {
             shift={dialog.shift}
             demo={isDemoShift(dialog.shift, products.data)}
             setAssembly={dialog.shift.setItems !== undefined}
+            onPrintSets={(timeZone) =>
+              setDialog({ kind: "sets_form", shift: dialog.shift, timeZone })
+            }
             onClose={() => setDialog(null)}
           />
         </Suspense>
+      )}
+      {dialog?.kind === "sets_form" && (
+        <PrintFormDialog
+          shift={dialog.shift}
+          target={{ kind: "sets" }}
+          taskInputs={null}
+          timeZone={dialog.timeZone}
+          format="a4"
+          onFormat={() => undefined}
+          onClose={() => setDialog(null)}
+        />
       )}
       {canPlan && dialog?.kind === "plan" && (
         <ShiftPlanDialog
