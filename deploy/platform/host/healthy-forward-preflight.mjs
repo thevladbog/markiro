@@ -215,16 +215,21 @@ async function observeRuntime(
   );
   return services.map((service) => {
     const expected = plan.containers[service];
-    const environment = plan.replacements.includes(service)
-      ? candidateEnvironment
-      : sourceEnvironment;
+    const replaced = plan.replacements.includes(service);
+    const environment = replaced ? candidateEnvironment : sourceEnvironment;
     const [image, digestKey] = serviceImages[service];
     const container = rows.find((row) => row.Id === expected.id);
+    const reference = container?.Config.Image;
+    // The recorded source API and edge can have been created from local image
+    // IDs. Their receipt, observed recipe and image ID remain pinned below.
+    const imageMatches =
+      reference === `${image}@${environment[digestKey]}` ||
+      (!replaced && service !== "postgres" && reference === expected.imageId);
     ensure(
       container &&
         container.Config.Labels["com.docker.compose.project"] === project &&
         container.Config.Labels["com.docker.compose.service"] === service &&
-        container.Config.Image === `${image}@${environment[digestKey]}` &&
+        imageMatches &&
         container.Image === expected.imageId &&
         containerRecipe(container) === expected.recipeSha256,
     );

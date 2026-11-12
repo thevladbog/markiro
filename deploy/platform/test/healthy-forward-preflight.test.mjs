@@ -333,6 +333,22 @@ test("preflight validates healthy forward rollout evidence", async (t) => {
     assert.ok(f.commands.some((command) => command[0] === "exec"));
   });
 
+  await t.test("accepts drift-bound API and edge created from local image IDs", async (t) => {
+    const { runtime } = f.input;
+    const containers = { ...runtime.containers };
+    for (const service of ["api", "edge"]) {
+      const observed = f.inspected[service];
+      const reference = observed.Config.Image;
+      t.after(() => {
+        observed.Config.Image = reference;
+      });
+      observed.Config.Image = observed.Image;
+      containers[service] = { ...containers[service], recipeSha256: containerRecipe(observed) };
+    }
+    const result = await verify({ ...f.input, runtime: { ...runtime, containers } });
+    assert.deepEqual(result.containers, containers);
+  });
+
   await t.test("a stopped source requires the same containers and no active API", async (t) => {
     const { api, edge } = f.inspected;
     const runningApi = api.State;
@@ -397,6 +413,17 @@ test("preflight validates healthy forward rollout evidence", async (t) => {
       assert.equal(result.containers.api.id, candidateApi.Id);
       assert.equal(result.containers.edge.id, f.input.runtime.containers.edge.id);
       assert.equal(result.containers.postgres.id, postgresId);
+      candidateApi.Config.Image = candidateApi.Image;
+      await assert.rejects(
+        verifyHealthyForwardPreflight(f.input, f.dependencies, {
+          phase: "api-started",
+          candidateContainers: {
+            api: { ...candidateDescriptor, recipeSha256: containerRecipe(candidateApi) },
+          },
+        }),
+        refusal,
+      );
+      candidateApi.Config.Image = admitted.manifest.api;
       postgres.Id = "f".repeat(64);
       await assert.rejects(mixed(), refusal);
     },
