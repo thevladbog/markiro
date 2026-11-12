@@ -47,7 +47,26 @@ test("verify only reads the exact stable channel via OIDC and returns no interna
   }
 });
 
-test("verify refuses empty, unreadable and wrong channels", async () => {
+test("verify reports an empty stable channel after successful OIDC admission", async () => {
+  for (const product of ["handheld", "standalone"]) {
+    const identity = { product, channel: "stable" };
+    const { client, requests } = fixture({
+      identity,
+      revision: "0",
+      publicationId: null,
+      readable: false,
+    });
+    assert.deepEqual(await verifyStablePublisher(product, client), {
+      scope: identity,
+      revision: "0",
+      status: "empty",
+    });
+    assert.equal(requests.length, 2);
+    assert.equal(requests[1][1].method, "GET");
+  }
+});
+
+test("verify refuses unreadable, inconsistent and wrong channels", async () => {
   const snapshot = {
     identity: { product: "handheld", channel: "stable" },
     revision: "1",
@@ -55,7 +74,8 @@ test("verify refuses empty, unreadable and wrong channels", async () => {
     readable: true,
   };
   for (const patch of [
-    { revision: "0", publicationId: null },
+    { revision: "0" },
+    { publicationId: null },
     { readable: false },
     { identity: { product: "handheld", channel: "beta" } },
   ]) {

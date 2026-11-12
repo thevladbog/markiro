@@ -1,0 +1,42 @@
+name: Prepare release catalog runtime
+description: Build the pinned publisher dependencies without release credentials
+outputs:
+  artifact-id:
+    description: Immutable Actions artifact ID
+    value: ${{ steps.upload.outputs.artifact-id }}
+  sha256:
+    description: SHA-256 of the runtime archive
+    value: ${{ steps.pack.outputs.sha256 }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: 24
+    - name: Install and build from the pinned lockfile
+      shell: bash
+      env:
+        npm_config_verify_deps_before_run: "false"
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+        corepack enable
+        pnpm --filter markiro --filter '@markiro/platform-contracts...' install --frozen-lockfile --ignore-scripts
+        pnpm --filter @markiro/domain build
+        pnpm --filter @markiro/platform-contracts build
+    - name: Pack publisher dependencies
+      id: pack
+      shell: bash
+      run: |
+        set -euo pipefail
+        sha256="$(python3 -I tools/release-catalog/runtime-archive.py pack "$RUNNER_TEMP/publisher-runtime.zip")"
+        [[ "$sha256" =~ ^[0-9a-f]{64}$ ]]
+        printf 'sha256=%s\n' "$sha256" >> "$GITHUB_OUTPUT"
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      id: upload
+      with:
+        name: publisher-runtime-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/publisher-runtime.zip
+        compression-level: 0
+        if-no-files-found: error
+        retention-days: 7

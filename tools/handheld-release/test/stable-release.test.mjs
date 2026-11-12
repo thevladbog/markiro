@@ -145,7 +145,7 @@ test("the stable workflow isolates the key and OIDC from the product checkout", 
   assert.equal(publish.steps[0].with.ref, "${{ github.sha }}");
   assert.equal(publish.environment, "handheld-stable-publisher");
   assert.equal(publish.permissions["id-token"], "write");
-  assert.deepEqual(publish.needs, ["authorize", "build"]);
+  assert.deepEqual(publish.needs, ["authorize", "build", "prepare-runtime"]);
   assert.match(publish.if, /github\.triggering_actor == github\.repository_owner/);
   const downloadIndex = publish.steps.findIndex((step) =>
     step.uses?.startsWith("actions/download-artifact@"),
@@ -182,7 +182,12 @@ test("the stable workflow isolates the key and OIDC from the product checkout", 
   for (const job of Object.values(workflow.jobs)) {
     for (const step of job.steps) {
       if (step.run) assert.doesNotMatch(step.run, /\$\{\{/);
-      if (step.uses) assert.match(step.uses, /@[0-9a-f]{40}$/);
+      if (
+        step.uses &&
+        !/^\.\/\.github\/actions\/(?:prepare|restore)-publisher-runtime$/u.test(step.uses)
+      ) {
+        assert.match(step.uses, /@[0-9a-f]{40}$/);
+      }
     }
   }
 });

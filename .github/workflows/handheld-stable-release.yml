@@ -25,6 +25,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare-runtime:
+    if: >-
+      github.repository == 'thevladbog/markiro' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/tags/handheld-publisher-v1' &&
+      github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      artifact_id: ${{ steps.runtime.outputs.artifact-id }}
+      sha256: ${{ steps.runtime.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-publisher-runtime
+        id: runtime
+
   authorize:
     if: >-
       inputs.mode == 'publish' && github.repository == 'thevladbog/markiro' &&
@@ -120,7 +142,7 @@ jobs:
       github.ref == 'refs/tags/handheld-publisher-v1' &&
       github.actor == github.repository_owner &&
       github.triggering_actor == github.repository_owner
-    needs: [authorize, build]
+    needs: [authorize, build, prepare-runtime]
     environment: handheld-stable-publisher
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -142,15 +164,10 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - name: Install publisher dependencies from the pinned checkout
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          corepack enable
-          pnpm install --frozen-lockfile
-          pnpm --filter @markiro/domain build
-          pnpm --filter @markiro/platform-contracts build
+      - uses: ./.github/actions/restore-publisher-runtime
+        with:
+          artifact-id: ${{ needs.prepare-runtime.outputs.artifact_id }}
+          sha256: ${{ needs.prepare-runtime.outputs.sha256 }}
       - name: Require the immutable build artifact ID
         shell: bash
         env:
@@ -254,6 +271,7 @@ jobs:
       github.ref == 'refs/tags/handheld-publisher-v1' &&
       github.actor == github.repository_owner &&
       github.triggering_actor == github.repository_owner
+    needs: prepare-runtime
     environment: handheld-stable-publisher
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -268,11 +286,9 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-      - name: Install pinned publisher dependencies
-        run: |
-          corepack enable
-          pnpm install --frozen-lockfile
-          pnpm --filter @markiro/domain build
-          pnpm --filter @markiro/platform-contracts build
+      - uses: ./.github/actions/restore-publisher-runtime
+        with:
+          artifact-id: ${{ needs.prepare-runtime.outputs.artifact_id }}
+          sha256: ${{ needs.prepare-runtime.outputs.sha256 }}
       - name: Verify stable catalog access
         run: node tools/release-catalog/verify-stable.mjs handheld
