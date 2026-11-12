@@ -42,6 +42,8 @@ internal val HOST_DATASET_BUSINESS_TABLES = setOf(
     "product_label_jobs",
     "replacement_drain",
     "scan_events",
+    "set_assemblies",
+    "set_assembly_claims",
     "shift_close_outbox",
     "shift_mirror",
     "sscc_pool",

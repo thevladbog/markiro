@@ -238,12 +238,13 @@ fn a_station_does_not_get_ahead_of_its_hosts_protocol() {
     let device_dir = tempfile::tempdir().unwrap();
     let device = station_paired_at(device_dir.path(), &host.address(), &host.fingerprint());
     let site = site("0.2.0", vec![]);
-    let newer = put_package(&site.updates, "0.3.0");
+    let newer_protocol = markiro_proto::PROTOCOL_VERSION + 1;
+    let newer = signed_test_package(&site.updates, "0.3.0", newer_protocol);
     block_on(site.state.scan()).unwrap();
     let report = block_on(site.state.verify(&device, &newer)).unwrap();
     assert_eq!(
         serde_json::to_value(&report.refusal).unwrap(),
-        json!({ "code": "host_first", "hostProtocol": markiro_proto::PROTOCOL_VERSION, "protocol": 9 })
+        json!({ "code": "host_first", "hostProtocol": markiro_proto::PROTOCOL_VERSION, "protocol": newer_protocol })
     );
     let seen = report.host.unwrap();
     assert_eq!(seen.protocol, markiro_proto::PROTOCOL_VERSION);
@@ -255,6 +256,10 @@ fn a_station_does_not_get_ahead_of_its_hosts_protocol() {
 fn downloaded_package(data: &Path, version: &str) -> String {
     let folder = data.join("updates").join(version);
     std::fs::create_dir_all(&folder).unwrap();
+    signed_test_package(&folder, version, markiro_proto::PROTOCOL_VERSION)
+}
+
+fn signed_test_package(folder: &Path, version: &str, protocol: u32) -> String {
     let bytes = test_installer(version);
     let size = bytes.len() as u64;
     let sha256 = markiro_proto::update::hash_exact(&bytes[..], size).unwrap();
@@ -264,7 +269,7 @@ fn downloaded_package(data: &Path, version: &str) -> String {
         "releasedAt": "2026-11-02T10:00:00Z",
         "sourceSha": "0123456789abcdef0123456789abcdef01234567",
         "installer": { "name": name, "sha256": sha256, "sizeBytes": size },
-        "protocol": markiro_proto::PROTOCOL_VERSION,
+        "protocol": protocol,
         "minProtocol": markiro_proto::MIN_PROTOCOL_VERSION,
         "minUpgradeFrom": "0.0.1", "notes": ["Тест"]
     }));

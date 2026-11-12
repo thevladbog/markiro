@@ -1,0 +1,55 @@
+.set-assembly__status,
+.set-assembly__recipe {
+  min-height: 0;
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--panel);
+  overflow: auto;
+}
+
+.set-assembly__status h2,
+.set-assembly__recipe h2 {
+  margin: 0 0 var(--sp-3);
+  font: var(--floor-title);
+}
+
+.set-assembly__progress {
+  margin-bottom: var(--sp-4);
+  font: 600 clamp(2rem, 6vw, 4.5rem)/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.set-assembly__recipe ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.set-assembly__recipe li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-3);
+  padding-block: var(--sp-2);
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.set-assembly__recipe strong {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.set-assembly__recipe small {
+  display: block;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+@media (max-width: 760px) {
+  .set-assembly {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+}

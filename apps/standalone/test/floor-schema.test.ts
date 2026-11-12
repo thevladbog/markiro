@@ -287,6 +287,7 @@ describe("the station's own production tables (migration 0006)", () => {
         ...DEVICE_TABLES,
         ...WAREHOUSE_TABLES,
         "floor_restore_epochs",
+        "floor_set_marks",
         "floor_shift_participation",
         "installation_dataset_epochs",
         "pallet_assembly_members",
@@ -1380,6 +1381,7 @@ describe("the shape of the production tables (migration 0006)", () => {
       ["floor_print_jobs", "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?"],
       ["floor_boxes", "floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?"],
       ["floor_pallets", "floor_pallets_shift (host_id=? AND device_id=? AND shift_id=?"],
+      ["floor_set_marks", "floor_set_marks_shift (host_id=? AND device_id=? AND shift_id=?"],
       ["floor_exceptions", "floor_exceptions_shift (shift_id=? AND host_id=? AND device_id=?"],
       [
         "floor_pallet_exceptions",
@@ -1453,7 +1455,7 @@ describe("the shape of the production tables (migration 0006)", () => {
       REFUSED_CLOSES_SQL,
       ...RETAINED_TABLES.map(purgeTableSql),
     ];
-    expect(new Set(retention).size).toBe(13);
+    expect(new Set(retention).size).toBe(14);
     for (const sql of retention) expect(source).toContain(`"${sql}"`);
   });
 

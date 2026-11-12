@@ -19,9 +19,8 @@ const unsentRow = z.object({ id: z.string(), kind: z.string(), payload: z.string
  * over 2 MiB (axum's default; its extractor answers the length rejection like
  * any malformed body: 400 `validation_failed`), and a refused batch is sent
  * again unchanged, so a batch that is too large would hold back every record
- * behind it for good. A record is at most 16 KiB (`MAX_RECORD_BYTES`), which
- * puts a batch of 100 at about 1.6 MiB: this only cuts a batch of records
- * that no fact makes.
+ * behind it for good. Assembly facts can contain many full marks and share
+ * this byte budget with the other records.
  */
 export const MAX_BATCH_BYTES = 1_835_008;
 
@@ -32,7 +31,7 @@ const encoder = new TextEncoder();
  * together, counted in bytes of UTF-8. The first goes alone, however large;
  * were it over the host's body limit it would be refused with 400 on every
  * send and block the queue, which cannot happen: `outboxStatement` keeps no
- * record over `MAX_RECORD_BYTES` (16 KiB), far below the limit.
+ * record over the batch budget.
  */
 function withinBudget<T extends { payload: string }>(rows: readonly T[]): T[] {
   let bytes = 0;

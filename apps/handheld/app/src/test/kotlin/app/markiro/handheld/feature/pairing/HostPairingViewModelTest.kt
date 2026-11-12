@@ -22,7 +22,7 @@ class HostPairingViewModelTest {
     private val pin = "ab".repeat(32)
     private val otherPin = "cd".repeat(32)
 
-    private fun hello(protocol: Int = 6, min: Int = 1) =
+    private fun hello(protocol: Int = 9, min: Int = 1) =
         HelloDto("markiro-host", protocol, min, "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f", "0.1.0", "2026-10-15T09:00:00Z", true)
 
     private class FakeGateway(
@@ -103,8 +103,8 @@ class HostPairingViewModelTest {
 
     @Test
     fun aHostOfAnotherProtocolIsNamedBeforeAnythingElse() = runTest {
-        for ((protocol, error) in listOf(5 to HostPairingError.HOST_TOO_OLD, 9 to HostPairingError.APP_TOO_OLD)) {
-            val min = if (protocol == 9) 8 else 1
+        for ((protocol, error) in listOf(8 to HostPairingError.HOST_TOO_OLD, 10 to HostPairingError.APP_TOO_OLD)) {
+            val min = if (protocol == 10) 10 else 1
             val gateway = FakeGateway(mapOf("10.0.0.5" to Result.success(Observed(pin, hello(protocol, min)))))
             val vm = viewModel(gateway)
             vm.onAddress("10.0.0.5")

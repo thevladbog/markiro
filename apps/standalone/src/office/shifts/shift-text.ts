@@ -27,10 +27,13 @@ export function datePickerTexts(t: TFunction) {
  * codes it accepted, never «0 шт · 0 кор.».
  */
 export function shiftOutput(
-  shift: Pick<OfficeShift, "status" | "mode" | "totals">,
+  shift: Pick<OfficeShift, "status" | "mode" | "totals" | "setItems">,
   t: TFunction,
 ): string {
   if (shift.status === "planned") return t("office.common.none");
+  if (shift.setItems !== undefined) {
+    return t("office.shiftCard.sets.output", { count: shift.totals.acceptedUnits });
+  }
   if (shift.mode === "validation") {
     return t("office.shifts.outputUnits", { units: UNITS.format(shift.totals.acceptedUnits) });
   }

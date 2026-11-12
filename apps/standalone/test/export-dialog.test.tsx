@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HostError } from "../src/host/client.js";
 import {
   shiftExportRowsSchema,
+  type OfficeShiftSets,
   type OfficePallet,
   type OfficeShift,
   type ShiftExportRows,
@@ -153,6 +154,56 @@ describe("office shifts: an export (plan ЧЗ)", () => {
     vi.restoreAllMocks();
   });
 
+  it("offers the set exports and refuses a conflict that arrived after opening the dialog", async () => {
+    const files = fakeFiles();
+    const closedSetShift: OfficeShift = {
+      ...CLOSED_PALLETS,
+      palletsEnabled: false,
+      mode: "validation",
+      setItems: [{ gtin14: "04607123456804", productName: "Крем для рук", quantity: 1 }],
+    };
+    const code = {
+      gtin14: "04607123456781",
+      serial: "S1",
+      codeHash: "set-hash",
+      canonical: "010460712345678121S1\u001d93Ab12",
+    };
+    const sets: OfficeShiftSets = [
+      {
+        id: DOCUMENT,
+        deviceId: DOCUMENT,
+        operatorId: null,
+        assembledAt: FORMED_AT,
+        setCode: code,
+        items: [
+          {
+            gtin14: "04607123456804",
+            serial: "ITEM1",
+            codeHash: "item-hash",
+            canonical: "010460712345680421ITEM1\u001d93Cd34",
+          },
+        ],
+        outcome: "accepted",
+      },
+    ];
+    const session = await openExport(closedSetShift, rows(), files, undefined, [], (prepared) => {
+      prepared.api.listShiftSets
+        .mockResolvedValueOnce(sets)
+        .mockResolvedValue(sets.map((set) => ({ ...set, outcome: "conflict" })));
+    });
+    expect(
+      within(dialog())
+        .getAllByRole("radio")
+        .map((radio) => radio.getAttribute("value")),
+    ).toEqual(["shift_csv_unf_set_items@1", "shift_xlsx_chz_set_registry@1"]);
+    expect(within(dialog()).queryByRole("checkbox", { name: "Разделить на части" })).toBeNull();
+    form();
+    await within(dialog()).findByText("Выгрузка недоступна из-за конфликтов кодов в наборах.");
+    expect(session.api.listShiftSets).toHaveBeenCalledTimes(2);
+    expect(files.save).not.toHaveBeenCalled();
+    expect(session.api.recordShiftExport).not.toHaveBeenCalled();
+  });
+
   it("forms the chosen format of fresh rows, saves the domain's bytes into the export's own folder, then records it, for both roles", async () => {
     for (const user of [undefined, TECHNOLOGIST]) {
       const files = fakeFiles();
@@ -235,8 +286,8 @@ describe("office shifts: an export (plan ЧЗ)", () => {
     };
     const reversed = "[TXT][С коробами][Обратная] Отчет смены";
     for (const [shift, source, radios] of [
-      [CLOSED_PALLETS, rows(), 11],
-      [{ ...CLOSED_PALLETS, palletsEnabled: false }, withoutPallets(), 6],
+      [CLOSED_PALLETS, rows(), 14],
+      [{ ...CLOSED_PALLETS, palletsEnabled: false }, withoutPallets(), 8],
     ] as const) {
       const files = fakeFiles();
       const session = await openExport(shift, source, files);
@@ -426,6 +477,16 @@ describe("office shifts: an export (plan ЧЗ)", () => {
           "[XML][ГИСМТ] Агрегация палетов без кодовНе все коды смены распределены по закрытым коробам.",
         disabled: true,
       },
+      {
+        label: "[1C][csv] Общая выгрузкаНе все коды смены распределены по закрытым коробам.",
+        disabled: true,
+      },
+      {
+        label:
+          "[1C][csv] Выгрузка Короба - КодыНе все коды смены распределены по закрытым коробам.",
+        disabled: true,
+      },
+      { label: "[1C][csv] Выгрузка Палеты - Короба", disabled: false },
     ]);
     fireEvent.click(
       within(dialog()).getByRole("radio", { name: "[TXT][Без коробов] Отчет смены" }),
@@ -888,6 +949,7 @@ describe("office shifts: an export's words, turns and care (plan ЧЗ, task 8)",
     const failures: Record<ExportFailure, true> = {
       SHIFT_NOT_CLOSED: true,
       SHIFT_HAS_NO_CODES: true,
+      SET_EXPORT_CONFLICT: true,
       BOX_COVERAGE_INCOMPLETE: true,
       SHIFT_HAS_NO_PALLETS: true,
       PALLET_NOT_CLOSED: true,
@@ -1210,7 +1272,7 @@ describe("office shifts: an export's words, turns and care (plan ЧЗ, task 8)",
   it("shows how far the check of the formats has come while it makes it", async () => {
     const session = await openDialog(CLOSED_PALLETS, rows(), fakeFiles());
     expect(session.api.getShiftExportSource).toHaveBeenCalledTimes(1);
-    await within(dialog()).findByText(/^Проверяем, какие форматы доступны: \d+ из 13…$/);
+    await within(dialog()).findByText(/^Проверяем, какие форматы доступны: \d+ из 16…$/);
     await within(dialog()).findByRole("radiogroup");
     expect(within(dialog()).queryByText(/^Проверяем, какие форматы/)).toBeNull();
   });

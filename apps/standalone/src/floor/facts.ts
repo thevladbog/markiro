@@ -14,6 +14,7 @@ import {
   type ShiftClosedFact,
   type UnitLabelFact,
 } from "../host/protocol.js";
+import { MAX_BATCH_BYTES } from "../local/facts-sender.js";
 import type { LocalStatement } from "../local/executor.js";
 import type { Pairing } from "../local/reference-sync.js";
 
@@ -85,16 +86,10 @@ export function scannedCode(km: ParsedKm): ScannedCode {
   return { codeHash: kmHash(km), gtin14: km.gtin14, serial: km.serial, canonical: km.raw };
 }
 
-/**
- * The largest record the outbox keeps, in bytes of its JSON. A scan's record
- * is about 1.3 KB at most (a canonical code of 1024 bytes), so this only
- * keeps out a record no fact makes; and a batch of 100 such records stays
- * under the host's 2 MiB body limit, past which the host answers 400
- * `validation_failed` and the same batch would be refused for good.
- */
+/** The ordinary fact limit in UTF-8 bytes. An assembly fact can use the batch budget. */
 export const MAX_RECORD_BYTES = 16 * 1024;
 
-/** A record larger than `MAX_RECORD_BYTES`: never kept, so it can never block the outbox. */
+/** A record larger than its applicable limit is never added to the outbox. */
 export class RecordTooLargeError extends Error {
   constructor(bytes: number) {
     super(`a record of ${bytes} bytes`);
@@ -121,7 +116,8 @@ export function outboxStatement(
   const checked = factRecordSchema.parse(record);
   const payload = JSON.stringify(checked);
   const bytes = new TextEncoder().encode(payload).length;
-  if (bytes > MAX_RECORD_BYTES) throw new RecordTooLargeError(bytes);
+  const maxBytes = checked.kind === "set_assembled" ? MAX_BATCH_BYTES : MAX_RECORD_BYTES;
+  if (bytes > maxBytes) throw new RecordTooLargeError(bytes);
   return {
     sql:
       "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at) " +

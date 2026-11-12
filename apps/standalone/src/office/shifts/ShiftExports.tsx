@@ -1,4 +1,8 @@
-import { getPalletExportFormat, getShiftExportFormat } from "@markiro/domain";
+import {
+  getPalletExportFormat,
+  getShiftExportFormat,
+  getStandaloneExportFormat,
+} from "@markiro/domain";
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -20,7 +24,10 @@ const COUNT = new Intl.NumberFormat("ru");
 function formatLabel(row: OfficeShiftExport): string {
   try {
     return row.palletId === null
-      ? getShiftExportFormat(row.formatId, row.formatVersion).label
+      ? (
+          getStandaloneExportFormat(row.formatId, row.formatVersion) ??
+          getShiftExportFormat(row.formatId, row.formatVersion)
+        ).label
       : getPalletExportFormat(row.formatId, row.formatVersion).label;
   } catch {
     return `${row.formatId} v${row.formatVersion}`;
@@ -52,14 +59,17 @@ export function ShiftExports({
   const titleId = useId();
   const formsTitleId = useId();
   const settingsTitleId = useId();
-  const forms = useOfficeQuery(officeKeys.shiftForms(shift.id), (api, token) =>
-    api.listExportFiles(token, { shiftId: shift.id, kind: "form" }),
+  const setAssembly = shift.setItems !== undefined;
+  const forms = useOfficeQuery(
+    officeKeys.shiftForms(shift.id),
+    (api, token) => api.listExportFiles(token, { shiftId: shift.id, kind: "form" }),
+    { enabled: !setAssembly },
   );
   const exports = useOfficeQuery(officeKeys.shiftExports(shift.id), (api, token) =>
     api.listShiftExports(token, shift.id),
   );
 
-  const columns: TableColumn<OfficeShiftExport>[] = [
+  const allColumns: TableColumn<OfficeShiftExport>[] = [
     {
       key: "at",
       title: t("office.shiftCard.exports.at"),
@@ -126,6 +136,9 @@ export function ShiftExports({
       render: (row) => row.userName ?? t("office.common.none"),
     },
   ];
+  const columns = setAssembly
+    ? allColumns.filter((column) => column.key !== "boxes" && column.key !== "pallets")
+    : allColumns;
 
   const formColumns: TableColumn<ExportFile>[] = [
     {
@@ -172,26 +185,28 @@ export function ShiftExports({
           )}
         </Card>
       </section>
-      <section className="shift-card__section" aria-labelledby={formsTitleId}>
-        <h2 id={formsTitleId}>{t("office.shiftCard.exports.formsTitle")}</h2>
-        <Card>
-          <p className="office-note">{t("office.shiftCard.exports.formsHint")}</p>
-          {forms.isPending ? (
-            <PageLoading />
-          ) : forms.isError ? (
-            <LoadError error={forms.error} onRetry={() => void forms.refetch()} />
-          ) : (
-            <PagedTable
-              tableId="shift-export-files"
-              columns={formColumns}
-              rows={forms.data.items}
-              getRowKey={(row) => row.id}
-              empty={t("office.shiftCard.exports.formsEmpty")}
-              scrollLabel={t("office.shiftCard.exports.formsTable")}
-            />
-          )}
-        </Card>
-      </section>
+      {!setAssembly && (
+        <section className="shift-card__section" aria-labelledby={formsTitleId}>
+          <h2 id={formsTitleId}>{t("office.shiftCard.exports.formsTitle")}</h2>
+          <Card>
+            <p className="office-note">{t("office.shiftCard.exports.formsHint")}</p>
+            {forms.isPending ? (
+              <PageLoading />
+            ) : forms.isError ? (
+              <LoadError error={forms.error} onRetry={() => void forms.refetch()} />
+            ) : (
+              <PagedTable
+                tableId="shift-export-files"
+                columns={formColumns}
+                rows={forms.data.items}
+                getRowKey={(row) => row.id}
+                empty={t("office.shiftCard.exports.formsEmpty")}
+                scrollLabel={t("office.shiftCard.exports.formsTable")}
+              />
+            )}
+          </Card>
+        </section>
+      )}
       <section className="shift-card__section" aria-labelledby={settingsTitleId}>
         <h2 id={settingsTitleId}>{t("office.storedFiles.settings.title")}</h2>
         <Card>

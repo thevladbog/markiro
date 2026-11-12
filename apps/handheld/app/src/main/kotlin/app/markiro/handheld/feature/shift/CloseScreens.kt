@@ -77,7 +77,7 @@ fun CloseScreen(step: CloseStep, cb: CloseCallbacks) {
                     Icons.Outlined.Factory,
                     stringResource(if (step.preview.shared) R.string.close_part_confirm_title else R.string.close_confirm_title),
                     text,
-                    primary = StateAction(stringResource(R.string.close_action), cb.onConfirm),
+                    primary = if (step.preview.pendingSetDraft) null else StateAction(stringResource(R.string.close_action), cb.onConfirm),
                     secondary = StateAction(stringResource(R.string.common_cancel), cb.onCancel),
                 )
             }
@@ -102,9 +102,11 @@ fun CloseScreen(step: CloseStep, cb: CloseCallbacks) {
                 val partTitle = step.outcome == CloseOutcome.PART_CLOSED || (step.part && step.outcome == CloseOutcome.PENDING)
                 AppBar(stringResource(if (partTitle) R.string.close_summary_part_title else R.string.close_summary_title))
                 Column(Modifier.padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
-                    SummaryRow(stringResource(R.string.close_summary_accepted), step.accepted.toString())
-                    SummaryRow(stringResource(R.string.close_summary_errors), step.errors.toString())
-                    SummaryRow(stringResource(R.string.close_summary_duplicates), step.duplicates.toString())
+                    SummaryRow(stringResource(if (step.assembly) R.string.set_shift_total else R.string.close_summary_accepted), step.accepted.toString())
+                    if (!step.assembly) {
+                        SummaryRow(stringResource(R.string.close_summary_errors), step.errors.toString())
+                        SummaryRow(stringResource(R.string.close_summary_duplicates), step.duplicates.toString())
+                    }
                     // Design brief 10 §9 lists boxes and pallets in this summary,
                     // grouped with the other production counts; conflicts stay
                     // last because they are about sync, not about what was made.
@@ -164,6 +166,8 @@ private fun SummaryRow(label: String, value: String) {
 private fun confirmText(p: ShiftCloser.Preview): String {
     val others = p.othersOpen
     return when {
+        p.pendingSetDraft -> stringResource(R.string.set_finish_before_close)
+        p.assembly -> stringResource(R.string.set_close_confirm, p.accepted)
         !p.shared -> stringResource(R.string.close_confirm_text, p.accepted, p.errors, p.duplicates)
         others == null -> stringResource(R.string.close_part_confirm_text_unknown, p.accepted, p.errors, p.duplicates)
         others > 0 -> stringResource(R.string.close_part_confirm_text_others, p.accepted, p.errors, p.duplicates, others)

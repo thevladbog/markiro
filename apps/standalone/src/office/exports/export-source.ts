@@ -2,16 +2,19 @@ import type {
   ShiftExportFormatDescriptor,
   ShiftExportPalletGroup,
   ShiftExportSource,
+  StandaloneExportSet,
+  StandaloneShiftExportFormat,
+  StandaloneUnfSource,
 } from "@markiro/domain";
 
 import type { CloudPalletRows } from "../../host/cloud-history-read.js";
 import type { ShiftExportRows } from "../../host/protocol.js";
 
 /**
- * The cloud's export source (`apps/api/src/modules/shift-exports/shift-export-source.service.ts`,
+ * For the shared formats, the cloud's export source (`apps/api/src/modules/shift-exports/shift-export-source.service.ts`,
  * `loadFromTransaction` and `loadPallet`) ported over the host's rows (plan
  * ЧЗ): the same checks in the same order, the same order of codes, boxes and
- * pallets, the same grouping. Nothing here is the standalone's own rule but
+ * pallets, the same grouping. The differences for these formats are
  * the operation instant (`shiftOperationDateTime`) and the count of pallets
  * taken apart, which only warns. `packages/domain/test/fixtures/shift-export-parity`
  * holds the cases both products must render to the same bytes; the cloud's
@@ -22,7 +25,7 @@ import type { ShiftExportRows } from "../../host/protocol.js";
  * reprocessings with flatOnly; only flat TXT/CSV formats include those codes.
  */
 
-/** The cloud's refusals of an export's source (`ShiftExportSourceErrorCode`), less `SHIFT_DATE_MISSING`. */
+/** Refusals before rendering, including the shared formats' source checks. */
 export type ExportSourceRefusal =
   | "SHIFT_NOT_CLOSED"
   | "SHIFT_HAS_NO_CODES"
@@ -31,7 +34,8 @@ export type ExportSourceRefusal =
   | "PALLET_NOT_CLOSED"
   | "PALLET_DISASSEMBLED"
   | "ORG_INN_MISSING"
-  | "ORG_NAME_MISSING";
+  | "ORG_NAME_MISSING"
+  | "SET_EXPORT_CONFLICT";
 
 export type SourceResult<T> = { ok: true; value: T } | { ok: false; refusal: ExportSourceRefusal };
 
@@ -80,12 +84,29 @@ interface EligibleBox {
   codes: string[];
 }
 
+export interface SetExportRow {
+  setCode: { canonical: string };
+  items: readonly { canonical: string }[];
+  outcome: "accepted" | "conflict";
+}
+
 function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function compareAuthoritative(left: Authoritative, right: Authoritative): number {
   return left.time - right.time || compareCodeUnits(left.codeHash, right.codeHash);
+}
+
+function authoritativeCodes(rows: ShiftExportRows, includeFlatOnly: boolean): Authoritative[] {
+  return rows.codes
+    .filter((code) => includeFlatOnly || !code.flatOnly)
+    .map((code) => ({
+      codeHash: code.codeHash,
+      time: Date.parse(code.scannedAt),
+      canonical: code.canonical,
+    }))
+    .sort(compareAuthoritative);
 }
 
 /** Ascending by an instant; a null (never once a group exists) first. */
@@ -139,14 +160,7 @@ export function shiftExportSnapshot(
     if (organizationInn === null) return { ok: false, refusal: "ORG_INN_MISSING" };
     if (organizationName === null) return { ok: false, refusal: "ORG_NAME_MISSING" };
   }
-  const selected = rows.codes.filter((code) => format.boxMode === "flat" || !code.flatOnly);
-  const authoritative = selected
-    .map((code) => ({
-      codeHash: code.codeHash,
-      time: Date.parse(code.scannedAt),
-      canonical: code.canonical,
-    }))
-    .sort(compareAuthoritative);
+  const authoritative = authoritativeCodes(rows, format.boxMode === "flat");
   if (authoritative.length === 0) return { ok: false, refusal: "SHIFT_HAS_NO_CODES" };
 
   let source: ShiftExportSource;
@@ -186,6 +200,88 @@ export function shiftExportSnapshot(
       source,
     },
   };
+}
+
+interface UnfExportSnapshot {
+  source: StandaloneUnfSource;
+  openPalletSuppressedBoxCount: number;
+}
+
+export function unfExportSnapshot(
+  rows: ShiftExportRows,
+  format: StandaloneShiftExportFormat,
+): SourceResult<UnfExportSnapshot> {
+  if (rows.shift.status !== "closed") return { ok: false, refusal: "SHIFT_NOT_CLOSED" };
+  let boxes: EligibleBox[] = [];
+  if (format.id !== "shift_csv_unf_pallet_boxes") {
+    const authoritative = authoritativeCodes(rows, false);
+    if (authoritative.length === 0) return { ok: false, refusal: "SHIFT_HAS_NO_CODES" };
+    const eligible = eligibleBoxes(rows, authoritative);
+    if (eligible === null) return { ok: false, refusal: "BOX_COVERAGE_INCOMPLETE" };
+    boxes = eligible.sort((left, right) => compareCodeUnits(left.sscc, right.sscc));
+  }
+  if (format.id === "shift_csv_unf_pallet_boxes" && !rows.shift.palletsEnabled) {
+    return { ok: false, refusal: "SHIFT_HAS_NO_PALLETS" };
+  }
+  if (format.id === "shift_csv_unf_box_codes" || !rows.shift.palletsEnabled) {
+    return { ok: true, value: { source: { boxes, pallets: [] }, openPalletSuppressedBoxCount: 0 } };
+  }
+
+  const palletById = new Map(rows.pallets.map((pallet) => [pallet.id, pallet]));
+  const groups = new Map<string, { sscc: string; closedAt: string; boxSsccs: string[] }>();
+  let openPalletSuppressedBoxCount = 0;
+  for (const box of rows.boxes) {
+    if (box.closedAt === null || box.sscc === null || box.disassembledAt !== null) continue;
+    const pallet = box.palletId === null ? undefined : palletById.get(box.palletId);
+    if (pallet === undefined || pallet.disassembledAt !== null) continue;
+    if (pallet.closedAt === null || pallet.sscc === null) {
+      openPalletSuppressedBoxCount += 1;
+      continue;
+    }
+    const group = groups.get(pallet.id) ?? {
+      sscc: pallet.sscc,
+      closedAt: pallet.closedAt,
+      boxSsccs: [],
+    };
+    group.boxSsccs.push(box.sscc);
+    groups.set(pallet.id, group);
+  }
+  const pallets = [...groups.values()]
+    .sort(
+      (left, right) =>
+        compareNullableInstants(left.closedAt, right.closedAt) ||
+        compareCodeUnits(left.sscc, right.sscc),
+    )
+    .map(({ sscc, boxSsccs }) => ({ sscc, boxSsccs: boxSsccs.sort(compareCodeUnits) }));
+  if (format.id === "shift_csv_unf_pallet_boxes" && pallets.length === 0) {
+    return { ok: false, refusal: "SHIFT_HAS_NO_PALLETS" };
+  }
+  return { ok: true, value: { source: { boxes, pallets }, openPalletSuppressedBoxCount } };
+}
+
+export function setExportSnapshot(
+  rows: ShiftExportRows,
+  sets: readonly SetExportRow[],
+): SourceResult<StandaloneExportSet[]> {
+  const refusal = setExportRefusal(rows, sets);
+  if (refusal !== null) return { ok: false, refusal };
+  return {
+    ok: true,
+    value: sets.map(({ setCode, items }) => ({
+      code: setCode.canonical,
+      items: items.map((item) => item.canonical),
+    })),
+  };
+}
+
+export function setExportRefusal(
+  rows: ShiftExportRows,
+  sets: readonly SetExportRow[],
+): ExportSourceRefusal | null {
+  if (rows.shift.status !== "closed") return "SHIFT_NOT_CLOSED";
+  if (sets.some((set) => set.outcome === "conflict")) return "SET_EXPORT_CONFLICT";
+  if (sets.length === 0) return "SHIFT_HAS_NO_CODES";
+  return null;
 }
 
 /**

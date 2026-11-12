@@ -59,6 +59,7 @@ data class ShiftEntity(
     val palletLabelTemplateSpec: String? = null,
     @androidx.room.ColumnInfo(defaultValue = "0")
     val allowPreviouslyAcceptedCodes: Boolean = false,
+    val setItemsJson: String? = null,
 )
 
 /** Accepted codes on this device, keyed by the KM hash device-wide (a code is one physical item). */

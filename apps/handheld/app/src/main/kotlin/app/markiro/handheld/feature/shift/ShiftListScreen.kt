@@ -78,6 +78,7 @@ data class ShiftCard(
     val active: Boolean,
     val enabled: Boolean,
     val disabledReason: Int?,
+    val assembly: Boolean = false,
 )
 
 private fun ShiftEntity.card(reachable: Boolean) = ShiftCard(
@@ -91,6 +92,7 @@ private fun ShiftEntity.card(reachable: Boolean) = ShiftCard(
     tolling = counterpartyName,
     active = status == "active",
     enabled = bundleFetchedAt != null || reachable,
+    assembly = setItemsJson != null,
     disabledReason = if (bundleFetchedAt == null && !reachable) R.string.shifts_needs_network else null,
 )
 
@@ -105,6 +107,7 @@ private fun ShiftDto.card(reachable: Boolean, lineName: String) = ShiftCard(
     tolling = counterpartyName,
     active = status == "active",
     enabled = reachable,
+    assembly = setItems.isNotEmpty(),
     disabledReason = if (!reachable) R.string.shifts_needs_network else null,
 )
 
@@ -220,7 +223,7 @@ fun ShiftCardView(card: ShiftCard, onClick: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp1),
             verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp1),
         ) {
-            MarkiroChip(stringResource(R.string.shifts_mode_validation), Tone.Neutral)
+            MarkiroChip(stringResource(if (card.assembly) R.string.set_title else R.string.shifts_mode_validation), Tone.Neutral)
             if (card.aggregation) MarkiroChip(stringResource(R.string.shifts_mode_aggregation), Tone.Info)
             // Only alongside aggregation: pallets are built out of closed
             // boxes, so the flag is meaningless on a validation shift and a

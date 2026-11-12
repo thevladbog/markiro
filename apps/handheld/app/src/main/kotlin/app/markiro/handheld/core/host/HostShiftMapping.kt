@@ -3,16 +3,21 @@ package app.markiro.handheld.core.host
 import app.markiro.handheld.core.network.BundleLabelTemplateDto
 import app.markiro.handheld.core.network.BundleProductDto
 import app.markiro.handheld.core.network.BundleSsccDto
+import app.markiro.handheld.core.network.SetItemDto
 import app.markiro.handheld.core.network.ShiftDto
 import app.markiro.handheld.core.network.ValidationPrintDto
 import app.markiro.handheld.core.network.host.DeviceShiftDto
 import app.markiro.handheld.core.storage.SsccRangeEntity
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
+
+private val recipeJson = Json { ignoreUnknownKeys = true }
 
 private fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull
 private fun JsonObject.number(key: String): Int? = (this[key] as? JsonPrimitive)?.intOrNull
@@ -39,7 +44,13 @@ fun DeviceShiftDto.toShiftDto(lineName: String?) = ShiftDto(
     palletsEnabled = palletsEnabled,
     openedAt = openedAt,
     closedAt = closedAt,
+    setItems = assemblyItems(),
 )
+
+fun DeviceShiftDto.assemblyItems(): List<SetItemDto> {
+    val frozen = snapshot?.product?.get("setItems")?.takeUnless { it is JsonNull }
+    return if (frozen == null) setItems else recipeJson.decodeFromJsonElement(ListSerializer(SetItemDto.serializer()), frozen)
+}
 
 fun JsonObject.toBundleProduct() = BundleProductDto(
     id = checkNotNull(text("id")),

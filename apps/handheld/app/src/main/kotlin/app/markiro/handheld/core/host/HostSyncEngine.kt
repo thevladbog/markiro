@@ -3,6 +3,7 @@ package app.markiro.handheld.core.host
 import app.markiro.handheld.core.network.host.FactReceiptDto
 import app.markiro.handheld.core.network.host.HostApi
 import app.markiro.handheld.core.network.host.HostApiError
+import app.markiro.handheld.core.sets.SET_ASSEMBLED
 import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.HostOutboxEntity
@@ -132,7 +133,8 @@ class HostSyncEngine(
         val dao = db.hostOutboxDao()
         var previous: List<String>? = null
         while (true) {
-            val batch = dao.queuedFor(target, if (target in isolating) 1 else MAX_BATCH)
+            val sizes = dao.queuedBodySizes(target, if (target in isolating) 1 else MAX_BATCH)
+            val batch = dao.queuedFor(target, batchCount(sizes))
             if (batch.isEmpty()) {
                 isolating.remove(target)
                 return true
@@ -179,13 +181,27 @@ class HostSyncEngine(
         if (batch.size > 1) {
             isolating += target
         } else {
-            db.hostOutboxDao().quarantine(batch.single().recordId, "refused_$status")
+            val row = batch.single()
+            db.recovery.commit {
+                db.hostOutboxDao().quarantine(row.recordId, "refused_$status")
+                if (row.sourceKind == SET_ASSEMBLED) db.setAssemblyDao().settle(row.sourceKey, "conflict")
+            }
         }
         return true
     }
 
     companion object {
         const val TARGET = "facts"
+        const val MAX_BODY_BYTES = 2 * 1024 * 1024
+
+        internal fun batchCount(sizes: List<Int>): Int {
+            var bytes = """{"records":[]}""".length
+            for ((index, size) in sizes.withIndex()) {
+                bytes += size + if (index == 0) 0 else 1
+                if (bytes > MAX_BODY_BYTES) return index.coerceAtLeast(1)
+            }
+            return sizes.size
+        }
         const val EVENTS = "events"
         private const val MAX_ROUNDS = 4
         private const val MAX_REFUSALS = 3

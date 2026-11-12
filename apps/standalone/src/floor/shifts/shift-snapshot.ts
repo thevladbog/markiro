@@ -110,7 +110,21 @@ export function checkShiftSnapshot(raw: unknown, palletsEnabled = false): Snapsh
     return { ok: false, reason: "gtin" };
   }
   if (!ISSUER_PREFIX.test(issuerPrefix)) return { ok: false, reason: "prefix" };
-  const box = readTemplate(boxTemplate);
+  // The host keeps the wire slot for existing shift snapshots. Assembly does
+  // not print, so this layout is never passed to a printer.
+  const box =
+    product.setItems === undefined
+      ? readTemplate(boxTemplate)
+      : {
+          ...boxTemplate,
+          spec: {
+            widthMm: 10,
+            heightMm: 10,
+            dpi: 203,
+            language: "zpl",
+            elements: [],
+          } satisfies LabelTemplateSpec,
+        };
   if (box === null) return { ok: false, reason: "layout" };
   const pallet =
     parsed.data.palletTemplate === undefined ? null : readTemplate(parsed.data.palletTemplate);

@@ -17,6 +17,7 @@ import {
 } from "../shifts/shift-participation.js";
 import { UNRESOLVED_UNIT_LABEL_SQL } from "../unit-labels/unit-label-store.js";
 import type { BoxContext } from "../work/box-close.js";
+import { readLostSets } from "../work/set-assembly.js";
 import { readLostCodes } from "../work/work-reads.js";
 import { stationReasonRequired } from "./shared-reason.js";
 
@@ -37,6 +38,7 @@ export type CloseBlocker =
   | { kind: "label" }
   | { kind: "label_unresolved" }
   | { kind: "open_pallet"; boxes: number }
+  | { kind: "open_set" }
   | { kind: "closed" };
 
 /** What a part's close of a shared shift does (plan 2b), as the station knows it. */
@@ -71,6 +73,7 @@ const summaryRow = z.object({
   open_items: z.number().int().nonnegative(),
   waiting: z.number().int().nonnegative(),
   pallet_boxes: z.number().int().nonnegative(),
+  draft_items: z.number().int().nonnegative().optional(),
 });
 
 /** The counts of the shift's codes and closed boxes, as one statement's guard compares them. */
@@ -139,6 +142,20 @@ export const MARK_CLOSING_SQL =
   "AND b.device_id = s.device_id AND b.shift_id = s.id AND b.closed_at IS NOT NULL " +
   "AND b.disassembled_at IS NULL) = ?";
 
+const MARK_SCOPE = "m.host_id = s.host_id AND m.device_id = s.device_id AND m.shift_id = s.id";
+const COMPLETED_SETS = `(SELECT count(*) FROM floor_set_marks m WHERE ${MARK_SCOPE} AND m.is_set = 1)`;
+const DRAFT_ITEMS = `FROM floor_set_marks m WHERE ${MARK_SCOPE} AND m.assembly_id IS NULL`;
+
+const SET_CLOSE_SUMMARY_SQL =
+  `SELECT s.local_state, ${COMPLETED_SETS} AS actual, (SELECT count(*) ${DRAFT_ITEMS}) AS draft_items, ` +
+  "0 AS closed, 0 AS open_items, 0 AS waiting, 0 AS pallet_boxes " +
+  "FROM floor_shifts s WHERE s.host_id = ? AND s.device_id = ? AND s.id = ?";
+
+const SET_MARK_CLOSING_SQL =
+  "UPDATE floor_shifts AS s SET local_state = 'closing' WHERE s.host_id = ? " +
+  "AND s.device_id = ? AND s.id = ? AND s.local_state IS NULL AND s.planned_qty IS ? " +
+  `AND NOT EXISTS (SELECT 1 ${DRAFT_ITEMS}) AND ${COMPLETED_SETS} = ? AND ? = 0`;
+
 const unresolvedRow = z.object({ n: z.number().int().nonnegative() });
 
 /**
@@ -161,7 +178,7 @@ export async function readCloseSummary(
 ): Promise<CloseSummary> {
   const copy = await readShiftCopy(local, pairing, shiftId);
   const [row] = await local.query(
-    CLOSE_SUMMARY_SQL,
+    copy?.setAssembly ? SET_CLOSE_SUMMARY_SQL : CLOSE_SUMMARY_SQL,
     [pairing.hostId, pairing.deviceId, shiftId],
     summaryRow,
   );
@@ -182,20 +199,23 @@ export async function readCloseSummary(
   const blocker: CloseBlocker | null =
     row.local_state !== null
       ? { kind: "closed" }
-      : row.open_items > 0
-        ? { kind: "open_box", items: row.open_items }
-        : row.waiting > 0
-          ? { kind: "label" }
-          : (unresolved?.n ?? 0) > 0
-            ? { kind: "label_unresolved" }
-            : row.pallet_boxes > 0
-              ? { kind: "open_pallet", boxes: row.pallet_boxes }
-              : null;
+      : (row.draft_items ?? 0) > 0
+        ? { kind: "open_set" }
+        : row.open_items > 0
+          ? { kind: "open_box", items: row.open_items }
+          : row.waiting > 0
+            ? { kind: "label" }
+            : (unresolved?.n ?? 0) > 0
+              ? { kind: "label_unresolved" }
+              : row.pallet_boxes > 0
+                ? { kind: "open_pallet", boxes: row.pallet_boxes }
+                : null;
   // Plan 2b: what the host's last read said of the shift; unreadable, the shift is a solo one.
   const participation = await readParticipation(local, pairing, shiftId).catch(() => null);
   const shared = sharedParticipation(participation);
   // The codes of this station the host counts for no one here (final review I2).
-  const lost = shared === null ? 0 : await readLostCodes(local, pairing, shiftId).catch(() => 0);
+  const readLost = copy.setAssembly ? readLostSets : readLostCodes;
+  const lost = shared === null ? 0 : await readLost(local, pairing, shiftId).catch(() => 0);
   const part: PartClose | null =
     shared === null
       ? null
@@ -305,7 +325,8 @@ export async function closeShift(
       },
       outboxStatement(record, pairing, closedAt),
       {
-        sql: MARK_CLOSING_SQL,
+        sql:
+          shift.snapshot.product.setItems === undefined ? MARK_CLOSING_SQL : SET_MARK_CLOSING_SQL,
         values: [...scope, summary.plannedQty, summary.actualQty, summary.closedBoxes],
         expectedChanges: 1,
       },

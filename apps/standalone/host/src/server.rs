@@ -669,6 +669,10 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::office_boxes::list_pallets),
         )
         .route(
+            "/v1/office/shifts/{id}/sets",
+            get(crate::routes::office_sets::list_sets),
+        )
+        .route(
             "/v1/office/shifts/{id}/scans",
             get(crate::routes::office_scan_history::list_scans),
         )
@@ -1079,17 +1083,9 @@ mod tests {
 
     #[tokio::test]
     async fn a_supported_version_passes() {
-        // Protocol 8 (a handheld's warehouse pallet disassembly) is this build's; 7 (several
-        // devices in one shift, plan 2b), 6 (handhelds on the host, plan ТСД), 5 (the duplicate print, plan РЕЖ part B), 4 (shift modes, part A), 3 (pallets, plan ПЛ-Х), 2 (stage 2a) and 1
-        // (stage 1) are still taken.
-        assert_eq!(call(Some("8")).await.0, StatusCode::OK);
-        assert_eq!(call(Some("7")).await.0, StatusCode::OK);
-        assert_eq!(call(Some("6")).await.0, StatusCode::OK);
-        assert_eq!(call(Some("5")).await.0, StatusCode::OK);
-        assert_eq!(call(Some("4")).await.0, StatusCode::OK);
-        assert_eq!(call(Some("3")).await.0, StatusCode::OK);
-        assert_eq!(call(Some("2")).await.0, StatusCode::OK);
-        assert_eq!(call(Some("1")).await.0, StatusCode::OK);
+        for protocol in markiro_proto::MIN_PROTOCOL_VERSION..=markiro_proto::PROTOCOL_VERSION {
+            assert_eq!(call(Some(&protocol.to_string())).await.0, StatusCode::OK);
+        }
     }
 
     #[tokio::test]
@@ -1099,16 +1095,19 @@ mod tests {
         assert_eq!(body["error"]["code"], "protocol_unsupported");
         assert_eq!(body["error"]["details"]["protocol"], Value::Null);
         assert_eq!(body["error"]["details"]["minProtocol"], 1);
-        assert_eq!(body["error"]["details"]["maxProtocol"], 8);
+        assert_eq!(
+            body["error"]["details"]["maxProtocol"],
+            markiro_proto::PROTOCOL_VERSION
+        );
     }
 
     #[tokio::test]
     async fn an_out_of_range_or_garbled_version_is_refused() {
-        let (status, body) = call(Some("9")).await;
+        let future = markiro_proto::PROTOCOL_VERSION + 1;
+        let (status, body) = call(Some(&future.to_string())).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(body["error"]["details"]["protocol"], 9);
+        assert_eq!(body["error"]["details"]["protocol"], future);
         assert_eq!(call(Some("abc")).await.0, StatusCode::BAD_REQUEST);
         assert_eq!(call(Some("0")).await.0, StatusCode::BAD_REQUEST);
-        assert_eq!(call(Some("10")).await.0, StatusCode::BAD_REQUEST);
     }
 }

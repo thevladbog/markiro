@@ -110,7 +110,9 @@ export function renderGismtAggregationXml(input: {
     ...input.boxes.flatMap((box) => [
       "        <pack_content>",
       `            <pack_code>${xmlText(formatGismtAggregationSscc(box.sscc))}</pack_code>`,
-      ...box.codes.map((code) => `            <cis>${xmlText(stripKmCryptoTail(code))}</cis>`),
+      ...box.codes.map(
+        (code) => `            <cis>${xmlText(formatGismtAggregationCis(code))}</cis>`,
+      ),
       "        </pack_content>",
     ]),
     // Boxes first, pallets last. An aggregate cannot be nested before it
@@ -197,7 +199,7 @@ function isCanonicalIsoTimestamp(value: string): boolean {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString() === value;
 }
 
-function stripKmCryptoTail(code: string): string {
+export function formatGismtAggregationCis(code: string): string {
   try {
     const segments = parseKmSegments(code);
     const cis = `01${segments.gtin14}21${segments.serial}`;

@@ -34,6 +34,7 @@ export const RETAINED_TABLES = [
   "floor_print_jobs",
   "floor_boxes",
   "floor_pallets",
+  "floor_set_marks",
   "floor_unit_labels",
   "floor_shift_participation",
   "outbox",

@@ -1,14 +1,17 @@
 import {
   sanitizeShiftExportFilenameSegment,
   SHIFT_EXPORT_FORMATS,
+  STANDALONE_SHIFT_EXPORT_FORMATS,
   shiftExportFormatRequiresPallets,
   type ShiftExportFormatDescriptor,
+  type StandaloneShiftExportFormat,
 } from "@markiro/domain";
 
 import type { OfficePallet, ShiftExportRows, ShiftMode } from "../../host/protocol.js";
 import {
   palletExportSnapshot,
   shiftExportSnapshot,
+  unfExportSnapshot,
   type ExportSourceRefusal,
   type ShiftExportSnapshot,
   type SourceResult,
@@ -24,7 +27,7 @@ import {
  */
 
 export interface FormatOffer {
-  format: ShiftExportFormatDescriptor;
+  format: ShiftExportFormatDescriptor | StandaloneShiftExportFormat;
   /** `null`: the source allows it now. */
   refusal: ExportSourceRefusal | null;
 }
@@ -87,10 +90,11 @@ export function formatOffers(
   rows: ShiftExportRows,
   formedAt: string,
   mode: ShiftMode,
+  includeUnf = false,
 ): FormatOffer[] {
-  return offeredFormats(rows, mode).map((format) => {
-    const snapshot = shiftExportSnapshot(rows, format, formedAt);
-    return { format, refusal: snapshot.ok ? null : snapshot.refusal };
+  return offeredFormats(rows, mode, includeUnf).map((format) => {
+    const { refusal } = formatCheck(rows, format, formedAt);
+    return { format, refusal };
   });
 }
 
@@ -98,13 +102,22 @@ export function formatOffers(
 export function offeredFormats(
   rows: ShiftExportRows,
   mode: ShiftMode,
-): ShiftExportFormatDescriptor[] {
+  includeUnf = false,
+): FormatOffer["format"][] {
   if (mode === "validation") {
     return SHIFT_EXPORT_FORMATS.filter((format) => format.boxMode === "flat");
   }
-  return SHIFT_EXPORT_FORMATS.filter(
+  const formats: FormatOffer["format"][] = SHIFT_EXPORT_FORMATS.filter(
     (format) => rows.shift.palletsEnabled || !shiftExportFormatRequiresPallets(format),
   );
+  if (includeUnf) {
+    formats.push(
+      ...STANDALONE_SHIFT_EXPORT_FORMATS.filter(
+        (format) => rows.shift.palletsEnabled || format.id !== "shift_csv_unf_pallet_boxes",
+      ),
+    );
+  }
+  return formats;
 }
 
 /** A format's offer with its warnings, both from one snapshot of the shift. */
@@ -119,9 +132,17 @@ export interface FormatCheck extends FormatOffer {
  */
 export function formatCheck(
   rows: ShiftExportRows,
-  format: ShiftExportFormatDescriptor,
+  format: FormatOffer["format"],
   formedAt: string,
 ): FormatCheck {
+  if (!("boxMode" in format)) {
+    const snapshot = unfExportSnapshot(rows, format);
+    const warnings = lateDataWarnings(rows);
+    if (snapshot.ok && snapshot.value.openPalletSuppressedBoxCount > 0) {
+      warnings.push({ kind: "open_pallets", boxes: snapshot.value.openPalletSuppressedBoxCount });
+    }
+    return { format, refusal: snapshot.ok ? null : snapshot.refusal, warnings };
+  }
   const snapshot = shiftExportSnapshot(rows, format, formedAt);
   return {
     format,
@@ -188,10 +209,18 @@ export function exportCounts(rows: ShiftExportRows): ExportCounts {
  */
 export function exportWarnings(
   rows: ShiftExportRows,
-  format: ShiftExportFormatDescriptor,
+  format: FormatOffer["format"],
   formedAt: string,
 ): ExportWarning[] {
-  return warningsOf(rows, format, () => shiftExportSnapshot(rows, format, formedAt));
+  if ("boxMode" in format) {
+    return warningsOf(rows, format, () => shiftExportSnapshot(rows, format, formedAt));
+  }
+  return formatCheck(rows, format, formedAt).warnings;
+}
+
+export function lateDataWarnings(rows: ShiftExportRows): ExportWarning[] {
+  const at = rows.shift.lateDataAt;
+  return at === null ? [] : [{ kind: "late_data", at }];
 }
 
 /** The warnings of `format`; the snapshot is asked for only by a pallets format. */
@@ -200,10 +229,7 @@ function warningsOf(
   format: ShiftExportFormatDescriptor,
   snapshotOf: () => SourceResult<ShiftExportSnapshot>,
 ): ExportWarning[] {
-  const warnings: ExportWarning[] = [];
-  if (rows.shift.lateDataAt !== null) {
-    warnings.push({ kind: "late_data", at: rows.shift.lateDataAt });
-  }
+  const warnings = lateDataWarnings(rows);
   if (!shiftExportFormatRequiresPallets(format)) return warnings;
   const snapshot = snapshotOf();
   if (!snapshot.ok) return warnings;

@@ -70,6 +70,9 @@ data class IdentityResponse(val device: DeviceDto)
 @Serializable
 data class RosterResponse(val items: List<OperatorDto>)
 
+@Serializable
+data class SetItemDto(val gtin14: String, val productName: String, val quantity: Int)
+
 /** `GET /shifts` item; fields the handheld does not use (images, templates, dates of creation) are ignored. */
 @Serializable
 data class ShiftDto(
@@ -98,6 +101,7 @@ data class ShiftDto(
     val boxLabelTemplateId: String? = "missing-offline-grant-fact",
     val palletLabelTemplateId: String? = "missing-offline-grant-fact",
     val createdFrom: String = "missing-offline-grant-fact",
+    val setItems: List<SetItemDto> = emptyList(),
 )
 
 @Serializable

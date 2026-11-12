@@ -12,10 +12,11 @@
 //! device reads this list again to refresh its totals.
 
 use axum::extract::State;
-use axum::Json;
+use axum::{Extension, Json};
 use markiro_proto::{
     shift_supports, DeviceKind, DeviceShift, DeviceShiftCreate, DeviceShifts, ShiftEnter,
     ShiftLeave, ShiftMode, ShiftOrigin, ShiftSnapshot, ShiftStatus, ValidationPrint,
+    SET_ASSEMBLY_PROTOCOL_VERSION,
 };
 use serde_json::json;
 use sqlx::SqliteConnection;
@@ -26,7 +27,7 @@ use crate::clock::format_timestamp;
 use crate::db::{begin_write, commit_with_revision, next_revision};
 use crate::error::{ApiError, ApiJson, ApiPath};
 use crate::routes::devices::require_active_line;
-use crate::server::AppState;
+use crate::server::{AppState, ClientProtocol};
 use crate::shift_participants::{self, EntryDecision};
 use crate::shift_totals;
 use crate::shifts::{self, NewShift};
@@ -45,13 +46,15 @@ const SELECT: &str =
      s.planned_qty, s.box_capacity, s.box_template_id, \
      s.pallet_box_capacity, s.pallet_template_id, s.validation_print_mode, \
      s.validation_print_verification, s.validation_print_template_id, s.owner_device_id, \
-     s.opened_at, s.closed_at, l.max_stations \
+     s.opened_at, s.closed_at, l.max_stations, \
+     CASE WHEN s.snapshot IS NULL THEN p.set_items ELSE json_extract(s.snapshot, '$.product.setItems') END AS set_items \
      FROM shifts s JOIN products p ON p.id = s.product_id \
      JOIN lines l ON l.id = s.line_id \
      LEFT JOIN counterparties c ON c.id = s.counterparty_id";
 
 #[derive(sqlx::FromRow)]
 struct ShiftRow {
+    set_items: Option<String>,
     id: String,
     number_month_key: String,
     number_seq: i64,
@@ -86,6 +89,7 @@ fn record(row: ShiftRow) -> Result<DeviceShift, ApiError> {
     let created_from = row.created_from.parse().map_err(ApiError::internal)?;
     let status: ShiftStatus = row.status.parse().map_err(ApiError::internal)?;
     Ok(DeviceShift {
+        set_items: super::products::parse_set_items(row.set_items.as_deref())?,
         number: shifts::format_number(&row.number_month_key, row.number_seq, created_from),
         id: row.id,
         status,
@@ -185,6 +189,7 @@ const CLOSED_DAYS: i64 = 30;
 /// production date. A station without a line sees only the latter.
 pub async fn list_device_shifts(
     State(state): State<AppState>,
+    Extension(ClientProtocol(protocol)): Extension<ClientProtocol>,
     device: AuthDevice,
 ) -> Result<Json<DeviceShifts>, ApiError> {
     let cutoff = format_timestamp(state.now() - time::Duration::days(CLOSED_DAYS));
@@ -212,6 +217,9 @@ pub async fn list_device_shifts(
     let as_of = state.timestamp();
     let mut shifts = Vec::with_capacity(rows.len());
     for row in rows {
+        if protocol < SET_ASSEMBLY_PROTOCOL_VERSION && row.set_items.is_some() {
+            continue;
+        }
         let shift = record(row)?;
         let with_totals = shift.status == ShiftStatus::Active;
         shifts.push(with_participation(&mut tx, shift, &device.id, &as_of, with_totals).await?);
@@ -232,6 +240,7 @@ pub fn line_conflict() -> ApiError {
 /// no second shift.
 pub async fn create_device_shift(
     State(state): State<AppState>,
+    Extension(ClientProtocol(protocol)): Extension<ClientProtocol>,
     device: AuthDevice,
     ApiJson(create): ApiJson<DeviceShiftCreate>,
 ) -> Result<Json<DeviceShift>, ApiError> {
@@ -289,10 +298,13 @@ pub async fn create_device_shift(
             .map_err(ApiError::internal)?;
     if let Some(id) = repeated {
         // Nothing to write: the transaction rolls back when dropped.
-        return read(&mut tx, &id)
+        let shift = read(&mut tx, &id)
             .await?
-            .map(Json)
-            .ok_or_else(|| ApiError::internal("shift vanished"));
+            .ok_or_else(|| ApiError::internal("shift vanished"))?;
+        if shift.set_items.is_some() && protocol < SET_ASSEMBLY_PROTOCOL_VERSION {
+            return Err(station_update());
+        }
+        return Ok(Json(shift));
     }
     let lot_number = shifts::lot_number(create.lot_number.as_deref())?;
     if kind == DeviceKind::Handheld && lot_number.is_some() {
@@ -336,7 +348,16 @@ pub async fn create_device_shift(
     if let Some(counterparty_id) = &create.counterparty_id {
         shifts::check_counterparty(&mut tx, counterparty_id).await?;
     }
-    shifts::check_box_template(&mut tx, &create.box_template_id, product.group).await?;
+    let box_template_id = if product.is_set {
+        if protocol < SET_ASSEMBLY_PROTOCOL_VERSION {
+            return Err(station_update());
+        }
+        shifts::check_set_rules(mode, &validation_print, lot_number.as_deref())?;
+        shifts::SET_BOX_TEMPLATE_ID
+    } else {
+        shifts::check_box_template(&mut tx, &create.box_template_id, product.group).await?;
+        &create.box_template_id
+    };
     if let ValidationPrint::DuplicateDm { template_id, .. } = &validation_print {
         shifts::check_duplicate_template(&mut tx, template_id, product.group).await?;
     }
@@ -349,7 +370,7 @@ pub async fn create_device_shift(
         lot_number.is_some(),
     )
     .await?;
-    if kind == DeviceKind::Handheld {
+    if kind == DeviceKind::Handheld && !product.is_set {
         // Do not create a planned shift this client will be refused on entry.
         for (field, id) in [
             ("boxTemplateId", Some(create.box_template_id.as_str())),
@@ -416,7 +437,7 @@ pub async fn create_device_shift(
             planned_date,
             planned_qty: create.planned_qty,
             box_capacity: create.box_capacity.unwrap_or(product.box_capacity),
-            box_template_id: &create.box_template_id,
+            box_template_id,
             pallets,
             validation_print: &validation_print,
         },
@@ -482,6 +503,7 @@ fn require_supports(
     mode: ShiftMode,
     prints: bool,
     has_lot_number: bool,
+    is_set: bool,
     enter: &ShiftEnter,
 ) -> Result<(), ApiError> {
     let mut needed: Vec<&str> = match (mode, prints) {
@@ -496,6 +518,9 @@ fn require_supports(
     // know the host's protocol must not work the shift (spec 6.3).
     if kind == DeviceKind::Handheld {
         needed.push(shift_supports::HANDHELD_HOST);
+    }
+    if is_set {
+        needed.push(shift_supports::SET_ASSEMBLY);
     }
     if has_lot_number {
         needed.push(shift_supports::LOT_NUMBER);
@@ -541,6 +566,7 @@ fn require_template_support(snapshot: &ShiftSnapshot, enter: &ShiftEnter) -> Res
 /// A shift as an entry reads it, with its line's limit (plan 2b).
 #[derive(sqlx::FromRow)]
 struct EntryRow {
+    is_set: bool,
     status: String,
     mode: String,
     line_id: String,
@@ -581,6 +607,7 @@ struct EntryRow {
 /// joining an open shift checks neither (plan 2b: joining is no new shift).
 pub async fn enter_shift(
     State(state): State<AppState>,
+    Extension(ClientProtocol(protocol)): Extension<ClientProtocol>,
     device: AuthDevice,
     ApiPath(id): ApiPath<String>,
     enter: Option<ApiJson<ShiftEnter>>,
@@ -603,8 +630,11 @@ pub async fn enter_shift(
         "SELECT s.status, s.mode, s.line_id, s.product_id, s.box_template_id, \
          s.pallet_template_id, s.pallet_sheet_template_id, s.validation_print_mode, \
          s.validation_print_verification, s.validation_print_template_id, s.counterparty_id, \
-         s.snapshot, s.lot_number, s.number_month_key, s.number_seq, s.number_origin AS created_from, l.max_stations \
-         FROM shifts s JOIN lines l ON l.id = s.line_id WHERE s.id = ?",
+         s.snapshot, s.lot_number, s.number_month_key, s.number_seq, s.number_origin AS created_from, l.max_stations, \
+         CASE WHEN s.snapshot IS NULL THEN p.set_items \
+              ELSE json_extract(s.snapshot, '$.product.setItems') END IS NOT NULL AS is_set \
+         FROM shifts s JOIN lines l ON l.id = s.line_id JOIN products p ON p.id = s.product_id \
+         WHERE s.id = ?",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
@@ -664,11 +694,15 @@ pub async fn enter_shift(
         Some(ValidationPrint::None {}) | None => None,
     };
     let mode = shift.mode.parse().map_err(ApiError::internal)?;
+    if shift.is_set && protocol < SET_ASSEMBLY_PROTOCOL_VERSION {
+        return Err(station_update());
+    }
     require_supports(
         kind,
         mode,
         duplicate.is_some(),
         shift.lot_number.is_some(),
+        shift.is_set,
         &enter,
     )?;
     let origin = shift.created_from.parse().map_err(ApiError::internal)?;
@@ -914,6 +948,8 @@ struct CreateProduct {
     box_category_default: Option<String>,
     pallet_preference: Option<String>,
     pallet_category_default: Option<String>,
+    #[serde(skip)]
+    set_items: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -929,6 +965,7 @@ struct CreateTemplate {
 /// No layouts or operator records go through this route. POST checks the references again.
 pub async fn shift_create_options(
     State(state): State<AppState>,
+    Extension(ClientProtocol(protocol)): Extension<ClientProtocol>,
     device: AuthDevice,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
@@ -957,17 +994,29 @@ pub async fn shift_create_options(
     let products: Vec<CreateProduct> = sqlx::query_as(
         "SELECT p.id, p.name, p.gtin14, p.chz_group_code AS 'group', p.box_capacity, p.pallet_box_capacity, \
          p.default_box_template_id AS box_preference, box.template_id AS box_category_default, \
-         p.default_pallet_template_id AS pallet_preference, pal.template_id AS pallet_category_default \
+         p.default_pallet_template_id AS pallet_preference, pal.template_id AS pallet_category_default, p.set_items \
          FROM products p \
          LEFT JOIN category_template_defaults box ON box.chz_group_code=p.chz_group_code AND box.purpose='box' \
          LEFT JOIN category_template_defaults pal ON pal.chz_group_code=p.chz_group_code AND pal.purpose='pallet' \
          WHERE p.status='active' AND p.archived=0 AND p.chz_group_code IS NOT NULL \
            AND p.box_capacity IS NOT NULL AND p.pallet_box_capacity IS NOT NULL \
+           AND (? OR p.set_items IS NULL) \
          ORDER BY p.name COLLATE NOCASE, p.id",
     )
+    .bind(protocol >= SET_ASSEMBLY_PROTOCOL_VERSION)
     .fetch_all(&mut *tx)
     .await
     .map_err(ApiError::internal)?;
+    let products: Vec<_> = products
+        .into_iter()
+        .map(|product| {
+            let mut value = serde_json::to_value(&product).map_err(ApiError::internal)?;
+            if let Some(items) = super::products::parse_set_items(product.set_items.as_deref())? {
+                value["setItems"] = serde_json::to_value(items).map_err(ApiError::internal)?;
+            }
+            Ok::<_, ApiError>(value)
+        })
+        .collect::<Result<_, _>>()?;
     let rows: Vec<(String, String, String, Option<String>, String)> = sqlx::query_as(
         "SELECT id, name, purpose, category_codes, spec FROM label_templates \
          WHERE enabled=1 AND purpose IN ('box', 'pallet') \

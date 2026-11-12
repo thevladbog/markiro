@@ -1,4 +1,8 @@
-import { shiftExportFormatRequiresPallets } from "@markiro/domain";
+import {
+  STANDALONE_SET_EXPORT_FORMATS,
+  getStandaloneExportFormat,
+  shiftExportFormatRequiresPallets,
+} from "@markiro/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
@@ -24,10 +28,12 @@ import { civilDateLabel } from "../shifts/shift-list.js";
 import {
   conflictWarnings,
   exportFolder,
+  lateDataWarnings,
   reportedCountWarnings,
   type ExportWarning,
 } from "./export-checks.js";
 import { useExportPlan, yieldToUi } from "./export-plan.js";
+import { setExportRefusal } from "./export-source.js";
 import { OfficeFilesError, type SavedFolder } from "./office-files.js";
 import { storeExportFiles } from "./stored-files.js";
 import { useRefreshStoredFiles } from "./use-refresh-files.js";
@@ -72,6 +78,7 @@ export interface ExportDialogProps {
   /** An active or closed shift. */
   shift: Pick<OfficeShift, "id" | "number" | "mode">;
   sourceKind?: "native" | "cloud";
+  setAssembly?: boolean;
   /**
    * Only this pallet's ЧЗ document (plan КРТ, the pallet's card): the dialog
    * shows its row and its «XML палета», not the shift's formats.
@@ -86,10 +93,10 @@ export interface ExportDialogProps {
 }
 
 /**
- * «Выгрузка» of a shift (plan ЧЗ): the cloud's formats with what the source
- * would refuse now, the line limit, the warnings, and the pallets of the
- * shift for a ЧЗ document each. Forming reads the host's rows again, renders
- * with `@markiro/domain` exactly as the cloud does (`runExport`), saves the
+ * «Выгрузка» of a shift: its formats, with any reason the source would refuse
+ * them now, line limit when available, and the shift's pallets for individual
+ * ЧЗ documents. Forming reads the host's rows again, renders
+ * with `@markiro/domain` (`runExport`), saves the
  * parts into a new folder under «Документы\Markiro\Выгрузки» and only then
  * records the export in the host's audit trail; a record the host did not
  * take is said, with «Записать снова», and the saved files stay.
@@ -109,6 +116,7 @@ export function ExportDialog({
   demo = false,
   onClose,
   sourceKind = "native",
+  setAssembly = false,
 }: ExportDialogProps) {
   const { t } = useTranslation();
   const formId = useId();
@@ -118,6 +126,7 @@ export function ExportDialog({
   const session = useOfficeSession();
   const queryClient = useQueryClient();
   const refreshFiles = useRefreshStoredFiles();
+  const setMode = setAssembly && sourceKind === "native" && palletId === undefined;
   const sourceKey =
     sourceKind === "cloud"
       ? officeKeys.cloudExportSource(shift.id)
@@ -127,6 +136,11 @@ export function ExportDialog({
       ? api.getCloudShiftExportSource(token, shift.id)
       : api.getShiftExportSource(token, shift.id),
   );
+  const sets = useOfficeQuery(
+    officeKeys.shiftSets(shift.id),
+    (api, token) => api.listShiftSets(token, shift.id),
+    { enabled: setMode },
+  );
   const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
   const rows = source.data;
   // The host's own count of a pallet's boxes against the station's: information, so a list that
@@ -134,15 +148,21 @@ export function ExportDialog({
   const palletList = useOfficeQuery(
     officeKeys.shiftPallets(shift.id),
     (api, token) => api.listShiftPallets(token, shift.id),
-    { enabled: sourceKind === "native" && rows?.shift.palletsEnabled === true },
+    { enabled: !setMode && sourceKind === "native" && rows?.shift.palletsEnabled === true },
   );
   // The shift's unreviewed conflicts (plan КНФ): information, so a list that does not load
   // leaves the dialog whole and the warning out (ПР-12: never a refusal).
   const conflictQuery: ConflictQuery = { shiftId: shift.id, reviewed: false, page: 1 };
-  const unreviewed = useOfficeQuery(officeKeys.conflictList(conflictQuery), (api, token) =>
-    api.listConflicts(token, conflictQuery),
+  const unreviewed = useOfficeQuery(
+    officeKeys.conflictList(conflictQuery),
+    (api, token) => api.listConflicts(token, conflictQuery),
+    { enabled: !setMode },
   );
-  const plan = useExportPlan(rows, shift.mode);
+  const plan = useExportPlan(
+    setMode ? undefined : rows,
+    shift.mode,
+    sourceKind === "native" && palletId === undefined,
+  );
   const record = useOfficeMutation((api, token, body: ShiftExportRecord) =>
     api.recordShiftExport(token, shift.id, body),
   );
@@ -177,9 +197,20 @@ export function ExportDialog({
   const reportTimeZone = () =>
     sourceKind === "cloud" ? requireHistoryTimeZone(rows?.organization.timeZone) : nativeTimeZone;
 
-  const checks = (plan.status === "ready" ? plan.plan.checks : []).filter(
-    (check) => !demo || !isGismtFormat(check.format.id),
-  );
+  const setReady = setMode && rows !== undefined && sets.isSuccess;
+  const ready = setMode ? setReady : plan.status === "ready";
+  const setRefusal = setReady ? setExportRefusal(rows, sets.data) : null;
+  const checks = setMode
+    ? setReady
+      ? STANDALONE_SET_EXPORT_FORMATS.map((format) => ({
+          format,
+          refusal: setRefusal,
+          warnings: lateDataWarnings(rows),
+        }))
+      : []
+    : (plan.status === "ready" ? plan.plan.checks : []).filter(
+        (check) => !demo || !isGismtFormat(check.format.id),
+      );
   // A pallet's own dialog (plan КРТ) lists that pallet only; a demo shift's pallets get no ЧЗ
   // document.
   const pallets =
@@ -196,13 +227,20 @@ export function ExportDialog({
       : [
           ...selected.warnings,
           ...conflictWarnings(unreviewed.data?.total ?? 0),
-          ...(shiftExportFormatRequiresPallets(selected.format) && palletList.data !== undefined
+          ...("boxMode" in selected.format &&
+          shiftExportFormatRequiresPallets(selected.format) &&
+          palletList.data !== undefined
             ? reportedCountWarnings(palletList.data)
             : []),
         ];
-  const maxLines = split ? parseLineLimit(lineLimit) : null;
+  const standaloneFormat =
+    selected !== undefined &&
+    getStandaloneExportFormat(selected.format.id, selected.format.version) !== undefined;
+  const allowSplit = !setMode && !standaloneFormat;
+  const splitSelected = allowSplit && split;
+  const maxLines = splitSelected ? parseLineLimit(lineLimit) : null;
   const lineLimitError =
-    split && maxLines === null ? t("office.exports.lineLimitError") : undefined;
+    splitSelected && maxLines === null ? t("office.exports.lineLimitError") : undefined;
   const busy = phase !== "idle";
   const cancelable = phase === "reading" || phase === "forming";
 
@@ -243,11 +281,16 @@ export function ExportDialog({
       let fresh;
       try {
         fresh = await Promise.race([
-          session.call((token) =>
-            sourceKind === "cloud"
-              ? session.api.getCloudShiftExportSource(token, shift.id)
-              : session.api.getShiftExportSource(token, shift.id),
-          ),
+          Promise.all([
+            session.call((token) =>
+              sourceKind === "cloud"
+                ? session.api.getCloudShiftExportSource(token, shift.id)
+                : session.api.getShiftExportSource(token, shift.id),
+            ),
+            setMode
+              ? session.call((token) => session.api.listShiftSets(token, shift.id))
+              : undefined,
+          ]),
           calledOffWhileReading,
         ]);
       } catch (error) {
@@ -263,22 +306,27 @@ export function ExportDialog({
         setOutcome({ kind: "cancelled" });
         return;
       }
+      const [freshRows, freshSets] = fresh;
       const originalZone =
         sourceKind === "cloud"
-          ? requireHistoryTimeZone(fresh.organization.timeZone)
+          ? requireHistoryTimeZone(freshRows.organization.timeZone)
           : nativeTimeZone;
       setPhase("forming");
       await yieldToUi();
       const formedAt = new Date().toISOString();
       const documentId = crypto.randomUUID();
-      const result = runExport(fresh, {
-        formatId: format.id,
-        formatVersion: format.version,
-        maxLines: lines,
-        palletId,
-        documentId,
-        formedAt,
-      });
+      const result = runExport(
+        freshRows,
+        {
+          formatId: format.id,
+          formatVersion: format.version,
+          maxLines: lines,
+          palletId,
+          documentId,
+          formedAt,
+        },
+        freshSets,
+      );
       // A click that came while it formed is handled in this turn, before anything is saved.
       await yieldToUi();
       if (calledOff.current) {
@@ -322,7 +370,7 @@ export function ExportDialog({
       let folderFailure: string | null = null;
       try {
         saved = await files.save(
-          exportFolder(fresh.shift.number, format.id, formedAt, originalZone),
+          exportFolder(freshRows.shift.number, format.id, formedAt, originalZone),
           parts.map((part) => ({ name: part.filename, bytes: part.bytes })),
         );
       } catch (error) {
@@ -445,7 +493,7 @@ export function ExportDialog({
       case "recording":
         return t("office.exports.recording");
       case "idle":
-        return plan.status === "working" && rows !== undefined
+        return !setMode && plan.status === "working" && rows !== undefined
           ? t("office.exports.checking", { done: plan.done, total: plan.total })
           : "";
     }
@@ -531,7 +579,7 @@ export function ExportDialog({
   };
 
   const content = () => {
-    if (source.isPending || org.isPending) return <PageLoading />;
+    if (source.isPending || org.isPending || (setMode && sets.isPending)) return <PageLoading />;
     if (source.isError || rows === undefined) {
       return sourceKind === "cloud" ? (
         <Alert
@@ -548,6 +596,9 @@ export function ExportDialog({
         <LoadError error={source.error} onRetry={() => void source.refetch()} />
       );
     }
+    if (setMode && sets.isError) {
+      return <LoadError error={sets.error} onRetry={() => void sets.refetch()} />;
+    }
     if (!sourceZoneSupported)
       return (
         <Alert tone="error">{t("office.cloudHistory.errors.history_time_zone_unsupported")}</Alert>
@@ -560,7 +611,14 @@ export function ExportDialog({
             date: civilDateLabel(rows.shift.productionDate),
           })}
         </p>
-        {plan.status === "ready" && (
+        {setMode && sets.data !== undefined && (
+          <p className="office-note">
+            {t("office.exports.setCounts", {
+              sets: sets.data.filter((set) => set.outcome === "accepted").length,
+            })}
+          </p>
+        )}
+        {!setMode && plan.status === "ready" && (
           <p className="office-note">
             {t("office.exports.counts", {
               codes: plan.plan.counts.codes,
@@ -599,7 +657,7 @@ export function ExportDialog({
             </Alert>
           ))}
         </div>
-        {plan.status === "ready" && (
+        {ready && (
           <>
             {palletId === undefined && (
               <>
@@ -627,13 +685,15 @@ export function ExportDialog({
                     }))}
                   />
                 </div>
-                <Checkbox
-                  label={t("office.exports.split")}
-                  checked={split}
-                  disabled={busy}
-                  onCheckedChange={setSplit}
-                />
-                {split && (
+                {allowSplit && (
+                  <Checkbox
+                    label={t("office.exports.split")}
+                    checked={split}
+                    disabled={busy}
+                    onCheckedChange={setSplit}
+                  />
+                )}
+                {splitSelected && (
                   <Input
                     label={t("office.exports.lineLimit")}
                     inputMode="numeric"
@@ -642,6 +702,15 @@ export function ExportDialog({
                     {...(lineLimitError === undefined ? {} : { error: lineLimitError })}
                     onChange={(event) => setLineLimit(event.target.value)}
                   />
+                )}
+                {standaloneFormat && (
+                  <Alert tone="info">
+                    {t(
+                      selected.format.id === "shift_xlsx_chz_set_registry"
+                        ? "office.exports.setRegistryHint"
+                        : "office.exports.unfCsvHint",
+                    )}
+                  </Alert>
                 )}
               </>
             )}

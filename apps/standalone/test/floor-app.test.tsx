@@ -52,7 +52,13 @@ import { SHARED_ENTERED } from "./support/multi-station.js";
 
 /** The body of every entry this station sends (`shift-enter.json`, plan РЕЖ). */
 const STATION_ENTRY = {
-  supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1", "lot-number"],
+  supports: [
+    "validation-v1",
+    "validation-dm-duplicate-v1",
+    "multi-station-v1",
+    "lot-number",
+    "set-assembly-v1",
+  ],
 };
 
 // The tones are the work screen's; the floor only gives them a level.
@@ -106,7 +112,7 @@ async function madeAsAsked(body: DeviceShiftCreate): Promise<DeviceShift> {
   return {
     ...PLANNED,
     productId: body.productId,
-    boxTemplateId: body.boxTemplateId,
+    boxTemplateId: body.boxTemplateId ?? PLANNED.boxTemplateId,
     productionDate: body.productionDate,
     boxCapacity: body.boxCapacity ?? PLANNED.boxCapacity,
     plannedQty: body.plannedQty ?? null,

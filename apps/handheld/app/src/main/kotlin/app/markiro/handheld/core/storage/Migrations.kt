@@ -581,3 +581,15 @@ val MIGRATION_25_26 = object : Migration(25, 26) {
             db.execSQL("ALTER TABLE print_destinations ADD COLUMN printer_outputMode TEXT")
     }
 }
+
+/** A frozen recipe and the device's completed sets and their code claims. */
+val MIGRATION_26_27 = object : Migration(26, 27) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        if ("setItemsJson" !in db.columnsOf("shift_mirror")) {
+            db.execSQL("ALTER TABLE shift_mirror ADD COLUMN setItemsJson TEXT")
+        }
+        db.execSQL("CREATE TABLE IF NOT EXISTS set_assemblies (id TEXT NOT NULL PRIMARY KEY, shiftId TEXT NOT NULL, status TEXT NOT NULL)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_set_assemblies_shiftId ON set_assemblies (shiftId)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS set_assembly_claims (codeHash TEXT NOT NULL PRIMARY KEY, setId TEXT NOT NULL)")
+    }
+}

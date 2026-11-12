@@ -5,7 +5,7 @@ enum class HostCompatibility { COMPATIBLE, HOST_TOO_OLD, APP_TOO_OLD }
 /** `markiro_proto::compatibility_for`: who must update, decided from the `hello` envelope before anything else is read. */
 object HostCompat {
     /** The protocol this build speaks (`PROTOCOL_VERSION` of the host crate). */
-    const val PROTOCOL = 6
+    const val PROTOCOL = 9
 
     /** The oldest protocol this build still speaks to (`MIN_PROTOCOL_VERSION`). */
     const val MIN_PROTOCOL = 1

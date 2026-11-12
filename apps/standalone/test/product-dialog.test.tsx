@@ -163,6 +163,48 @@ describe("office product dialog", () => {
     localStorage.removeItem("markiro.theme");
   });
 
+  it("creates a set from active marked cosmetics with an explicit quantity", async () => {
+    const fake = session();
+    const cream: OfficeProduct = {
+      ...MILK,
+      id: "00000000-0000-4000-8000-000000000023",
+      gtin14: "04607123456804",
+      name: "Крем для рук",
+      printName: null,
+      chzProductGroupCode: 35,
+    };
+    const items = [{ gtin14: cream.gtin14, productName: cream.name, quantity: 2 }];
+    fake.api.listProducts.mockResolvedValue([MILK, AYRAN, cream]);
+    fake.api.createProduct.mockResolvedValue({
+      ...cream,
+      id: "00000000-0000-4000-8000-000000000024",
+      gtin14: "04607123456781",
+      name: "Зимний набор",
+      setItems: items,
+    });
+    await openProducts(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Добавить набор" }));
+    type("GTIN набора", "4607123456781");
+    type("Название набора", "Зимний набор");
+    expect(choices("Товар из каталога")).toContain("Крем для рук · 04607123456804");
+    expect(choices("Товар из каталога")).not.toContain("Молоко 3,2% 0,9 л · 04600682000013");
+    chooseValue("Товар из каталога", cream.gtin14);
+    fireEvent.click(screen.getByRole("button", { name: "Добавить в состав" }));
+    type("Количество: Крем для рук", "2");
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() =>
+      expect(fake.api.createProduct).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          name: "Зимний набор",
+          gtin14: "04607123456781",
+          chzProductGroupCode: 35,
+          setItems: items,
+        }),
+      ),
+    );
+  });
+
   it("lets both office roles add and change products", async () => {
     for (const user of [TECHNOLOGIST, { ...TECHNOLOGIST, role: "admin" as const }]) {
       const view = renderOffice(session(user), { initialPath: "/products" });

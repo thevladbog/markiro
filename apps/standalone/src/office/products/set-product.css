@@ -1,0 +1,39 @@
+.set-product__recipe {
+  min-width: 0;
+  margin: 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+}
+
+.set-product__recipe legend {
+  padding-inline: var(--sp-2);
+  font-weight: 600;
+}
+
+.set-product__recipe ul {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.set-product__recipe li,
+.set-product__add {
+  display: grid;
+  align-items: end;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-2);
+  margin-block: var(--sp-2);
+}
+
+.set-product__recipe li {
+  grid-template-columns: minmax(0, 1fr) minmax(6rem, 9rem) auto;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: var(--sp-2);
+}
+
+.set-product__recipe small {
+  display: block;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}

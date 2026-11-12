@@ -12,13 +12,9 @@ import {
 } from "../src/floor/outbox-status.js";
 import { UNSENT_SQL } from "../src/local/facts-sender.js";
 import { REOPEN_SQL } from "../src/local/restore-reconcile.js";
-import {
-  DUE_SHIFTS_SQL,
-  PURGE_COPY_SQL,
-  purgeTableSql,
-  RETAINED_TABLES,
-} from "../src/local/retention.js";
+import { DUE_SHIFTS_SQL, PURGE_COPY_SQL, purgeTableSql } from "../src/local/retention.js";
 import { DEVICE_ID, HOST_ID } from "./support/fixtures.js";
+import { RETAINED_TABLES_AT_0010 } from "./support/local-db.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building a URL from it.
 const testModuleUrl = import.meta.url;
@@ -50,16 +46,8 @@ function plans(db: DatabaseSync): Record<string, string> {
     REOPEN_SQL,
     DUE_SHIFTS_SQL,
     PURGE_COPY_SQL,
-    ...RETAINED_TABLES.map(purgeTableSql),
-  ]
-    // The unit labels' table comes with migration `0015` (plan РЕЖ part B), the participation
-    // cache's with `0022` (the shared shift), after this one.
-    .filter(
-      (sql) =>
-        !sql.includes("resolved_at") &&
-        !sql.includes("floor_unit_labels") &&
-        !sql.includes("floor_shift_participation"),
-    );
+    ...RETAINED_TABLES_AT_0010.map(purgeTableSql),
+  ].filter((sql) => !sql.includes("resolved_at"));
   return Object.fromEntries(
     statements.map((sql) => [
       sql,

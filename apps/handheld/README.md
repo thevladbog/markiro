@@ -19,6 +19,16 @@ available in Settings → About device: they use the public release channel with
 host or cloud device credentials. Hardware acceptance steps:
 `docs/runbooks/standalone-handheld-checklist.md`. Scoped notes: "Host mode" in `AGENTS.md`.
 
+### Marked sets in host mode
+
+This build uses host protocol 9. Upgrade Avtonom to 1.7.0 or later before
+updating the handhelds paired to it.
+In «Новая смена», scan the set's EAN or Data Matrix, or select the set from the
+catalogue. The work screen keeps the shift's frozen recipe and each item's
+count. Scan the package Data Matrix after all components are present. The
+unfinished assembly survives restart. A completed set enters the local sync
+queue and is sent to the host when connectivity returns.
+
 ## Build and test
 
     ./gradlew testDebugUnitTest lintDebug assembleDebug

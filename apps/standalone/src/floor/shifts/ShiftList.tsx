@@ -23,6 +23,7 @@ import { cardAction } from "./ShiftCard.js";
 import { opensBlocked } from "../license.js";
 import { queueBadge } from "./hub-layout.js";
 import { readAcceptedCounts } from "./shift-accepted.js";
+import { readLostSets } from "../work/set-assembly.js";
 import { readLostCodes } from "../work/work-reads.js";
 import { ShiftHubView, type HubCopies } from "./ShiftHub.js";
 
@@ -137,18 +138,16 @@ export function ShiftList({
       .then(async ([read, refused, participation]) => {
         // Only a shift this station entered and that has a plan can show «Принято N из M».
         const counted = read.filter((copy) => copy.entered && (copy.plannedQty ?? 0) > 0);
-        const accepted = await readAcceptedCounts(
-          local,
-          pairing,
-          counted.map((copy) => copy.id),
-        );
+        const accepted = await readAcceptedCounts(local, pairing, counted);
         // A shared shift's progress is the whole shift's: the others' part by the host and this
         // station's own codes, less those the host counts for no one here (plan 2b, the plan is
         // reached by the shift-wide total; final review I2). An unreadable loss counts none.
-        for (const [id, own] of accepted) {
+        for (const { id, setAssembly } of counted) {
+          const own = accepted.get(id);
           const shared = sharedParticipation(participation.get(id) ?? null);
-          if (shared === null) continue;
-          const lost = await readLostCodes(local, pairing, id).catch(() => 0);
+          if (own === undefined || shared === null) continue;
+          const readLost = setAssembly ? readLostSets : readLostCodes;
+          const lost = await readLost(local, pairing, id).catch(() => 0);
           accepted.set(id, sharedCount(shared, deviceId, own, lost).total);
         }
         return { read, refused, accepted, participation };

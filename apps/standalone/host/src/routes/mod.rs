@@ -34,6 +34,7 @@ pub mod office_pallet_create;
 pub mod office_pallets;
 pub mod office_reports;
 pub mod office_scan_history;
+pub mod office_sets;
 pub mod office_shift_review;
 pub mod office_shifts;
 pub mod office_users;

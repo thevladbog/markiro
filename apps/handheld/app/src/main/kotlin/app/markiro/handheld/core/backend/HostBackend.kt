@@ -9,6 +9,7 @@ import app.markiro.handheld.core.host.ShiftParticipationStore
 import app.markiro.handheld.core.host.toBundle
 import app.markiro.handheld.core.host.toBundleProduct
 import app.markiro.handheld.core.host.toBundleTemplate
+import app.markiro.handheld.core.host.assemblyItems
 import app.markiro.handheld.core.host.toShiftDto
 import app.markiro.handheld.core.network.BoxRegistryPageDto
 import app.markiro.handheld.core.network.BoxSsccTopUpDto
@@ -108,6 +109,10 @@ class HostBackend(
     override suspend fun bundle(shiftId: String): ShiftBundleDto {
         val entered = entries.remove(shiftId) ?: calls.run { api().enter(shiftId) }
         val snapshot = checkNotNull(entered.snapshot) { "an entered shift carries its snapshot" }
+        if (entered.assemblyItems().isNotEmpty()) return ShiftBundleDto(
+            shift = entered.toShiftDto(config.get()?.lineName),
+            product = snapshot.product.toBundleProduct(),
+        )
         val prefix = snapshot.issuerPrefix
         calls.run { supplier.ensure(prefix, 0) }
         if (entered.palletsEnabled) calls.run { supplier.ensure(prefix, 1) }

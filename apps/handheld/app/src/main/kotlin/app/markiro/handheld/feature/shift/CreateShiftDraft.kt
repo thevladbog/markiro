@@ -55,10 +55,11 @@ data class CreateShiftDraft(
 
     fun request(options: ShiftCreateOptionsDto, requestId: String): HostShiftCreateRequest? {
         val product = product(options) ?: return null
-        val boxes = mode != CreateShiftMode.VALIDATION
-        val pallets = mode == CreateShiftMode.PALLETS
+        val assembly = product.setItems.isNotEmpty()
+        val boxes = !assembly && mode != CreateShiftMode.VALIDATION
+        val pallets = !assembly && mode == CreateShiftMode.PALLETS
         if (!options.creationAllowed || (pallets && !options.palletsAllowed)) return null
-        val boxTemplate = template(options, "box") ?: return null
+        val boxTemplate = if (assembly) null else template(options, "box") ?: return null
         val boxCapacity = if (boxes) count(boxCapacity, MAX_SHIFT_BOX_CAPACITY) ?: return null else null
         val palletTemplate = if (pallets) template(options, "pallet") ?: return null else null
         val palletCapacity = if (pallets) count(palletCapacity, MAX_SHIFT_PALLET_CAPACITY) ?: return null else null
@@ -67,7 +68,7 @@ data class CreateShiftDraft(
         return HostShiftCreateRequest(
             requestId = requestId, expectedLineId = options.lineId, productId = product.id,
             mode = if (boxes) "aggregation" else "validation", productionDate = productionDate,
-            plannedDate = plannedDate, boxTemplateId = boxTemplate.id, plannedQty = plan,
+            plannedDate = plannedDate, boxTemplateId = boxTemplate?.id, plannedQty = plan,
             boxCapacity = boxCapacity, palletsEnabled = pallets, palletBoxCapacity = palletCapacity,
             palletTemplateId = palletTemplate?.id, palletSheetTemplateId = if (pallets) template(options, "sheet")?.id else null,
         )

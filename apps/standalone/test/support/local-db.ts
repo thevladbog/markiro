@@ -10,6 +10,18 @@ import { LocalDbError, type LocalExecutor } from "../../src/local/executor.js";
 const moduleUrl = import.meta.url;
 const MIGRATIONS = new URL("../../src-tauri/migrations/", moduleUrl);
 
+/** Shift record tables in the retention policy at migration 0010. */
+export const RETAINED_TABLES_AT_0010 = [
+  "floor_scans",
+  "floor_exceptions",
+  "floor_pallet_exceptions",
+  "floor_codes",
+  "floor_print_jobs",
+  "floor_boxes",
+  "floor_pallets",
+  "outbox",
+] as const;
+
 /** Same limits as `src-tauri/src/local_db.rs`. */
 const MAX_STATEMENTS = 32;
 const MAX_SQL_BYTES = 64 * 1024;

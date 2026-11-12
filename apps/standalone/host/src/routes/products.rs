@@ -9,7 +9,10 @@
 
 use axum::extract::State;
 use axum::Json;
-use markiro_proto::{OfficeProduct, ProductCreate, ProductGroup, ProductUpdate, TemplatePurpose};
+use markiro_proto::{
+    OfficeProduct, ProductCreate, ProductGroup, ProductUpdate, SetItem, TemplatePurpose,
+    MAX_SET_ITEMS,
+};
 use serde_json::json;
 use sqlx::SqliteConnection;
 
@@ -42,7 +45,7 @@ const SELECT: &str = "SELECT p.id, p.gtin14, p.name, p.print_name, p.chz_group_c
      p.default_pallet_template_id, p.default_pallet_sheet_id, p.egais_code, \
      p.default_counterparty_id, \
      (SELECT ph.checksum FROM product_photos ph WHERE ph.product_id = p.id) AS photo_checksum, \
-     p.demo, p.archived, p.status, p.rev FROM products p";
+     p.demo, p.archived, p.status, p.rev, p.set_items FROM products p";
 
 #[derive(sqlx::FromRow)]
 struct ProductRow {
@@ -64,10 +67,12 @@ struct ProductRow {
     archived: bool,
     status: String,
     rev: i64,
+    set_items: Option<String>,
 }
 
 fn record(row: ProductRow) -> Result<OfficeProduct, ApiError> {
     Ok(OfficeProduct {
+        set_items: parse_set_items(row.set_items.as_deref())?,
         id: row.id,
         gtin14: row.gtin14,
         name: row.name,
@@ -96,6 +101,68 @@ async fn read(conn: &mut SqliteConnection, id: &str) -> Result<Option<OfficeProd
         .await
         .map_err(ApiError::internal)?;
     row.map(record).transpose()
+}
+
+const COSMETICS_GROUP: u32 = 35;
+
+pub(crate) fn parse_set_items(raw: Option<&str>) -> Result<Option<Vec<SetItem>>, ApiError> {
+    raw.map(serde_json::from_str)
+        .transpose()
+        .map_err(ApiError::internal)
+}
+
+/// Resolve the current catalog names when editing a recipe or freezing one for a new shift.
+pub(crate) async fn resolve_set_items(
+    conn: &mut SqliteConnection,
+    set_gtin: &str,
+    group: Option<u32>,
+    items: &[SetItem],
+) -> Result<Vec<SetItem>, ApiError> {
+    if group != Some(COSMETICS_GROUP) {
+        return Err(ApiError::validation(
+            "chzProductGroupCode",
+            "only cosmetics sets are supported",
+        ));
+    }
+    let total: u64 = items.iter().map(|item| u64::from(item.quantity)).sum();
+    if !(1..=u64::from(MAX_SET_ITEMS)).contains(&total) {
+        return Err(ApiError::validation(
+            "setItems",
+            format!("a set must contain 1-{MAX_SET_ITEMS} components"),
+        ));
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut resolved = Vec::with_capacity(items.len());
+    for item in items {
+        let gtin14 = validate::gtin14("setItems", &item.gtin14)?;
+        if gtin14 == set_gtin || !seen.insert(gtin14.clone()) || item.quantity == 0 {
+            return Err(ApiError::validation(
+                "setItems",
+                "each component must have a distinct GTIN and a positive quantity",
+            ));
+        }
+        let product_name = sqlx::query_scalar(
+            "SELECT name FROM products WHERE gtin14 = ? AND archived = 0 AND status = 'active' \
+             AND chz_group_code = ? AND set_items IS NULL",
+        )
+        .bind(&gtin14)
+        .bind(COSMETICS_GROUP)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| {
+            ApiError::validation(
+                "setItems",
+                "the component must be an active marked cosmetics product",
+            )
+        })?;
+        resolved.push(SetItem {
+            gtin14,
+            product_name,
+            quantity: item.quantity,
+        });
+    }
+    Ok(resolved)
 }
 
 /// The fields a create and an update share, as the request sent them.
@@ -357,13 +424,28 @@ pub async fn create_product(
     ApiJson(create): ApiJson<ProductCreate>,
 ) -> Result<Json<OfficeProduct>, ApiError> {
     context.require_catalog()?;
-    let fields = Sent::from(&create).validate()?;
+    let mut fields = Sent::from(&create).validate()?;
     let egais_code = effective_egais_code(&fields, None)?;
     let default_counterparty_id = fields.default_counterparty_id.clone().flatten();
     let at = state.timestamp();
     let id = uuid::Uuid::new_v4().to_string();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_catalog_in(&mut tx).await?;
+    let set_items = if let Some(items) = create.set_items.as_deref() {
+        fields.box_capacity.get_or_insert(1);
+        fields.pallet_box_capacity.get_or_insert(1);
+        Some(
+            resolve_set_items(
+                &mut tx,
+                &fields.gtin14,
+                fields.chz_product_group_code,
+                items,
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
     check_references(&mut tx, &fields).await?;
     check_default_counterparty(&mut tx, default_counterparty_id.as_deref(), None).await?;
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
@@ -371,8 +453,8 @@ pub async fn create_product(
         "INSERT INTO products (id, gtin14, name, print_name, chz_group_code, box_capacity, \
          pallet_box_capacity, shelf_life_days, default_box_template_id, \
          default_pallet_template_id, default_pallet_sheet_id, egais_code, \
-         default_counterparty_id, archived, rev) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+         default_counterparty_id, archived, rev, set_items) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
     )
     .bind(&id)
     .bind(&fields.gtin14)
@@ -393,6 +475,13 @@ pub async fn create_product(
     .bind(&egais_code)
     .bind(&default_counterparty_id)
     .bind(rev)
+    .bind(
+        set_items
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(ApiError::internal)?,
+    )
     .execute(&mut *tx)
     .await
     .map_err(gtin_taken)?;
@@ -405,7 +494,9 @@ pub async fn create_product(
             target_type: Some("product"),
             target_id: Some(&id),
             outcome: Outcome::Ok,
-            details: if egais_code.is_some() || default_counterparty_id.is_some() {
+            details: if let Some(items) = set_items {
+                json!({ "gtin14": fields.gtin14, "name": fields.name, "setItems": items })
+            } else if egais_code.is_some() || default_counterparty_id.is_some() {
                 json!({
                     "gtin14": fields.gtin14,
                     "name": fields.name,
@@ -435,7 +526,7 @@ pub async fn update_product(
     ApiJson(update): ApiJson<ProductUpdate>,
 ) -> Result<Json<OfficeProduct>, ApiError> {
     context.require_catalog()?;
-    let fields = Sent::from(&update).validate()?;
+    let mut fields = Sent::from(&update).validate()?;
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_catalog_in(&mut tx).await?;
@@ -451,6 +542,45 @@ pub async fn update_product(
     if current.rev != update.expected_rev {
         return Err(ApiError::stale_revision(current.rev));
     }
+    if current.set_items.is_none() && update.set_items.is_some() {
+        return Err(ApiError::validation(
+            "setItems",
+            "a product's type cannot be changed",
+        ));
+    }
+    let set_items = if let Some(current_items) = current.set_items.as_ref() {
+        fields.box_capacity = Some(current.box_capacity.unwrap_or(1));
+        fields.pallet_box_capacity = Some(current.pallet_box_capacity.unwrap_or(1));
+        if fields.chz_product_group_code != Some(COSMETICS_GROUP) {
+            return Err(ApiError::validation(
+                "chzProductGroupCode",
+                "only cosmetics sets are supported",
+            ));
+        }
+        match update.set_items.as_deref() {
+            Some(items) => Some(
+                resolve_set_items(
+                    &mut tx,
+                    &fields.gtin14,
+                    fields.chz_product_group_code,
+                    items,
+                )
+                .await?,
+            ),
+            None if current.gtin14 != fields.gtin14 => Some(
+                resolve_set_items(
+                    &mut tx,
+                    &fields.gtin14,
+                    fields.chz_product_group_code,
+                    current_items,
+                )
+                .await?,
+            ),
+            None => Some(current_items.clone()),
+        }
+    } else {
+        None
+    };
     let default_pallet_sheet_id = fields
         .default_pallet_sheet_id
         .clone()
@@ -516,6 +646,7 @@ pub async fn update_product(
             json!(default_counterparty_id),
         ),
         ("archived", json!(current.archived), json!(update.archived)),
+        ("setItems", json!(current.set_items), json!(set_items)),
     ]) else {
         // Nothing actually changed: report the product as-is without bumping
         // the revision, writing a row nobody changed, or auditing a no-op.
@@ -527,7 +658,7 @@ pub async fn update_product(
          box_capacity = ?, pallet_box_capacity = ?, shelf_life_days = ?, \
          default_box_template_id = ?, default_pallet_template_id = ?, \
          default_pallet_sheet_id = ?, egais_code = ?, default_counterparty_id = ?, \
-         archived = ?, rev = ? WHERE id = ?",
+         archived = ?, rev = ?, set_items = ? WHERE id = ?",
     )
     .bind(&fields.gtin14)
     .bind(&fields.name)
@@ -543,6 +674,13 @@ pub async fn update_product(
     .bind(&default_counterparty_id)
     .bind(update.archived)
     .bind(rev)
+    .bind(
+        set_items
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(ApiError::internal)?,
+    )
     .bind(&id)
     .execute(&mut *tx)
     .await

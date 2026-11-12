@@ -4,6 +4,7 @@ import app.markiro.handheld.core.grants.*
 import android.database.sqlite.SQLiteConstraintException
 import app.markiro.handheld.core.host.ShiftParticipationStore
 import app.markiro.handheld.core.km.Verdict
+import app.markiro.handheld.core.sets.SetAssemblyStore
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.ShiftCloseEntity
 import app.markiro.handheld.core.util.Iso
@@ -12,6 +13,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
+
+class PendingSetDraft : IllegalStateException()
 
 /** Port of the station's closeShiftOffline: the close is a durable local fact before any network. */
 class ShiftCloser(
@@ -53,6 +56,8 @@ class ShiftCloser(
         val othersOpen: Int? = null,
         /** The count the plan is judged against in the reason step: the shift-wide total in a shared shift, this device's own otherwise; `null` reads as [accepted]. */
         val reasonBasis: Int? = null,
+        val assembly: Boolean = false,
+        val pendingSetDraft: Boolean = false,
     )
 
     suspend fun preview(shiftId: String): Preview? {
@@ -68,9 +73,10 @@ class ShiftCloser(
         } catch (_: Exception) {
         }
         val figures = participation.get(shiftId)
-        val accepted = db.codeDao().countForShift(shiftId)
+        val accepted = if (shift.setItemsJson == null) db.codeDao().countForShift(shiftId)
+        else db.setAssemblyDao().countFinished(shiftId)
         // Codes the host gave to another device are inside the others' part already: the shift-wide total must not count them twice.
-        val lost = db.codeDao().lostForShift(shiftId)
+        val lost = if (shift.setItemsJson == null) db.codeDao().lostForShift(shiftId) else 0
         val now = clock()
         val shared = SharedShiftRules.isShared(figures)
         val errors = db.scanEventDao().count(shiftId, Verdict.INVALID.wire) + db.scanEventDao().count(shiftId, Verdict.WRONG_GTIN.wire)
@@ -87,6 +93,8 @@ class ShiftCloser(
             closedBoxes = if (aggregation) db.boxDao().closedCount(shiftId) else null,
             closedPallets = if (aggregation && shift.palletsEnabled) db.palletDao().closedCount(shiftId) else null,
             shared = shared,
+            assembly = shift.setItemsJson != null,
+            pendingSetDraft = shift.setItemsJson != null && db.metaDao().get(SetAssemblyStore.draftKey(shiftId)) != null,
             othersOpen = if (shared && SharedShiftRules.isFresh(figures, now)) figures?.othersOpen else null,
             reasonBasis = if (figures != null && figures.participantsEver >= 2 && SharedShiftRules.isFresh(figures, now)) {
                 SharedShiftRules.shiftTotal(figures, accepted, lost)
@@ -105,7 +113,9 @@ class ShiftCloser(
             return@commit existing
         }
         val shift = db.shiftDao().get(shiftId) ?: error("shift $shiftId is not on this device")
-        val accepted = db.codeDao().countForShift(shiftId)
+        if (shift.setItemsJson != null && db.metaDao().get(SetAssemblyStore.draftKey(shiftId)) != null) throw PendingSetDraft()
+        val accepted = if (shift.setItemsJson == null) db.codeDao().countForShift(shiftId)
+        else db.setAssemblyDao().countFinished(shiftId)
         val reason = reasonCode?.takeIf { it in REASONS }
         // Stage 2a's refusal holds where the host still holds the shift to it: this device is the only one that ever worked it (the host's
         // `reason_need` with one participant: `Required`). In a shared shift the reason is asked when it is known to be needed (`preview`), and a

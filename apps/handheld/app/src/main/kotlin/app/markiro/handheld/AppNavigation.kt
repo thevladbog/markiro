@@ -114,6 +114,7 @@ import app.markiro.handheld.feature.work.PalletCloseCallbacks
 import app.markiro.handheld.feature.work.PalletCloseScreen
 import app.markiro.handheld.feature.work.PalletCloseStep
 import app.markiro.handheld.feature.work.WorkCallbacks
+import app.markiro.handheld.feature.work.SetAssemblyScreen
 import app.markiro.handheld.feature.work.WorkScreen
 import app.markiro.handheld.feature.work.WorkViewModel
 
@@ -526,13 +527,19 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                 var duplicateReplacement by remember(duplicateStep.jobId()) { mutableStateOf<String?>(null) }
                 val planPrompt by vm.planPrompt.collectAsStateWithLifecycle()
                 val shiftId = entry.arguments?.getString("shiftId").orEmpty()
-                WorkScreen(
+                val assembly by vm.assembly.collectAsStateWithLifecycle()
+                val leave = {
+                    vm.leave()
+                    nav.popBackStack(Routes.HUB, inclusive = false)
+                    Unit
+                }
+                if (state.shift?.setItemsJson != null) SetAssemblyScreen(
+                    state, assembly, onLeave = leave, onClose = { nav.navigate(Routes.close(shiftId)) },
+                    onRemove = vm::removeSetItem,
+                ) else WorkScreen(
                     state,
                     WorkCallbacks(
-                        onLeave = {
-                            vm.leave()
-                            nav.popBackStack(Routes.HUB, inclusive = false)
-                        },
+                        onLeave = leave,
                         onClose = { nav.navigate(Routes.close(shiftId)) },
                         onConflicts = { nav.navigate(Routes.conflicts(shiftId)) },
                         onCloseBoxEarly = vm::closeEarly,
@@ -610,7 +617,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                 // Last of the three overlays: a box close or a duplicate is about
                 // the unit in the operator's hand and must win over a prompt about
                 // the shift as a whole.
-                if (planPrompt && closeStep == BoxCloseStep.Idle && duplicateStep == DuplicateStep.Idle) {
+                if (planPrompt && assembly.draft.isEmpty() && closeStep == BoxCloseStep.Idle && duplicateStep == DuplicateStep.Idle) {
                     PlanReachedScreen(
                         total = state.total,
                         plan = state.plan ?: 0,

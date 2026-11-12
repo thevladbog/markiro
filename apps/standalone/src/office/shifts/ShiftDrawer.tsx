@@ -58,6 +58,7 @@ import { ShiftTotalsBody } from "./ShiftTotalsDialog.js";
 import { ShiftEditBody, type ShiftEditStatus } from "./ShiftEditor.js";
 import { ShiftExports } from "./ShiftExports.js";
 import { ShiftScans } from "./ShiftScans.js";
+import { ShiftSets } from "./ShiftSets.js";
 import { PalletCountTag } from "./PalletCountTag.js";
 import { ShiftSummaryMetrics, ShiftDeviceContributions } from "./ShiftSummaryMetrics.js";
 import "./shift-summary.css";
@@ -98,6 +99,7 @@ type CardDialog = "export" | "close" | "reason";
 export const DRAWER_TABS = [
   "summary",
   "stations",
+  "sets",
   "boxes",
   "pallets",
   "scans",
@@ -116,9 +118,12 @@ function isDrawerTab(value: string | null): value is DrawerTab {
 export function drawerTabs(shift: OfficeShift): DrawerTab[] {
   if (shift.status === "planned") return ["summary"];
   const validation = shift.mode === "validation";
+  const setAssembly = shift.setItems !== undefined;
   return DRAWER_TABS.filter((tab) => {
     // The devices of a shared shift (plan 2b); a host before protocol 7 names none.
     if (tab === "stations") return (shift.participants?.length ?? 0) > 0;
+    if (tab === "sets") return setAssembly;
+    if (setAssembly) return tab === "summary" || tab === "rejections" || tab === "exports";
     if (tab === "boxes") return !validation;
     if (tab === "pallets") return shift.palletsEnabled;
     // Box and pallet exceptions only: a validation shift can have none.
@@ -214,6 +219,7 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
     void queryClient.invalidateQueries({ queryKey: officeKeys.shift(id) });
     void queryClient.invalidateQueries({ queryKey: officeKeys.shiftBoxes(id) });
     void queryClient.invalidateQueries({ queryKey: officeKeys.shiftPallets(id) });
+    void queryClient.invalidateQueries({ queryKey: officeKeys.shiftSets(id) });
     void queryClient.invalidateQueries({ queryKey: officeKeys.shiftExceptions(id) });
     void queryClient.invalidateQueries({ queryKey: officeKeys.shiftRejections(id) });
     void queryClient.invalidateQueries({ queryKey: officeKeys.shiftExports(id) });
@@ -324,6 +330,7 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
     );
 
   const editable = canPlan && current.status === "planned";
+  const setAssembly = current.setItems !== undefined;
   const demo = isDemoShift(current, products.data);
   const title = (
     <>
@@ -405,7 +412,7 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
           {t("office.shifts.supplyReason")}
         </Button>
       )}
-      {current.status !== "closed" && (
+      {current.status !== "closed" && !setAssembly && (
         <Button variant="secondary" onClick={() => setForm({ kind: "task" })}>
           {t("office.shiftCard.taskForm")}
         </Button>
@@ -457,6 +464,7 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
         {active === "stations" && (
           <ShiftStations key={`stations-${current.id}`} shift={current} at={at} />
         )}
+        {active === "sets" && <ShiftSets key={`sets-${current.id}`} shift={current} at={at} />}
         {active === "boxes" && (
           <ShiftBoxes key={`boxes-${current.id}`} shift={current} at={at} onForm={setForm} />
         )}
@@ -495,6 +503,7 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
           <ExportDialog
             shift={current}
             demo={demo}
+            setAssembly={setAssembly}
             onClose={() => {
               setDialog(null);
               // A finished export wrote a row of the history.
@@ -566,6 +575,7 @@ function ShiftSummary({
   const { t } = useTranslation();
   const figuresId = useId();
   const validation = current.mode === "validation";
+  const setAssembly = current.setItems !== undefined;
   const duplicate =
     current.validationPrint?.mode === "duplicate_dm" ? current.validationPrint : null;
   return (
@@ -620,10 +630,12 @@ function ShiftSummary({
             {
               id: "mode",
               term: t("office.shifts.table.mode"),
-              description: t(`office.shifts.modes.${current.mode}`),
+              description: t(
+                setAssembly ? "office.shiftCard.sets.mode" : `office.shifts.modes.${current.mode}`,
+              ),
             },
             // The duplicate print is a validation shift's alone (plan РЕЖ part B).
-            ...(validation
+            ...(validation && !setAssembly
               ? [
                   {
                     id: "duplicate",
@@ -650,7 +662,7 @@ function ShiftSummary({
             },
             // A validation shift has no boxes and no pallets (plan РЕЖ, Р11): the capacity it
             // keeps (Р4) means nothing to it.
-            ...(validation
+            ...(validation || setAssembly
               ? []
               : [
                   {
@@ -672,7 +684,7 @@ function ShiftSummary({
                 ]),
             // The templates the shift prints with, frozen at its opening (a validation shift
             // prints no box label; its duplicate template is shown above with the flag).
-            ...(validation
+            ...(validation || setAssembly
               ? duplicate === null
                 ? []
                 : [

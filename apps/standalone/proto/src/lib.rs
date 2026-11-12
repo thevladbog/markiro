@@ -36,7 +36,10 @@ use sha2::{Digest, Sha256};
 /// box's `palletId`). A new fact kind, a new field of a fact's `data` or a
 /// new meaning of one raises it, because an older host refuses such a record
 /// for good.
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
+/// Protocol that introduced durable assembly facts for marked sets.
+pub const SET_ASSEMBLY_PROTOCOL_VERSION: u32 = 9;
+pub const MAX_SET_ITEMS: u32 = 1000;
 /// Oldest protocol version this build still accepts from a client.
 pub const MIN_PROTOCOL_VERSION: u32 = 1;
 /// Request header carrying the client's protocol version.
@@ -867,6 +870,8 @@ impl std::str::FromStr for ProductStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProductRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_items: Option<Vec<SetItem>>,
     /// 14 digits, as the office normalized it (`normalizeToGtin14`).
     pub gtin14: String,
     pub name: String,
@@ -1623,12 +1628,24 @@ pub struct ProductGroup {
     pub name: String,
 }
 
+/// One marked catalog product and its required quantity in the recipe.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetItem {
+    pub gtin14: String,
+    #[serde(default)]
+    pub product_name: String,
+    pub quantity: u32,
+}
+
 /// A product as the office sees it (`GET /v1/office/products`, archived
 /// products included). `status` is computed: `active` with a product group
 /// and both capacities, `draft` before.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OfficeProduct {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_items: Option<Vec<SetItem>>,
     pub id: String,
     pub gtin14: String,
     pub name: String,
@@ -1683,6 +1700,8 @@ pub struct DemoDataSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProductCreate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_items: Option<Vec<SetItem>>,
     pub gtin14: String,
     pub name: String,
     #[serde(default)]
@@ -1720,6 +1739,8 @@ pub struct ProductCreate {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProductUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_items: Option<Vec<SetItem>>,
     pub gtin14: String,
     pub name: String,
     #[serde(default)]
@@ -1996,6 +2017,7 @@ impl std::str::FromStr for ShiftMode {
 pub mod shift_supports {
     /// Validation shifts: single codes accepted without a box.
     pub const VALIDATION: &str = "validation-v1";
+    pub const SET_ASSEMBLY: &str = "set-assembly-v1";
     /// Validation shifts that print a Data Matrix duplicate of each accepted
     /// code (part B of plan РЕЖ; declared with protocol 4, checked by the
     /// host from protocol 5).
@@ -2193,6 +2215,8 @@ pub struct DeviceShiftTotals {
 #[serde(rename_all = "camelCase")]
 pub struct OfficeShift {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_items: Option<Vec<SetItem>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lot_number: Option<String>,
     pub id: String,
     pub number: String,
@@ -2319,6 +2343,7 @@ pub struct ShiftCreate {
     /// The shift's own date (beta 3); left out, the production date.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub planned_date: Option<String>,
+    #[serde(default)]
     pub box_template_id: String,
     #[serde(default)]
     pub box_capacity: Option<u32>,
@@ -2422,6 +2447,8 @@ pub struct ShiftCloseReasonSet {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceShift {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_items: Option<Vec<SetItem>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lot_number: Option<String>,
     pub id: String,
@@ -2535,6 +2562,8 @@ pub struct SnapshotValidationPrint {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShiftSnapshotProduct {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_items: Option<Vec<SetItem>>,
     pub id: String,
     pub gtin14: String,
     pub name: String,
@@ -2616,6 +2645,7 @@ pub struct DeviceShiftCreate {
     pub lot_number: Option<String>,
     pub request_id: String,
     pub product_id: String,
+    #[serde(default)]
     pub box_template_id: String,
     pub production_date: String,
     /// The shift's own date, today in the organization's time zone as the
@@ -2667,6 +2697,7 @@ pub enum FactKind {
     PalletLabel,
     PalletException,
     UnitLabel,
+    SetAssembled,
 }
 
 impl FactKind {
@@ -2681,6 +2712,7 @@ impl FactKind {
             FactKind::PalletLabel => "pallet_label",
             FactKind::PalletException => "pallet_exception",
             FactKind::UnitLabel => "unit_label",
+            FactKind::SetAssembled => "set_assembled",
         }
     }
 }
@@ -2797,6 +2829,27 @@ pub struct ScannedCode {
     pub gtin14: String,
     pub serial: String,
     pub canonical: String,
+}
+
+/// One completed set with its own mark and the ordered component scans.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetAssembledFact {
+    pub assembled_at: String,
+    pub set_code: ScannedCode,
+    pub items: Vec<ScannedCode>,
+}
+
+/// Assembly journal row. Only accepted rows may be exported.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficeSet {
+    pub id: String,
+    pub device_id: String,
+    pub operator_id: Option<String>,
+    #[serde(flatten)]
+    pub assembly: SetAssembledFact,
+    pub outcome: FactOutcome,
 }
 
 /// `data` of a `scan` fact: every scan of the work screen, accepted or not.
@@ -3817,6 +3870,7 @@ mod tests {
             FactKind::PalletLabel,
             FactKind::PalletException,
             FactKind::UnitLabel,
+            FactKind::SetAssembled,
         ];
         for kind in &kinds {
             match kind {
@@ -3828,7 +3882,8 @@ mod tests {
                 | FactKind::PalletClosed
                 | FactKind::PalletLabel
                 | FactKind::PalletException
-                | FactKind::UnitLabel => {}
+                | FactKind::UnitLabel
+                | FactKind::SetAssembled => {}
             }
         }
         kinds

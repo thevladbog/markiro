@@ -157,6 +157,7 @@ async fn shift_part(
         number,
         production_date,
         product: ShiftSnapshotProduct {
+            set_items: None,
             id: local_id,
             gtin14,
             name: name.unwrap_or(local_name),

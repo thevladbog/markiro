@@ -232,7 +232,7 @@ class HostFixturesTest {
                 ),
             )
         }
-        assertEquals(6, HostCompat.PROTOCOL)
+        assertEquals(9, HostCompat.PROTOCOL)
         assertEquals(fixture("hello.json").getValue("minProtocol").jsonPrimitive.int, HostCompat.MIN_PROTOCOL)
     }
 

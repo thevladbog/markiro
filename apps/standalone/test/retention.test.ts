@@ -191,6 +191,7 @@ const NONE = {
   floor_print_jobs: 0,
   floor_boxes: 0,
   floor_pallets: 0,
+  floor_set_marks: 0,
   floor_unit_labels: 0,
   floor_shift_participation: 0,
   outbox: 0,
@@ -204,6 +205,7 @@ const WHOLE = {
   floor_print_jobs: 1,
   floor_boxes: 1,
   floor_pallets: 0,
+  floor_set_marks: 0,
   floor_unit_labels: 0,
   floor_shift_participation: 1,
   outbox: 5,
@@ -697,6 +699,20 @@ describe("the retention of a shift's records on the station", () => {
     // deleted cursor would bring every displacement back as new.
     const notRetained = ["floor_displacements"];
     expect(withShift).toEqual([...RETAINED_TABLES, ...notRetained].sort());
+  });
+
+  it("purges acknowledged assembly marks with their shift and preserves another pairing", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", "2026-09-01T00:00:00.000Z");
+    const addMark = at.db.prepare(
+      "INSERT INTO floor_set_marks (host_id, device_id, shift_id, code_hash, assembly_id, is_set) " +
+        "VALUES (?, ?, ?, 'hash', 'assembly', 1)",
+    );
+    addMark.run(PAIRING.hostId, PAIRING.deviceId, ENTERED.id);
+    addMark.run(OTHER_PAIRING.hostId, OTHER_PAIRING.deviceId, ENTERED.id);
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(1);
+    expect(keptFor(at, PAIRING, ENTERED.id)).toEqual(NONE);
+    expect(keptFor(at, OTHER_PAIRING, ENTERED.id)).toMatchObject({ floor_set_marks: 1 });
   });
 
   // The pallets of a shift (plan ПЛ-Ц) go with it: the pallet, its exception, one pairing's,

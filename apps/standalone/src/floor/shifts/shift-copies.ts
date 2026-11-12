@@ -34,6 +34,7 @@ export interface ShiftCopy {
   status: ShiftStatus;
   localState: "closing" | "closed" | null;
   mode: ShiftMode;
+  setAssembly?: true;
   palletsEnabled: boolean;
   createdFrom: ShiftOrigin;
   lineId: string;
@@ -282,6 +283,7 @@ const copyRow = z.object({
   product_name: z.string(),
   product_print_name: z.string().nullable(),
   product_gtin14: z.string(),
+  set_assembly: z.number(),
   counterparty_name: z.string().nullable(),
   production_date: z.string(),
   planned_date: z.string().nullable(),
@@ -303,6 +305,9 @@ const COPY_COLUMNS =
   "CASE WHEN snapshot IS NOT NULL THEN json_extract(snapshot, '$.product.printName') " +
   "ELSE (SELECT print_name FROM ref_products WHERE ref_products.id = floor_shifts.product_id) " +
   "END AS product_print_name, " +
+  "(CASE WHEN snapshot IS NOT NULL THEN json_extract(snapshot, '$.product.setItems') " +
+  "ELSE (SELECT set_items FROM ref_products WHERE ref_products.id = floor_shifts.product_id) " +
+  "END) IS NOT NULL AS set_assembly, " +
   "product_gtin14, counterparty_name, production_date, planned_date, planned_qty, " +
   "CASE WHEN snapshot IS NULL THEN lot_number ELSE snapshot ->> 'lotNumber' END AS lot_number, " +
   "box_capacity, box_template_id, pallet_box_capacity, pallet_template_id, owner_device_id, " +
@@ -316,6 +321,7 @@ function toCopy(row: z.infer<typeof copyRow>): ShiftCopy {
     status: row.status,
     localState: row.local_state,
     mode: row.mode,
+    ...(row.set_assembly === 1 ? { setAssembly: true } : {}),
     palletsEnabled: row.pallets_enabled === 1,
     createdFrom: row.created_from,
     lineId: row.line_id,

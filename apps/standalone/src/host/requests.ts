@@ -22,6 +22,7 @@ import type {
   PairingCodeRequest,
   ProductCreate,
   ProductUpdate,
+  SetItem,
   ShiftClose,
   ShiftCloseReasonSet,
   ShiftCreate,
@@ -259,6 +260,7 @@ export function badgeCreate(badge: BadgeInput): BadgeCreate {
  * 14 digits (`toGtin14`), `null` for a field left blank.
  */
 export interface ProductInput {
+  setItems?: SetItem[] | undefined;
   gtin14: string;
   name: string;
   printName: string | null;
@@ -279,6 +281,7 @@ export interface ProductInput {
 /** `POST /v1/office/products` (`product-create.json`): every field, `null` for none. */
 export function productCreate(product: ProductInput): ProductCreate {
   return {
+    ...(product.setItems === undefined ? {} : { setItems: product.setItems }),
     gtin14: product.gtin14,
     name: product.name,
     printName: product.printName,
@@ -304,6 +307,7 @@ export function productUpdate(
   expectedRev: number,
 ): ProductUpdate {
   return {
+    ...(product.setItems === undefined ? {} : { setItems: product.setItems }),
     gtin14: product.gtin14,
     name: product.name,
     printName: product.printName,
@@ -509,7 +513,7 @@ export interface ShiftChange {
   productionDate?: string;
   plannedDate?: string;
   lotNumber?: string | null;
-  boxTemplateId?: string;
+  boxTemplateId?: string | undefined;
   boxCapacity?: number;
   plannedQty?: number | null;
   counterpartyId?: string | null;
@@ -671,6 +675,7 @@ export const STATION_SHIFT_ENTER: ShiftEnter = {
     SHIFT_SUPPORTS.validationDmDuplicate,
     SHIFT_SUPPORTS.multiStation,
     SHIFT_SUPPORTS.lotNumber,
+    SHIFT_SUPPORTS.setAssembly,
   ],
 };
 
@@ -678,7 +683,7 @@ export const STATION_SHIFT_ENTER: ShiftEnter = {
 export interface DeviceShiftInput {
   requestId: string;
   productId: string;
-  boxTemplateId: string;
+  boxTemplateId?: string | undefined;
   productionDate: string;
   /** Today in the organization's zone (beta 3); left out, the host takes the production date. */
   plannedDate?: string;
@@ -709,7 +714,7 @@ export function deviceShiftCreate(shift: DeviceShiftInput): DeviceShiftCreate {
   return {
     requestId: shift.requestId,
     productId: shift.productId,
-    boxTemplateId: shift.boxTemplateId,
+    ...(shift.boxTemplateId === undefined ? {} : { boxTemplateId: shift.boxTemplateId }),
     productionDate: shift.productionDate,
     ...(shift.plannedDate === undefined ? {} : { plannedDate: shift.plannedDate }),
     ...(shift.lotNumber == null ? {} : { lotNumber: shift.lotNumber }),

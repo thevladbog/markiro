@@ -49,7 +49,7 @@ export function ShiftStations({ shift, at }: ShiftStationsProps) {
   const parts = new Map((shift.byDevice ?? []).map((part) => [part.deviceId, part]));
   const figure = (value: number | undefined) =>
     value === undefined ? t("office.common.none") : UNITS.format(value);
-  const validation = shift.mode === "validation";
+  const tracksPackaging = shift.mode !== "validation" && shift.setItems === undefined;
 
   const columns: TableColumn<ShiftParticipant>[] = [
     {
@@ -93,7 +93,7 @@ export function ShiftStations({ shift, at }: ShiftStationsProps) {
       render: (each) => figure(parts.get(each.deviceId)?.accepted),
     },
     // A validation shift puts its codes in no box and on no pallet (plan РЕЖ, Р11).
-    ...(validation
+    ...(!tracksPackaging
       ? []
       : [
           {
@@ -104,7 +104,7 @@ export function ShiftStations({ shift, at }: ShiftStationsProps) {
             render: (each: ShiftParticipant) => figure(parts.get(each.deviceId)?.boxesClosed),
           },
         ]),
-    ...(validation || !shift.palletsEnabled
+    ...(!tracksPackaging || !shift.palletsEnabled
       ? []
       : [
           {

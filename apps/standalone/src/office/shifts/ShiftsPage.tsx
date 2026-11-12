@@ -401,7 +401,13 @@ export function ShiftsPage() {
               phase={STATUS_PHASE[shift.status]}
               label={t(`office.shifts.statuses.${shift.status}`)}
             />
-            <Badge tone={MODE_TONE[shift.mode]}>{t(`office.shifts.modes.${shift.mode}`)}</Badge>
+            <Badge tone={MODE_TONE[shift.mode]}>
+              {t(
+                shift.setItems === undefined
+                  ? `office.shifts.modes.${shift.mode}`
+                  : "office.shiftCard.sets.mode",
+              )}
+            </Badge>
             {blocker !== null && (
               // A sentence, not a chip: a long warning in a chip is a tall box in a narrow column.
               <span className="shift-cell__warn">
@@ -804,6 +810,7 @@ export function ShiftsPage() {
           <ExportDialog
             shift={dialog.shift}
             demo={isDemoShift(dialog.shift, products.data)}
+            setAssembly={dialog.shift.setItems !== undefined}
             onClose={() => setDialog(null)}
           />
         </Suspense>

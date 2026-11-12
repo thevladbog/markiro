@@ -406,7 +406,7 @@ describe("ENTITY_SET", () => {
     // build cannot change one and forget the other.
     expect(ENTITY_SET).toBe(
       "org_profile,site,lines,operators,operator_badges,products,label_templates," +
-        "category_template_defaults,code_releases;v6",
+        "category_template_defaults,code_releases;v7",
     );
   });
 });

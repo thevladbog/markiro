@@ -173,7 +173,10 @@ type FormView =
  * prints a duplicate, chooses the duplicate template.
  */
 function viewsOf(form: Form, from: NewShiftChoices): FormView[] {
-  const details: FormView[] = from.useLotNumbers ? ["details", "lot_number"] : ["details"];
+  const details: FormView[] =
+    from.useLotNumbers && form.product.setItems === undefined
+      ? ["details", "lot_number"]
+      : ["details"];
   if (form.mode === "validation") {
     return form.printDuplicate ? [...details, "duplicate_template"] : details;
   }
@@ -344,10 +347,12 @@ export function NewShift({
           lotNumber: "",
           plannedQty: "",
           boxCapacity: product.boxCapacity === null ? "" : String(product.boxCapacity),
-          pallets: palletCapacityOffered(product, ready.palletTemplates) !== null,
+          pallets:
+            product.setItems === undefined &&
+            palletCapacityOffered(product, ready.palletTemplates) !== null,
           palletTemplateId: palletFixed,
           palletSheetId: null,
-          mode: "aggregation",
+          mode: product.setItems === undefined ? "aggregation" : "validation",
           printDuplicate: false,
           duplicateTemplateId: onlyDuplicate?.id ?? null,
           verificationRequired: false,
@@ -611,8 +616,9 @@ export function NewShift({
 
   const submit = async (form: Form) => {
     if (ready === null || running.current) return;
-    const templateId = boxTemplateOf(form, ready);
-    if (templateId === null) return;
+    const setAssembly = form.product.setItems !== undefined;
+    const templateId = setAssembly ? null : boxTemplateOf(form, ready);
+    if (templateId === null && !setAssembly) return;
     const pallets = palletsOf(form, ready, paper);
     if (pallets.kind === "unavailable") return;
     const prints = form.mode === "validation" && form.printDuplicate;
@@ -632,13 +638,13 @@ export function NewShift({
     const input: DeviceShiftInput = {
       requestId: form.requestId,
       productId: form.product.id,
-      boxTemplateId: templateId,
+      ...(templateId === null ? {} : { boxTemplateId: templateId }),
       productionDate: form.productionDate,
       // The working day: today in the organization's zone unless the operator moved it.
       plannedDate: form.plannedDate,
       ...(lotNumber === null ? {} : { lotNumber }),
       // A validation shift hides the capacity: the host takes the product's unless a valid one stands.
-      ...(form.mode === "validation" && checked.boxCapacity === 0
+      ...(setAssembly || (form.mode === "validation" && checked.boxCapacity === 0)
         ? {}
         : { boxCapacity: checked.boxCapacity }),
       plannedQty: checked.plannedQty,
@@ -664,7 +670,7 @@ export function NewShift({
       if (lotNumber !== null) {
         const settings = await readWorkstationSettings(local).catch(() => null);
         const required = [
-          ...(form.mode === "aggregation"
+          ...(form.mode === "aggregation" && templateId !== null
             ? [
                 {
                   id: templateId,
@@ -870,6 +876,7 @@ export function NewShift({
    * box capacity). Every control is at least 64 px and nothing scrolls.
    */
   const detailsView = (form: Form, from: NewShiftChoices) => {
+    const setItems = form.product.setItems;
     const palletCapacity = palletCapacityOffered(form.product, from.palletTemplates);
     const zoneKnown = from.timeZone !== null && isKnownTimeZone(from.timeZone);
     // Once the host has made the shift its fields are not the form's to change.
@@ -902,14 +909,14 @@ export function NewShift({
               <h3 title={shiftProductTitle(form.product)}>{shiftProductTitle(form.product)}</h3>
               <div className="new-shift__code">{form.product.gtin14}</div>
               <div className="new-shift__facts">
-                {form.product.boxCapacity !== null && (
+                {setItems === undefined && form.product.boxCapacity !== null && (
                   <span className="new-shift__fact">
                     {t("floor.newShift.factBox", {
                       quantity: formatQuantity(form.product.boxCapacity),
                     })}
                   </span>
                 )}
-                {palletCapacity !== null && (
+                {setItems === undefined && palletCapacity !== null && (
                   <span className="new-shift__fact">
                     {t("floor.newShift.factPallet", { count: palletCapacity })}
                   </span>
@@ -917,22 +924,39 @@ export function NewShift({
               </div>
             </div>
           </div>
-          <ModeSegment<ShiftMode>
-            label={t("floor.newShift.mode")}
-            options={[
-              { value: "validation", label: t("floor.newShift.modeValidation") },
-              { value: "aggregation", label: t("floor.newShift.modeAggregation") },
-            ]}
-            value={form.mode}
-            hint={t(
-              aggregation
-                ? "floor.newShift.modeAggregationHint"
-                : "floor.newShift.modeValidationHint",
-            )}
-            disabled={frozen}
-            onChange={(mode) => update({ mode })}
-          />
-          {!aggregation && (
+          {setItems !== undefined ? (
+            <section
+              className="set-assembly__recipe"
+              aria-label={t("floor.setAssembly.composition")}
+            >
+              <strong>{t("floor.setAssembly.mode")}</strong>
+              <ul>
+                {setItems.map(({ gtin14, productName, quantity }) => (
+                  <li key={gtin14}>
+                    <span>{productName}</span>
+                    <strong>{quantity}</strong>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : (
+            <ModeSegment<ShiftMode>
+              label={t("floor.newShift.mode")}
+              options={[
+                { value: "validation", label: t("floor.newShift.modeValidation") },
+                { value: "aggregation", label: t("floor.newShift.modeAggregation") },
+              ]}
+              value={form.mode}
+              hint={t(
+                aggregation
+                  ? "floor.newShift.modeAggregationHint"
+                  : "floor.newShift.modeValidationHint",
+              )}
+              disabled={frozen}
+              onChange={(mode) => update({ mode })}
+            />
+          )}
+          {setItems === undefined && !aggregation && (
             <SwitchCard
               title={t("floor.newShift.printDuplicate")}
               hint={t("floor.newShift.printDuplicateHint")}
@@ -1037,10 +1061,12 @@ export function NewShift({
               />
             )}
             <NumericReadout
-              label={t("floor.newShift.plannedQty")}
+              label={t(
+                setItems === undefined ? "floor.newShift.plannedQty" : "floor.setAssembly.plan",
+              )}
               note={t("floor.newShift.planNote")}
               value={form.plannedQty}
-              unit={t("floor.newShift.unit")}
+              unit={t(setItems === undefined ? "floor.newShift.unit" : "floor.setAssembly.unit")}
               active={aggregation ? entryField === "plannedQty" : null}
               onSelect={() => setActiveField("plannedQty")}
               invalid={errors.plannedQty !== undefined}
@@ -1456,7 +1482,7 @@ export function NewShift({
             loading={busy !== null}
             disabled={
               !online ||
-              boxTemplateOf(form, from) === null ||
+              (form.product.setItems === undefined && boxTemplateOf(form, from) === null) ||
               palletsOf(form, from, paper).kind === "unavailable" ||
               (prints && form.duplicateTemplateId === null)
             }
@@ -1467,7 +1493,11 @@ export function NewShift({
             }}
           >
             {form.created === null
-              ? t("floor.newShift.create")
+              ? t(
+                  form.product.setItems === undefined
+                    ? "floor.newShift.create"
+                    : "floor.setAssembly.start",
+                )
               : t("floor.newShift.openCreated", { number: form.created.shift.number })}
           </Button>
         )}
