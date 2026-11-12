@@ -17,6 +17,7 @@ test("every repository workflow has an explicit reviewed event scope", () => {
     "deploy-platform.yml": ["workflow_dispatch"],
     "handheld-release.yml": ["workflow_dispatch"],
     "handheld-stable-release.yml": ["workflow_dispatch"],
+    "migrate-handheld-signing.yml": ["workflow_dispatch"],
     "stage-handheld-catalog.yml": ["workflow_dispatch"],
     "recover-platform.yml": ["workflow_dispatch"],
     "upgrade-platform.yml": ["workflow_dispatch"],
@@ -37,6 +38,40 @@ test("every repository workflow has an explicit reviewed event scope", () => {
   for (const name of workflowFiles) {
     assert.deepEqual(Object.keys(workflow(name).on).sort(), expectedEvents[name].sort(), name);
   }
+});
+
+test("the signing transfer reads only Android credentials under the old environment review", () => {
+  const value = workflow("migrate-handheld-signing.yml");
+  const job = value.jobs["seal-signing-secrets"];
+  assert.deepEqual(value.permissions, {});
+  assert.equal(job.permissions, undefined);
+  assert.equal(job.environment, "handheld-release");
+  for (const requirement of [
+    "github.ref == 'refs/heads/main'",
+    "github.actor == github.repository_owner",
+    "github.triggering_actor == github.repository_owner",
+    "github.run_attempt == 1",
+    "inputs.reviewed_sha == github.sha",
+  ]) {
+    assert.ok(job.if.includes(requirement), requirement);
+  }
+  const withCredentials = job.steps.filter((step) => JSON.stringify(step).includes("secrets."));
+  assert.equal(withCredentials.length, 1);
+  const signingNames = [
+    "MARKIRO_HANDHELD_KEYSTORE_BASE64",
+    "MARKIRO_HANDHELD_STORE_PASSWORD",
+    "MARKIRO_HANDHELD_KEY_ALIAS",
+    "MARKIRO_HANDHELD_KEY_PASSWORD",
+  ];
+  assert.deepEqual(
+    withCredentials[0].env,
+    Object.fromEntries(signingNames.map((name) => [name, `\${{ secrets.${name} }}`])),
+  );
+  assert.doesNotMatch(withCredentials[0].run, /\$\{\{/u);
+  const artifact = job.steps.find((step) => step.uses);
+  assert.match(artifact.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/u);
+  assert.equal(artifact.with.path, "${{ runner.temp }}/handheld-signing-transfer.json");
+  assert.equal(artifact.with["retention-days"], 1);
 });
 
 test("dependency review runs only for supported dependency surface changes", () => {
