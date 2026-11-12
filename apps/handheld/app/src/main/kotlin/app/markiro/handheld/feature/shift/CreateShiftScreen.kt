@@ -232,6 +232,15 @@ fun CreateShiftScreen(state: CreateShiftUi, cb: CreateShiftCallbacks) {
                             }
                         }
                     }
+                    if (options.useLotNumbers && product.setItems.isEmpty()) item {
+                        val invalid = !draft.isLotNumberValid()
+                        CreateField(
+                            stringResource(R.string.shift_create_lot_number), draft.lotNumber,
+                            { value -> cb.onEdit { it.copy(lotNumber = value) } },
+                            enabled = canEdit, error = invalid,
+                            supportingText = if (invalid) stringResource(R.string.shift_create_lot_number_invalid) else null,
+                        )
+                    }
                     item {
                         val planLabel = if (product.setItems.isEmpty()) R.string.shift_create_plan else R.string.set_plan
                         ChoiceField(stringResource(planLabel), draft.plan.ifBlank { stringResource(R.string.shift_create_no_plan) }, enabled = canEdit) {
@@ -352,9 +361,11 @@ private fun ChoiceField(
 private fun CreateField(
     label: String, value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier,
     numeric: Boolean = false, enabled: Boolean = true, error: Boolean = false,
+    supportingText: String? = null,
 ) {
     OutlinedTextField(value, onChange, modifier.fillMaxWidth(), label = { Text(label) }, singleLine = true,
         colors = markiroFieldColors(), enabled = enabled, isError = error,
+        supportingText = supportingText?.let { message -> { Text(message) } },
         keyboardOptions = KeyboardOptions(keyboardType = if (numeric) KeyboardType.Number else KeyboardType.Text))
 }
 

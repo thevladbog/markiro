@@ -39,6 +39,7 @@ fun DeviceShiftDto.toShiftDto(lineName: String?) = ShiftDto(
     plannedQty = plannedQty,
     plannedDate = plannedDate ?: productionDate,
     productionDate = productionDate,
+    lotNumber = if (snapshot == null) lotNumber else snapshot.lotNumber,
     boxCapacity = boxCapacity,
     palletBoxCapacity = if (palletsEnabled) palletBoxCapacity else null,
     palletsEnabled = palletsEnabled,

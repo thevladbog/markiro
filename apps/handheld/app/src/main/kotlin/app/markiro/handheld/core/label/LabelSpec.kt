@@ -25,6 +25,7 @@ enum class LabelField(val wire: String) {
     KM_CODE("km.code"),
     SSCC("sscc"),
     SHIFT_NO("shift.no"),
+    LOT_NUMBER("shift.lotNumber"),
     DATE("date"),
     EXPIRY("expiry"),
     QTY("qty"),
@@ -107,6 +108,7 @@ sealed interface LabelElement {
         val fontFamily: String? = null,
         val lineHeight: Double? = null,
         val minFontSizePt: Double? = null,
+        val visibleWhen: LabelField? = null,
     ) : LabelElement
 
     data class Field(
@@ -123,6 +125,7 @@ sealed interface LabelElement {
         val fontFamily: String? = null,
         val lineHeight: Double? = null,
         val minFontSizePt: Double? = null,
+        val visibleWhen: LabelField? = null,
     ) : LabelElement
 
     data class OrganizationLogo(
@@ -165,6 +168,14 @@ sealed interface LabelElement {
         val heightMm: Double,
         val thicknessMm: Double,
     ) : LabelElement
+}
+
+/** Text captions and values may depend on the presence of a field in the saved label data. */
+fun LabelElement.isVisible(data: Map<LabelField, String>): Boolean = when (this) {
+    is LabelElement.Text -> visibleWhen == null || !data[visibleWhen].isNullOrEmpty()
+    is LabelElement.Field -> (visibleWhen == null || !data[visibleWhen].isNullOrEmpty()) &&
+        (field != LabelField.LOT_NUMBER || !data[field].isNullOrEmpty())
+    else -> true
 }
 
 data class LabelSpec(

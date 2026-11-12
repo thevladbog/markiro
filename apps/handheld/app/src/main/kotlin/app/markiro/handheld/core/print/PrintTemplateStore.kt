@@ -6,6 +6,8 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Upsert
+import app.markiro.handheld.core.label.LabelElement
+import app.markiro.handheld.core.label.LabelField
 import app.markiro.handheld.core.label.LabelRenderException
 import app.markiro.handheld.core.label.LabelSpec
 import app.markiro.handheld.core.label.LabelSpecCodec
@@ -83,6 +85,9 @@ fun printableTemplate(json: String): LabelSpec? = try {
     null
 }
 
+internal fun LabelSpec.bindsLotNumber(): Boolean =
+    elements.any { it is LabelElement.Field && it.field == LabelField.LOT_NUMBER }
+
 class PrintTemplateStore(private val db: HandheldDatabase) {
     private val dao get() = db.printTemplateDao()
 
@@ -104,23 +109,38 @@ class PrintTemplateStore(private val db: HandheldDatabase) {
         true
     }
 
-    private suspend fun resolve(purpose: PrintPurpose, jobId: String, source: String?, productId: String?, groupCode: Int?, printerId: String? = null): PrintTemplateSnapshot {
+    private suspend fun resolve(
+        purpose: PrintPurpose, jobId: String, source: String?, productId: String?, groupCode: Int?,
+        requiresLotNumber: Boolean, printerId: String? = null,
+    ): PrintTemplateSnapshot {
         val target = printerId ?: db.printerDao().assigned(purpose)?.id
         val choice = target?.let { dao.choice(it, purpose.wire) }
-        val template = choice?.let { dao.template(it.templateId) }
-        return when {
-            choice == null -> PrintTemplateSnapshot(purpose.wire, jobId, source)
-            template == null || template.purpose != purpose.wire || !template.fits(productId, groupCode) ->
-                PrintTemplateSnapshot(purpose.wire, jobId, null, "template_incompatible")
-            printableTemplate(template.specJson) == null -> PrintTemplateSnapshot(purpose.wire, jobId, null, "template_invalid")
-            else -> PrintTemplateSnapshot(purpose.wire, jobId, template.specJson)
+        val spec = if (choice == null) {
+            source
+        } else {
+            val template = dao.template(choice.templateId)
+            if (template == null || template.purpose != purpose.wire || !template.fits(productId, groupCode)) {
+                return PrintTemplateSnapshot(purpose.wire, jobId, null, "template_incompatible")
+            }
+            template.specJson
         }
+        if (spec != null && (choice != null || requiresLotNumber)) {
+            val parsed = printableTemplate(spec)
+                ?: return PrintTemplateSnapshot(purpose.wire, jobId, null, "template_invalid")
+            if (requiresLotNumber && !parsed.bindsLotNumber()) {
+                return PrintTemplateSnapshot(purpose.wire, jobId, null, "template_incompatible")
+            }
+        }
+        return PrintTemplateSnapshot(purpose.wire, jobId, spec)
     }
 
-    suspend fun freeze(purpose: PrintPurpose, jobId: String, source: String?, productId: String?, groupCode: Int? = null): PrintTemplateSnapshot = db.recovery.commit {
+    suspend fun freeze(
+        purpose: PrintPurpose, jobId: String, source: String?, productId: String?, groupCode: Int? = null,
+        requiresLotNumber: Boolean = false,
+    ): PrintTemplateSnapshot = db.recovery.commit {
         require(purpose != PrintPurpose.DUPLICATE)
         dao.snapshot(purpose.wire, jobId)?.let { return@commit it }
-        val row = resolve(purpose, jobId, source, productId, groupCode)
+        val row = resolve(purpose, jobId, source, productId, groupCode, requiresLotNumber)
         dao.freeze(row)
         // Same transaction as closure and layout: no assignment edit can retarget a queued job.
         PrintDestinations(db).retain(purpose, jobId)
@@ -128,11 +148,14 @@ class PrintTemplateStore(private val db: HandheldDatabase) {
     }
 
     /** Recovery is allowed only after a definite pre-render template refusal, never after sending bytes. */
-    suspend fun forPrint(purpose: PrintPurpose, jobId: String, source: String?, productId: String?, groupCode: Int? = null, recoverUnsent: Boolean = false): PrintTemplateSnapshot = db.recovery.commit {
-        var row = freeze(purpose, jobId, source, productId, groupCode)
+    suspend fun forPrint(
+        purpose: PrintPurpose, jobId: String, source: String?, productId: String?, groupCode: Int? = null,
+        recoverUnsent: Boolean = false, requiresLotNumber: Boolean = false,
+    ): PrintTemplateSnapshot = db.recovery.commit {
+        var row = freeze(purpose, jobId, source, productId, groupCode, requiresLotNumber)
         if (recoverUnsent && (row.reason != null || row.specJson?.let { printableTemplate(it) == null } == true)) {
             val target = PrintDestinations(db).get(purpose, jobId)?.id
-            val resolved = resolve(purpose, jobId, source, productId, groupCode, target)
+            val resolved = resolve(purpose, jobId, source, productId, groupCode, requiresLotNumber, target)
             dao.recoverUnsent(purpose.wire, jobId, resolved.specJson, resolved.reason, row.specJson, row.reason)
             row = checkNotNull(dao.snapshot(purpose.wire, jobId))
         }
@@ -146,7 +169,7 @@ class PrintTemplateStore(private val db: HandheldDatabase) {
     suspend fun freezeBox(boxId: String, shiftId: String) {
         val shift = db.shiftDao().get(shiftId)
         val group = shift?.productId?.let { db.palletProductDao().byId(it)?.chzProductGroupCode }
-        freeze(PrintPurpose.BOX, boxId, shift?.boxLabelTemplate, shift?.productId, group)
+        freeze(PrintPurpose.BOX, boxId, shift?.boxLabelTemplate, shift?.productId, group, requiresLotNumber = shift?.lotNumber != null)
     }
 
     suspend fun freezePallet(pallet: PalletEntity) {
@@ -157,6 +180,6 @@ class PrintTemplateStore(private val db: HandheldDatabase) {
             group?.let { db.palletLabelTemplateDao().get(PalletLabelTemplateEntity.category(it)) }?.specJson
                 ?: db.palletLabelTemplateDao().get(PalletLabelTemplateEntity.ORG)?.specJson
         } else shift?.palletLabelTemplateSpec
-        freeze(PrintPurpose.PALLET, pallet.palletId, source, productId, group)
+        freeze(PrintPurpose.PALLET, pallet.palletId, source, productId, group, requiresLotNumber = shift?.lotNumber != null)
     }
 }

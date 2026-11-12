@@ -112,6 +112,7 @@ fun PrinterTemplateChooserScreen(
                             LabelField.QTY to "12", LabelField.QTY_BOXES to "4",
                             LabelField.DATE to "01.11.2026", LabelField.EXPIRY to "30.11.2026",
                             LabelField.SHIFT_NO to "14",
+                            LabelField.LOT_NUMBER to "A026",
                         ), Modifier.widthIn(max = 220.dp))
                     }
                     Text(stringResource(R.string.template_size, spec.widthMm.toString(), spec.heightMm.toString()), style = MarkiroTheme.type.body, color = c.fg2)

@@ -97,8 +97,11 @@ class SiteReprintEngine(
                     val printer = db.printerDao().assigned(purpose) ?: return@commit null
                     val chosenId = db.printTemplateDao().choice(printer.id, purpose.wire)?.templateId
                     val fitting = templates.filter { it.kind == source.kind && fits(it, source) }
-                    val template = if (chosenId != null) fitting.firstOrNull { it.id == chosenId }
-                        else source.defaultTemplateId?.let { id -> fitting.firstOrNull { it.id == id } } ?: fitting.singleOrNull()
+                    val template = if (chosenId != null) fitting.firstOrNull { it.id == chosenId } else {
+                        source.defaultTemplateId?.let { id ->
+                            fitting.firstOrNull { it.id == id } ?: fitting.firstOrNull { it.lotNumberSourceId == id }
+                        } ?: fitting.singleOrNull()
+                    }
                     printer to template
                 } ?: return@work SiteReprintResult.Failed("printer_unconfigured")
                 val (printer, template) = configured
@@ -262,7 +265,9 @@ class SiteReprintEngine(
     }
 
     private fun fits(t: SiteReprintTemplate, s: SiteReprintSource) =
-        (t.productId == null || t.productId == s.productId) && (t.groupCodes == null || s.groupCode in t.groupCodes)
+        (t.productId == null || t.productId == s.productId) &&
+            (t.groupCodes == null || s.groupCode in t.groupCodes) &&
+            (s.fields[LabelField.LOT_NUMBER.wire].isNullOrEmpty() || printableTemplate(t.specJson)?.bindsLotNumber() == true)
 
     private fun validSource(s: SiteReprintSource, raw: String): Boolean = try {
         when (s.kind) {

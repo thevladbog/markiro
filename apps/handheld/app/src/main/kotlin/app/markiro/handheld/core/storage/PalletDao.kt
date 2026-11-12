@@ -97,8 +97,17 @@ interface PalletDao {
     @Query("SELECT * FROM pallets WHERE closedAt IS NOT NULL AND printState <> 'printed' AND disassembledAt IS NULL ORDER BY closedAt, palletId")
     fun observeUnprinted(): Flow<List<PalletEntity>>
 
-    @Query("SELECT COUNT(*) FROM pallets WHERE closedAt IS NOT NULL AND printState <> 'printed' AND disassembledAt IS NULL")
+    @Query(
+        "SELECT COUNT(*) FROM pallets WHERE closedAt IS NOT NULL AND printState <> 'printed' " +
+            "AND disassembledAt IS NULL",
+    )
     fun observeUnprintedCount(): Flow<Int>
+
+    @Query(
+        "SELECT COUNT(*) FROM pallets WHERE shiftId = :shiftId AND closedAt IS NOT NULL " +
+            "AND printState <> 'printed' AND disassembledAt IS NULL",
+    )
+    fun observeUnprintedCountForShift(shiftId: String): Flow<Int>
 
     /** Anything the app left mid-print is unknown, never resumed -- same reasoning as `BoxDao.demoteInterruptedPrints`. */
     @Query("UPDATE pallets SET printState = 'unknown', printReason = NULL WHERE printState = 'printing'")

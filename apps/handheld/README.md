@@ -92,8 +92,11 @@ The plan is optional. The host assigns the number ending in `/M`.
 Creation requires the host connection. The device keeps the draft and retries
 an unconfirmed request with the same ID. If creation succeeded but entry
 failed, **Открыть смену** retries entry without creating another shift.
-Lot numbers and layouts that use a lot-number field require separate handheld
-support and are not offered by this form.
+On hosts that support handheld lot numbers, enabling **Use lot numbers** in the
+organization profile adds an optional **Lot number** field. Russian and Latin
+letters and digits retain their case and leading zeros. Aggregation with a
+number requires compatible label layouts. The device keeps the lot from the
+shift's frozen snapshot for offline box and production-pallet printing.
 
 An aggregation shift whose bundle carried no SSCC block warns on this card and on
 the work screen from entry — «В организации не задан GLN» or «У контрагента-эмитента
@@ -372,6 +375,14 @@ belongs to the device rather than to a shift, so it survives leaving one and clo
 second label on a box the server has accepted. A print the app died inside is read as `unknown` at
 startup, never resumed. Deferring an unknown outcome keeps it unknown, so it remains excluded
 from bulk retries. The bulk sender also checks the current persisted state at the send boundary.
+When a box also completes a production pallet, finish the box label and then tap
+**Print pallet label**. Confirm when the pallet label comes out. Until confirmation,
+a sent pallet label stays in the queue as an unknown outcome. Deferring releases
+the print screen so the operator can continue working. The automatic end-of-shift
+prompt waits for this shift's outstanding labels, including deferred ones.
+If the final scan closes only a box, confirm that the box label came out.
+Labels printed from the queue for the active shift also require confirmation.
+
 A new explicit reprint of a completed box uses the current box assignment; retries of pending
 labels retain their original destination until the operator chooses another printer.
 

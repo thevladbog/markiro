@@ -447,6 +447,10 @@
     <string name="box_refused_invalid_serial">The number does not fit the prefix</string>
     <string name="box_refused_invalid_serial_hint">The box stayed open. Try closing it again.</string>
     <string name="box_refused_dismiss">Got it</string>
+    <string name="pallet_wait_for_box_label">If the box label is still printing, wait for it to come out.</string>
+    <string name="pallet_print_label">Print pallet label</string>
+    <string name="pack_confirm_label">Confirm when the label comes out of the printer.</string>
+    <string name="work_pack_label_pending">Finish printing the label, then scan the code again.</string>
     <string name="pallet_close_title">Pallet closed</string>
     <string name="pallet_close_boxes">%1$d boxes</string>
     <string name="pallet_refused_empty">The pallet has no boxes</string>
@@ -1008,6 +1012,8 @@
     <string name="shift_create_mode_choose">Choose mode</string>
     <string name="shift_create_date">Shift date</string>
     <string name="shift_create_production_date">Production date</string>
+    <string name="shift_create_lot_number">Lot number (optional)</string>
+    <string name="shift_create_lot_number_invalid">Use Russian or Latin letters and digits without spaces inside the number.</string>
     <string name="shift_create_plan">Target units</string>
     <string name="shift_create_no_plan">No target</string>
     <string name="shift_create_plan_hint">Enter a whole number from 1 to 10,000,000.</string>

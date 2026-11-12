@@ -651,7 +651,7 @@ class WorkViewModelTest {
         assertEquals(1, transport.sent)
         // Confirming resolves it without sending anything more.
         vm.confirmPrinted()
-        assertEquals(BoxCloseStep.Idle, vm.closeStep.value)
+        vm.closeStep.first { it == BoxCloseStep.Idle }
         assertEquals(1, transport.sent)
         assertEquals(0, vm.state.first { it.unprintedLabels == 0 }.unprintedLabels)
     }
@@ -706,7 +706,7 @@ class WorkViewModelTest {
         advanceUntilIdle()
         vm.closeStep.first { it is BoxCloseStep.Failed }
         vm.deferLabel()
-        assertEquals(BoxCloseStep.Idle, vm.closeStep.value)
+        vm.closeStep.first { it == BoxCloseStep.Idle }
         assertEquals(1, vm.state.first { it.unprintedLabels == 1 }.unprintedLabels)
     }
 

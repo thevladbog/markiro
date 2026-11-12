@@ -47,6 +47,7 @@ data class PalletLabelInput(
     val productionDate: String?,
     /** `AUG26-003/S`; null when the mirror predates the shift-number sync. */
     val shiftNumber: String?,
+    val lotNumber: String? = null,
 )
 
 /**
@@ -89,5 +90,5 @@ fun palletLabelFields(
         LabelField.QTY_BOXES to input.boxCount.toString(),
         LabelField.OPERATOR to (input.operatorName ?: ""),
         LabelField.COUNTERPARTY_NAME to (input.counterpartyName ?: ""),
-    )
+    ) + input.lotNumber?.let { mapOf(LabelField.LOT_NUMBER to it) }.orEmpty()
 }

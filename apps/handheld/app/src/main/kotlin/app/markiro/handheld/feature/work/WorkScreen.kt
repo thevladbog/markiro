@@ -435,6 +435,7 @@ private fun LastScanStrip(last: LastScan?) {
         } else {
             val label = when (last.blockedBy) {
                 ScanBlock.BOX_FULL -> R.string.work_box_full
+                ScanBlock.PACK_LABEL -> R.string.work_pack_label_pending
                 ScanBlock.DUPLICATE_JOB -> R.string.duplicate_blocked
                 null -> last.verdict.label()
             }

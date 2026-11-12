@@ -4031,8 +4031,13 @@ planned shift offline or bypasses the license/participation rules.
 ## Shifts
 
 The organization setting `useLotNumbers` controls the optional input in the
-office and on the station. Planned shifts can change `lotNumber`. On the first
-entry the host freezes it in the shift snapshot used for printing. Linked stock
+office, on the station and on the handheld. The handheld sends `?lotNumbers=1`
+on `GET /v1/device/shift-create-options` and `POST /v1/device/shifts`. The
+opted-in options carry the setting, `supportsLotNumber` on every template, and
+`lotNumberSourceId` on linked variants. Older handhelds keep their filtered
+options and can create shifts without a lot. Planned shifts can change
+`lotNumber`. On the first entry the host freezes it in the shift snapshot used
+for printing. Linked stock
 variants are separate templates, leaving previous IDs and snapshots intact.
 Entry advertises `lot-number` in `ShiftEnter.supports`. Warehouse lookup
 advertises `?lotNumbers=1`, and warehouse close sends its optional frozen lot

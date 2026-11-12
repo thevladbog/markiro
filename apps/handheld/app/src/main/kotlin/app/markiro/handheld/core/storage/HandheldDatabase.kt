@@ -118,4 +118,4 @@ abstract class HandheldDatabase : RoomDatabase() {
     abstract fun setAssemblyDao(): SetAssemblyDao
 }
 
-const val HANDHELD_DATABASE_VERSION = 27
+const val HANDHELD_DATABASE_VERSION = 28

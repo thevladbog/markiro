@@ -1,6 +1,8 @@
 package app.markiro.handheld.feature.work
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -51,27 +53,28 @@ fun printReasonLabel(reason: String): Int = when (reason) {
     PrintReason.TEMPLATE_INVALID -> R.string.print_reason_template_invalid
     PrintReason.RENDER_FAILED -> R.string.print_reason_render_failed
     PrintReason.TRANSPORT_FAILED -> R.string.print_reason_transport_failed
+    PrintReason.AWAITING_CONFIRMATION -> R.string.pack_confirm_label
     else -> R.string.print_reason_other
 }
 
 /**
  * The full-screen state a closed box gets.
  *
- * `Printed` dismisses itself so the next box can start; every other state waits
+ * A routine print dismisses itself so the next box can start. Other states wait
  * for a person, because each one is a decision only they can make.
  */
 @Composable
 fun BoxCloseScreen(step: BoxCloseStep, cb: BoxCloseCallbacks, destinationLabel: String? = null) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    if (step is BoxCloseStep.Printed) {
+    if (step is BoxCloseStep.Printed && !step.awaitingConfirmation) {
         LaunchedEffect(step) {
             kotlinx.coroutines.delay(PRINTED_DWELL_MS)
             cb.onDismiss()
         }
     }
     Column(
-        Modifier.fillMaxSize().background(c.surfacePage).padding(MarkiroSizes.sp4),
+        Modifier.fillMaxSize().background(c.surfacePage).verticalScroll(rememberScrollState()).padding(MarkiroSizes.sp4),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -90,7 +93,17 @@ fun BoxCloseScreen(step: BoxCloseStep, cb: BoxCloseCallbacks, destinationLabel: 
             }
             is BoxCloseStep.Printed -> {
                 Header(step.box)
-                Text(stringResource(R.string.box_close_printed), style = t.title, color = c.tone(Tone.Ok).fg)
+                if (step.awaitingConfirmation) {
+                    Text(stringResource(R.string.pack_confirm_label), style = t.body, color = c.fg2, textAlign = TextAlign.Center)
+                    Spacer(Modifier.size(MarkiroSizes.sp4))
+                    Actions {
+                        PrimaryButton(stringResource(R.string.box_close_confirm_printed), cb.onConfirmPrinted)
+                        SecondaryButton(stringResource(R.string.box_close_print_again), cb.onRetry)
+                        MarkiroTextButton(stringResource(R.string.box_close_defer), cb.onDefer)
+                    }
+                } else {
+                    Text(stringResource(R.string.box_close_printed), style = t.title, color = c.tone(Tone.Ok).fg)
+                }
             }
             is BoxCloseStep.Failed -> {
                 Header(step.box)

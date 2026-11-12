@@ -9,6 +9,7 @@ import app.markiro.handheld.core.storage.MIGRATION_23_24
 import app.markiro.handheld.core.storage.MIGRATION_24_25
 import app.markiro.handheld.core.storage.MIGRATION_25_26
 import app.markiro.handheld.core.storage.MIGRATION_26_27
+import app.markiro.handheld.core.storage.MIGRATION_27_28
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
@@ -29,12 +30,12 @@ class SiteReprintMigrationTest {
         }
         old.close()
         try {
-            val upgraded = Room.databaseBuilder(context, HandheldDatabase::class.java, name).addMigrations(MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27).allowMainThreadQueries().build()
+            val upgraded = Room.databaseBuilder(context, HandheldDatabase::class.java, name).addMigrations(MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28).allowMainThreadQueries().build()
             try {
                 assertEquals("existing", upgraded.metaDao().get("kept-setting"))
                 assertTrue(upgraded.siteReprintDao().owed("owner", 1).isEmpty())
                 assertTrue(upgraded.siteReprintDao().unresolved("owner", 1).isEmpty())
-                assertEquals(27, upgraded.openHelper.readableDatabase.version)
+                assertEquals(28, upgraded.openHelper.readableDatabase.version)
             } finally { upgraded.close() }
         } finally { context.deleteDatabase(name) }
     }
@@ -52,12 +53,12 @@ class SiteReprintMigrationTest {
         old.close()
         try {
             val upgraded = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
-                .addMigrations(MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27).allowMainThreadQueries().build()
+                .addMigrations(MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28).allowMainThreadQueries().build()
             try {
                 assertEquals(saved, upgraded.siteReprintDao().audit(saved.recordId))
                 assertEquals(listOf(saved), upgraded.siteReprintDao().history(saved.jobId))
                 assertEquals(ReprintAuditCounts(1, 0), upgraded.siteReprintDao().counts(saved.ownerJson, saved.generation))
-                assertEquals(27, upgraded.openHelper.readableDatabase.version)
+                assertEquals(28, upgraded.openHelper.readableDatabase.version)
             } finally { upgraded.close() }
         } finally { context.deleteDatabase(name) }
     }

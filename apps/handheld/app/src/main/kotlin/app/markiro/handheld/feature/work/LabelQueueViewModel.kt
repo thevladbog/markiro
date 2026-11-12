@@ -158,14 +158,18 @@ class LabelQueueViewModel @Inject constructor(
     }
 
     private suspend fun print(id: String, replacementPrinterId: String? = null, allowUnknown: Boolean = false) {
+        // A recovered label still gates this shift's end until the operator sees it.
+        val activeShiftId = config.get()?.activeShiftId
         when (state.value.items.firstOrNull { it.id == id }?.kind ?: LabelKind.BOX) {
             LabelKind.BOX -> {
                 if (allowUnknown) auditIfOutcomeUnknown(id)
-                printer.print(id, replacementPrinterId, allowUnknown = allowUnknown)
+                val confirmDelivery = activeShiftId != null && boxes.get(id)?.shiftId == activeShiftId
+                printer.print(id, replacementPrinterId, allowUnknown = allowUnknown, confirmDelivery = confirmDelivery)
             }
             LabelKind.PALLET -> {
                 if (allowUnknown) auditPalletIfOutcomeUnknown(id)
-                palletPrinter.print(id, replacementPrinterId, allowUnknown = allowUnknown)
+                val confirmDelivery = activeShiftId != null && pallets.get(id)?.shiftId == activeShiftId
+                palletPrinter.print(id, replacementPrinterId, allowUnknown = allowUnknown, confirmDelivery = confirmDelivery)
             }
         }
     }

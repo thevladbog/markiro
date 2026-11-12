@@ -97,6 +97,37 @@ fun wrapTextToWidth(
     return kept
 }
 
+/** Strict identifier layout. Stop as soon as an extra line would exceed the template. */
+internal fun wrapCompleteText(text: String, measure: (String) -> Double, maxWidth: Int, maxLines: Int): List<String> {
+    if (maxWidth < 1 || maxLines < 1) throw CompleteTextOverflow()
+    if (WHITESPACE.containsMatchIn(text)) {
+        val lines = text.split(Regex("\\r?\\n"))
+            .flatMap { wrapTextToWidth(it, measure, maxWidth.toDouble(), Int.MAX_VALUE) }
+        if (lines.size > maxLines || lines.any { measure(it) > maxWidth }) throw CompleteTextOverflow()
+        return lines
+    }
+
+    val lines = mutableListOf<String>()
+    var current = ""
+    var index = 0
+    while (index < text.length) {
+        val nextIndex = index + Character.charCount(text.codePointAt(index))
+        val character = text.substring(index, nextIndex)
+        val candidate = current + character
+        if (measure(candidate) <= maxWidth) {
+            current = candidate
+        } else {
+            if (current.isEmpty() || lines.size + 1 >= maxLines || measure(character) > maxWidth) {
+                throw CompleteTextOverflow()
+            }
+            lines.add(current)
+            current = character
+        }
+        index = nextIndex
+    }
+    return lines + current
+}
+
 /**
  * What `align` means in dots, for both emitters' image branches and the TSPL native branch. With no
  * box there is nothing to align against and the offset is zero whatever the alignment says, which

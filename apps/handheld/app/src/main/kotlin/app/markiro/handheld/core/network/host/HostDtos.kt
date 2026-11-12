@@ -50,6 +50,7 @@ data class ShiftSnapshotDto(
     val counterpartyName: String? = null,
     val palletTemplate: JsonObject? = null,
     val organization: JsonObject? = null,
+    val lotNumber: String? = null,
 )
 
 /** A device's part in a shift (host protocol 7, `ShiftParticipant`): the strings are the host's, read as they come (`active|left|closed`). */
@@ -112,6 +113,7 @@ data class DeviceShiftDto(
     val totals: DeviceShiftTotalsDto? = null,
     val byDevice: List<DeviceTotalsDto>? = null,
     val setItems: List<SetItemDto> = emptyList(),
+    val lotNumber: String? = null,
 )
 
 @Serializable

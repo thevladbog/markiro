@@ -71,6 +71,7 @@ fun ShiftDto.toEntity(existing: ShiftEntity?, now: Long) = ShiftEntity(
     plannedQty = plannedQty,
     plannedDate = plannedDate,
     productionDate = productionDate,
+    lotNumber = if (existing?.bundleFetchedAt != null) existing.lotNumber else lotNumber,
     boxCapacity = boxCapacity,
     // The station and the handheld both read this same Room column as the
     // pallets-ON signal (CloseBox.kt, WorkViewModel.kt) because the server's
@@ -261,6 +262,7 @@ class ShiftRepository(
                     status = entered.status,
                     productGtin14 = bundle.product.gtin14,
                     productName = bundle.product.name,
+                    lotNumber = bundle.shift.lotNumber,
                     productPrintName = bundle.product.printName ?: bundle.shift.productPrintName,
                     boxLabelTemplate = bundle.boxLabelTemplate?.spec?.toString(),
                     palletLabelTemplateSpec = bundle.palletLabelTemplate?.spec?.toString(),

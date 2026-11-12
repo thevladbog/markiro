@@ -25,7 +25,7 @@ use crate::audit::{self, actions, Actor, Entry, Outcome};
 use crate::auth::AuthDevice;
 use crate::clock::format_timestamp;
 use crate::db::{begin_write, commit_with_revision, next_revision};
-use crate::error::{ApiError, ApiJson, ApiPath};
+use crate::error::{ApiError, ApiJson, ApiPath, ApiQuery};
 use crate::routes::devices::require_active_line;
 use crate::server::{AppState, ClientProtocol};
 use crate::shift_participants::{self, EntryDecision};
@@ -234,6 +234,13 @@ pub fn line_conflict() -> ApiError {
     ApiError::conflict("shift_line", "the shift is not on this station's line")
 }
 
+/// A handheld advertises lot-number rendering in the create form and on submission.
+#[derive(Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShiftLotNumberQuery {
+    lot_numbers: Option<u8>,
+}
+
 /// `POST /v1/device/shifts`: a station or handheld creates a planned shift
 /// on its assigned line. The number ends in `/S` for a station and `/M` for a handheld. The same `requestId` again answers the shift it created,
 /// whatever the body says now, so a create retried after a lost answer makes
@@ -242,6 +249,7 @@ pub async fn create_device_shift(
     State(state): State<AppState>,
     Extension(ClientProtocol(protocol)): Extension<ClientProtocol>,
     device: AuthDevice,
+    ApiQuery(query): ApiQuery<ShiftLotNumberQuery>,
     ApiJson(create): ApiJson<DeviceShiftCreate>,
 ) -> Result<Json<DeviceShift>, ApiError> {
     validate::client_uuid("requestId", &create.request_id)?;
@@ -307,10 +315,11 @@ pub async fn create_device_shift(
         return Ok(Json(shift));
     }
     let lot_number = shifts::lot_number(create.lot_number.as_deref())?;
-    if kind == DeviceKind::Handheld && lot_number.is_some() {
+    let handheld_without_lot_support = kind == DeviceKind::Handheld && query.lot_numbers != Some(1);
+    if handheld_without_lot_support && lot_number.is_some() {
         return Err(ApiError::validation(
             "lotNumber",
-            "handhelds do not yet support lot numbers",
+            "the handheld did not advertise lot number support",
         ));
     }
     // A new shift the station could not open (plan ЛЦ-2, spec §3.3): a
@@ -370,7 +379,7 @@ pub async fn create_device_shift(
         lot_number.is_some(),
     )
     .await?;
-    if kind == DeviceKind::Handheld && !product.is_set {
+    if handheld_without_lot_support && !product.is_set {
         // Do not create a planned shift this client will be refused on entry.
         for (field, id) in [
             ("boxTemplateId", Some(create.box_template_id.as_str())),
@@ -959,6 +968,10 @@ struct CreateTemplate {
     name: String,
     purpose: String,
     groups: Option<Vec<u32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    supports_lot_number: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lot_number_source_id: Option<String>,
 }
 
 /// A fresh read of just the references needed by the handheld's creation form.
@@ -967,7 +980,9 @@ pub async fn shift_create_options(
     State(state): State<AppState>,
     Extension(ClientProtocol(protocol)): Extension<ClientProtocol>,
     device: AuthDevice,
+    ApiQuery(query): ApiQuery<ShiftLotNumberQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    let supports_lot_numbers = query.lot_numbers == Some(1);
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
     device
         .require_kinds_in(&mut tx, &[DeviceKind::Handheld], WORKS_SHIFTS)
@@ -980,8 +995,9 @@ pub async fn shift_create_options(
     .await
     .map_err(ApiError::internal)?
     .ok_or_else(line_conflict)?;
-    let org = sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
-        "SELECT time_zone, default_box_template_id, default_pallet_template_id FROM org_profile WHERE id = 1",
+    let org = sqlx::query_as::<_, (String, Option<String>, Option<String>, bool)>(
+        "SELECT time_zone, default_box_template_id, default_pallet_template_id, use_lot_numbers \
+         FROM org_profile WHERE id = 1",
     )
     .fetch_one(&mut *tx)
     .await
@@ -1017,19 +1033,22 @@ pub async fn shift_create_options(
             Ok::<_, ApiError>(value)
         })
         .collect::<Result<_, _>>()?;
-    let rows: Vec<(String, String, String, Option<String>, String)> = sqlx::query_as(
-        "SELECT id, name, purpose, category_codes, spec FROM label_templates \
+    let rows: Vec<(String, String, String, Option<String>, String, Option<String>)> = sqlx::query_as(
+        "SELECT id, name, purpose, category_codes, spec, lot_number_source_id FROM label_templates \
          WHERE enabled=1 AND purpose IN ('box', 'pallet') \
-         UNION ALL SELECT id, name, 'sheet', NULL, spec FROM pallet_sheet_templates WHERE enabled=1 \
+         UNION ALL SELECT id, name, 'sheet', NULL, spec, lot_number_source_id \
+         FROM pallet_sheet_templates WHERE enabled=1 \
          ORDER BY name COLLATE NOCASE, id",
     )
     .fetch_all(&mut *tx)
     .await
     .map_err(ApiError::internal)?;
     let mut templates = Vec::with_capacity(rows.len());
-    for (id, name, purpose, groups, spec) in rows {
-        if shifts::template_supports_lot(&serde_json::from_str(&spec).map_err(ApiError::internal)?)
-        {
+    for (id, name, purpose, groups, spec, source_id) in rows {
+        let layout_supports_lot = shifts::template_supports_lot(
+            &serde_json::from_str(&spec).map_err(ApiError::internal)?,
+        );
+        if layout_supports_lot && !supports_lot_numbers {
             continue;
         }
         templates.push(CreateTemplate {
@@ -1040,13 +1059,19 @@ pub async fn shift_create_options(
                 .map(|groups| serde_json::from_str(&groups))
                 .transpose()
                 .map_err(ApiError::internal)?,
+            supports_lot_number: supports_lot_numbers.then_some(layout_supports_lot),
+            lot_number_source_id: source_id.filter(|_| supports_lot_numbers),
         });
     }
-    Ok(Json(json!({
+    let mut options = json!({
         "lineId": line_id, "lineName": line_name, "timeZone": org.0,
         "boxDefault": org.1, "palletDefault": org.2,
         "palletsAllowed": license.evaluation.features.pallets,
         "creationAllowed": license.evaluation.opens_new_shifts && license.evaluation.features.handheld,
         "products": products, "templates": templates,
-    })))
+    });
+    if supports_lot_numbers {
+        options["useLotNumbers"] = json!(org.3);
+    }
+    Ok(Json(options))
 }

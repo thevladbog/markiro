@@ -66,7 +66,13 @@ object ReprintBackendModule {
                     val kind = when (value.optionalString("purpose")) { "product_duplicate" -> "unit"; "box" -> "box"; "pallet" -> "pallet"; else -> return@mapNotNull null }
                     if (value["enabled"] != JsonPrimitive(true)) return@mapNotNull null
                     val spec = value["spec"] ?: return@mapNotNull null
-                    SiteReprintTemplate("host:" + entry.key.removePrefix("host_reprint_template:"), value.string("name"), kind, spec.toString(), value.toString(), value["rev"]?.jsonPrimitive?.content ?: value["revision"]?.jsonPrimitive?.content ?: "0", reprintDigest(value), (value["chzProductGroupCodes"] as? JsonArray)?.map { it.jsonPrimitive.int })
+                    SiteReprintTemplate(
+                        "host:" + entry.key.removePrefix("host_reprint_template:"), value.string("name"), kind,
+                        spec.toString(), value.toString(),
+                        value["rev"]?.jsonPrimitive?.content ?: value["revision"]?.jsonPrimitive?.content ?: "0",
+                        reprintDigest(value), (value["chzProductGroupCodes"] as? JsonArray)?.map { it.jsonPrimitive.int },
+                        lotNumberSourceId = value.optionalString("lotNumberSourceId")?.let { "host:$it" },
+                    )
                 }
             },
             branding = { HostOrgPrint(hostApi(), MetaStore(db)).fetch(); Unit },

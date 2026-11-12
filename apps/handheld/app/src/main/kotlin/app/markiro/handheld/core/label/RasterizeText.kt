@@ -16,8 +16,8 @@ data class RasterResult(
 
 /**
  * `maxWidthPx` is a contract, not a hint: the returned bitmap must not be wider. An implementation
- * satisfies it by wrapping up to `maxLines` lines and clipping the last. Without that, a long
- * Cyrillic name prints off the right edge of the label.
+ * satisfies it by wrapping up to `maxLines` lines and clipping the last. Complete values must
+ * instead fit in full, with the bitmap containing all glyph ink.
  */
 data class RasterOptions(
     val fontFamily: String,
@@ -27,7 +27,10 @@ data class RasterOptions(
     val maxLines: Int,
     val lineHeight: Double? = null,
     val minFontSizePx: Int? = null,
+    val requireComplete: Boolean = false,
 )
+
+internal class CompleteTextOverflow : Exception()
 
 fun interface RasterizeText {
     suspend fun rasterize(text: String, options: RasterOptions): RasterResult

@@ -32,6 +32,7 @@ data class SiteReprintTemplate(
     val digest: String = "",
     val groupCodes: List<Int>? = null,
     val productId: String? = null,
+    val lotNumberSourceId: String? = null,
 )
 
 sealed interface SiteReprintLookup {

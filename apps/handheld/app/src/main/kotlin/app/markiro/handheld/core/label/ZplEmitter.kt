@@ -29,16 +29,24 @@ suspend fun generateZpl(
     lines += "^PW${mmToDots(spec.widthMm, spec.dpi)}"
     lines += "^LL${mmToDots(spec.heightMm, spec.dpi)}"
     for (element in spec.elements) {
+        if (!element.isVisible(data)) continue
         lines += when (element) {
             is LabelElement.Text -> textLike(
                 spec, element.xMm, element.yMm, element.text, element.fontSizePt, element.bold,
                 element.align, element.maxWidthMm, element.maxLines, rasterize, element.fontFamily, element.lineHeight, element.minFontSizePt,
             )
-            is LabelElement.Field -> textLike(
-                spec, element.xMm, element.yMm,
-                labelFieldDisplayValue(element.field, data, element.textFormat),
-                element.fontSizePt, element.bold, element.align, element.maxWidthMm, element.maxLines, rasterize, element.fontFamily, element.lineHeight, element.minFontSizePt,
-            )
+            is LabelElement.Field -> {
+                val value = labelFieldDisplayValue(element.field, data, element.textFormat)
+                if (element.field == LabelField.LOT_NUMBER) {
+                    val lot = rasterizeLotNumber(spec, element, value, rasterize)
+                    "^FO${lot.x},${lot.y}${buildGfaCommand(lot.raster)}^FS"
+                } else {
+                    textLike(
+                        spec, element.xMm, element.yMm, value, element.fontSizePt, element.bold, element.align,
+                        element.maxWidthMm, element.maxLines, rasterize, element.fontFamily, element.lineHeight, element.minFontSizePt,
+                    )
+                }
+            }
             is LabelElement.OrganizationLogo -> if (logo == null) continue else fitLabelLogo(element, spec.dpi, logo).let { "^FO${it.x},${it.y}${buildGfaCommand(it.raster)}^FS" }
             is LabelElement.Barcode -> barcode(spec, element, data)
             is LabelElement.Line -> line(spec, element)

@@ -102,6 +102,10 @@ data class ShiftDto(
     val palletLabelTemplateId: String? = "missing-offline-grant-fact",
     val createdFrom: String = "missing-offline-grant-fact",
     val setItems: List<SetItemDto> = emptyList(),
+    // The cloud grant evidence serializes defaults. Keep the host-only field out of that wire body.
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val lotNumber: String? = null,
 )
 
 @Serializable

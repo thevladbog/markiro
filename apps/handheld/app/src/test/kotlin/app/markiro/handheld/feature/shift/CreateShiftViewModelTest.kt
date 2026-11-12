@@ -67,11 +67,11 @@ class CreateShiftViewModelTest {
         val calls = mutableListOf<Pair<String, String>>()
         val api = HostApi(object : HostTransport {
             override suspend fun get(path: String) = when (path) {
-                "/v1/device/shift-create-options" -> ok("""{
+                "/v1/device/shift-create-options?lotNumbers=1" -> ok("""{
                     "lineId":"line","lineName":"Mobile","timeZone":"Europe/Moscow",
-                    "palletsAllowed":true,"creationAllowed":true,"products":[{"id":"p","name":"Product",
+                    "palletsAllowed":true,"creationAllowed":true,"useLotNumbers":true,"products":[{"id":"p","name":"Product",
                     "gtin14":"04600682000020","group":1,"boxCapacity":12,"palletBoxCapacity":30}],
-                    "templates":[{"id":"b","name":"Box","purpose":"box","groups":null}]
+                    "templates":[{"id":"b","name":"Box","purpose":"box","groups":null,"supportsLotNumber":true}]
                 }""")
                 "/v1/device/shifts" -> ok("""{"shifts":[]}""")
                 else -> error(path)
@@ -79,7 +79,7 @@ class CreateShiftViewModelTest {
             override suspend fun post(path: String, body: String): HostResult {
                 calls += path to body
                 return when (path) {
-                    "/v1/device/shifts" -> if (calls.size == 1) HostResult.Failed(TransportFailure.TIMEOUT) else ok("""{
+                    "/v1/device/shifts?lotNumbers=1" -> if (calls.size == 1) HostResult.Failed(TransportFailure.TIMEOUT) else ok("""{
                         "id":"s1","number":"NOV26-014/M","status":"planned","mode":"validation","lineId":"line",
                         "productId":"p","productName":"Product","productGtin14":"04600682000020",
                         "productionDate":"2026-11-11","boxCapacity":12
@@ -102,7 +102,12 @@ class CreateShiftViewModelTest {
         val first = model()
         val options = checkNotNull(first.state.first { !it.busy }.options)
         first.select(options.products.single())
-        first.edit { it.copy(mode = CreateShiftMode.VALIDATION, productionDate = "2026-11-11", plannedDate = "2026-11-12") }
+        first.edit {
+            it.copy(
+                mode = CreateShiftMode.VALIDATION, productionDate = "2026-11-11", plannedDate = "2026-11-12",
+                lotNumber = "  0042Бк07AЁ  ",
+            )
+        }
         first.submit()
         assertEquals(CreateShiftIssue.OFFLINE, first.state.first { !it.busy }.issue)
         val frozen = Json.parseToJsonElement(calls.single().second).jsonObject
@@ -110,6 +115,7 @@ class CreateShiftViewModelTest {
         assertEquals("line", frozen["expectedLineId"]?.jsonPrimitive?.content)
         assertEquals("2026-11-12", frozen["plannedDate"]?.jsonPrimitive?.content)
         assertNull(frozen["plannedQty"])
+        assertEquals("0042Бк07AЁ", frozen["lotNumber"]?.jsonPrimitive?.content)
         first.viewModelScope.cancel()
 
         val second = model()
@@ -124,7 +130,7 @@ class CreateShiftViewModelTest {
         assertEquals("NOV26-014/M", third.state.first { !it.busy }.created?.number)
         third.submit()
         assertEquals(CreateShiftIssue.ENTER, third.state.first { !it.busy }.issue)
-        assertEquals(listOf("/v1/device/shifts", "/v1/device/shifts", "/v1/device/shifts/s1/enter", "/v1/device/shifts/s1/enter"), calls.map { it.first })
+        assertEquals(listOf("/v1/device/shifts?lotNumbers=1", "/v1/device/shifts?lotNumbers=1", "/v1/device/shifts/s1/enter", "/v1/device/shifts/s1/enter"), calls.map { it.first })
     }
 
     private fun ok(body: String) = HostResult.Ok(200, body, null)

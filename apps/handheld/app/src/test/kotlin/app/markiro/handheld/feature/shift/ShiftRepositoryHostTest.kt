@@ -108,6 +108,28 @@ class ShiftRepositoryHostTest {
     }
 
     @Test
+    fun anEnteredShiftKeepsItsFrozenLotAcrossAListRefresh() = runTest {
+        val entered = Json.parseToJsonElement(fixture("device-shift-entered-pallets.json")).jsonObject
+        val snapshot = entered.getValue("snapshot").jsonObject
+        val frozen = JsonObject(entered + mapOf(
+            "lotNumber" to JsonPrimitive("mutable"),
+            "snapshot" to JsonObject(snapshot + ("lotNumber" to JsonPrimitive("0042Бк07AЁ"))),
+        ))
+        val script = Script(
+            gets = mapOf(listPath() to fixture("device-shifts.json")),
+            posts = mutableMapOf(
+                enterPath() to ArrayDeque(listOf(ok(frozen.toString()))),
+                "/v1/device/sscc/blocks" to ArrayDeque(listOf(ok(block0), ok(block1))),
+            ),
+        )
+        val repository = repository(script)
+        assertEquals(EnterResult.Ok, repository.enter(id))
+        assertEquals("0042Бк07AЁ", db.shiftDao().get(id)?.lotNumber)
+        assertTrue(repository.refreshList())
+        assertEquals("0042Бк07AЁ", db.shiftDao().get(id)?.lotNumber)
+    }
+
+    @Test
     fun aShiftTheHostCallsClosedOrForOtherVersionsIsReportedAsThePeopleAlreadyRead() = runTest {
         val closed = HostResult.Ok(409, """{"error":{"code":"conflict","message":"m","details":{"constraint":"shift_status","status":"closed"}}}""", null)
         val update = HostResult.Ok(409, """{"error":{"code":"conflict","message":"m","details":{"constraint":"station_update"}}}""", null)

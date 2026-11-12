@@ -27,6 +27,7 @@ data class CreateShiftDraft(
     val boxTemplateId: String? = null,
     val palletTemplateId: String? = null,
     val sheetId: String? = null,
+    val lotNumber: String = "",
 ) {
     fun withProduct(product: ShiftCreateProductDto): CreateShiftDraft = copy(
         productId = product.id, boxCapacity = product.boxCapacity.toString(), palletCapacity = product.palletBoxCapacity.toString(),
@@ -37,8 +38,10 @@ data class CreateShiftDraft(
 
     fun templates(options: ShiftCreateOptionsDto, purpose: String): List<ShiftCreateTemplateDto> {
         val product = product(options) ?: return emptyList()
+        val requiresLot = options.useLotNumbers && normalizedLotNumber().isNotEmpty() && mode != CreateShiftMode.VALIDATION
         return options.templates.filter {
-            it.purpose == purpose && (it.groups == null || product.group in it.groups)
+            it.purpose == purpose && (it.groups == null || product.group in it.groups) &&
+                (!requiresLot || it.supportsLotNumber)
         }
     }
 
@@ -48,9 +51,12 @@ data class CreateShiftDraft(
         val preferences = when (purpose) {
             "box" -> listOf(boxTemplateId, product.boxPreference, product.boxCategoryDefault, options.boxDefault)
             "pallet" -> listOf(palletTemplateId, product.palletPreference, product.palletCategoryDefault, options.palletDefault)
-            else -> return candidates.firstOrNull { it.id == sheetId }
+            else -> listOf(sheetId)
         }
-        return preferences.firstNotNullOfOrNull { id -> candidates.firstOrNull { it.id == id } } ?: candidates.firstOrNull()
+        val selected = preferences.filterNotNull().firstNotNullOfOrNull { id ->
+            candidates.firstOrNull { it.id == id } ?: candidates.firstOrNull { it.lotNumberSourceId == id }
+        }
+        return selected ?: candidates.firstOrNull().takeUnless { purpose == "sheet" }
     }
 
     fun request(options: ShiftCreateOptionsDto, requestId: String): HostShiftCreateRequest? {
@@ -65,15 +71,28 @@ data class CreateShiftDraft(
         val palletCapacity = if (pallets) count(palletCapacity, MAX_SHIFT_PALLET_CAPACITY) ?: return null else null
         val plan = if (plan.isBlank()) null else count(plan, MAX_SHIFT_PLAN) ?: return null
         if (!civilDate(plannedDate) || !civilDate(productionDate)) return null
+        val lot = normalizedLotNumber().takeIf { !assembly && options.useLotNumbers && it.isNotEmpty() }
+        if (lot != null && !isLotNumberValid()) return null
         return HostShiftCreateRequest(
             requestId = requestId, expectedLineId = options.lineId, productId = product.id,
             mode = if (boxes) "aggregation" else "validation", productionDate = productionDate,
             plannedDate = plannedDate, boxTemplateId = boxTemplate?.id, plannedQty = plan,
             boxCapacity = boxCapacity, palletsEnabled = pallets, palletBoxCapacity = palletCapacity,
             palletTemplateId = palletTemplate?.id, palletSheetTemplateId = if (pallets) template(options, "sheet")?.id else null,
+            lotNumber = lot,
         )
     }
+
+    internal fun isLotNumberValid(): Boolean = LOT_NUMBER.matches(normalizedLotNumber())
+
+    private fun normalizedLotNumber(): String = lotNumber.trim { char ->
+        // Match the host and webview when a number is pasted with edge whitespace.
+        char in "\t\n\u000b\u000c\r \u00a0\u1680\u2028\u2029\u202f\u205f\u3000\ufeff" ||
+            char in '\u2000'..'\u200a'
+    }
 }
+
+private val LOT_NUMBER = Regex("[0-9A-Za-zА-Яа-яЁё]*")
 
 internal fun count(raw: String, max: Int): Int? =
     raw.takeIf { it.all { char -> char in '0'..'9' } }?.toIntOrNull()?.takeIf { it in 1..max }

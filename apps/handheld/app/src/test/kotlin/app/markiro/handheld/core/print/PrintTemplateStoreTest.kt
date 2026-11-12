@@ -54,6 +54,22 @@ class PrintTemplateStoreTest {
         assertEquals(a, store.freeze(PrintPurpose.BOX, "default", a, "product").specJson)
     }
 
+    @Test fun aPrintOverrideCannotOmitTheShiftLotAndAnUnsentJobCanRecover() = runTest {
+        val lotSpec = a.replace("[]", """[{"id":"lot","kind":"field","field":"shift.lotNumber","xMm":5,"yMm":5,"fontSizePt":12}]""")
+        assertTrue(store.select("p", PrintPurpose.BOX, "a"))
+        val frozen = store.freeze(PrintPurpose.BOX, "lot-job", lotSpec, "product", requiresLotNumber = true)
+        assertNull(frozen.specJson)
+        assertEquals("template_incompatible", frozen.reason)
+
+        assertTrue(store.select("p", PrintPurpose.BOX, null))
+        assertEquals(frozen, store.forPrint(PrintPurpose.BOX, "lot-job", lotSpec, "product", requiresLotNumber = true))
+        val recovered = store.forPrint(
+            PrintPurpose.BOX, "lot-job", lotSpec, "product", recoverUnsent = true, requiresLotNumber = true,
+        )
+        assertNull(recovered.reason)
+        assertEquals(lotSpec, recovered.specJson)
+    }
+
     @Test fun pendingJobsWithoutAnOriginalTemplateNeverPickUpALaterOverride() = runTest {
         store.freeze(PrintPurpose.BOX, "pending", null, "product")
         store.select("p", PrintPurpose.BOX, "b")
