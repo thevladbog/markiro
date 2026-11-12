@@ -2013,6 +2013,7 @@ async fn every_table_has_a_forget_class() {
             "floor_pallets",
             "floor_print_jobs",
             "floor_scans",
+            "floor_set_marks",
             "floor_shifts",
             "floor_sscc_blocks",
             "floor_unit_labels",
@@ -2121,6 +2122,15 @@ async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
     // one setting of the workstation (`0007`).
     db.transaction(device_records()).await.unwrap();
     db.transaction(vec![
+        statement(
+            "INSERT INTO floor_set_marks (host_id, device_id, shift_id, code_hash, assembly_id, is_set) \
+             VALUES (?, ?, 'shift-1', ?, 'assembly-1', 1)",
+            json!([
+                HOST,
+                DEVICE,
+                "7b6de53388730b7f5c76aef0433d58e6bb479794e6343e56c9e7f2a1f94d3b3d"
+            ]),
+        ),
         statement(
             "INSERT INTO pallet_registry_state (host_id, device_id, until_at) VALUES (?, ?, 'at')",
             json!([HOST, DEVICE]),
