@@ -39,6 +39,13 @@ const SAMPLE_CLUSTER_ROUTES = [
 ] as const;
 const AUTONOM_ROUTES = ["/skachat/", "/stoimost/"] as const;
 
+function instructionRoutes(hubRoute: string): string[] {
+  const hub = documents.get(hubRoute);
+  return [...(hub?.querySelectorAll<HTMLAnchorElement>(".legal-registry a[href]") ?? [])]
+    .map((link) => link.getAttribute("href"))
+    .filter((href): href is string => href !== null && href.startsWith(hubRoute));
+}
+
 it("V4 makes the manual workflow precede office management and preserves tariff trial context", () => {
   const home = documents.get("/");
   const work = home?.getElementById("produkt");
@@ -1680,10 +1687,7 @@ describe("rendered landing page", () => {
     const codes = ["01", "02", "03", "04", "08", "09", "10", "12", "13", "14", "15", "16"];
     for (const locale of ["ru", "en"]) {
       const hubRoute = locale === "ru" ? "/instruktsii/" : "/en/instructions/";
-      const hub = documents.get(hubRoute);
-      const links = [...(hub?.querySelectorAll<HTMLAnchorElement>(".legal-registry a[href]") ?? [])]
-        .map((link) => link.getAttribute("href"))
-        .filter((href): href is string => href !== null && href.startsWith(hubRoute));
+      const links = instructionRoutes(hubRoute);
       expect(links, hubRoute).toHaveLength(12);
       const foundCodes: string[] = [];
       for (const route of links) {
@@ -1748,30 +1752,26 @@ describe("rendered landing page", () => {
     }
   });
 
-  it("renders the updated handheld frames with their actual PNG dimensions", () => {
-    for (const route of ["/instruktsii/tsd/", "/en/instructions/handheld-terminal/"]) {
-      const page = new JSDOM(
-        readFileSync(path.join(outputDirectory, route.slice(1), "index.html"), "utf8"),
-      ).window.document;
-      for (const frame of [
-        "office-devices",
-        "office-handheld-line",
-        "pallet-printed",
-        "pallet-print-failed",
-        "sign-in",
-        "hub",
-        "printer-add",
-        "printer-assignments",
-        "pack-disassembly-scan",
-        "site-reprint-reason",
-      ]) {
-        const img = page.querySelector(`.instruction-document img[src*="/${frame}."]`);
-        expect(img, `${route}: ${frame}`).not.toBeNull();
-        const src = img?.getAttribute("src") ?? "";
-        const bytes = readFileSync(path.join(outputDirectory, src.slice(1)));
-        expect(bytes.subarray(1, 4).toString("ascii")).toBe("PNG");
-        expect(Number(img?.getAttribute("width"))).toBe(bytes.readUInt32BE(16));
-        expect(Number(img?.getAttribute("height"))).toBe(bytes.readUInt32BE(20));
+  it("renders instruction screenshots with their actual PNG dimensions", () => {
+    for (const hubRoute of ["/instruktsii/", "/en/instructions/"]) {
+      const routes = instructionRoutes(hubRoute);
+      expect(routes.length, hubRoute).toBeGreaterThan(0);
+      for (const route of routes) {
+        const page = new JSDOM(
+          readFileSync(path.join(outputDirectory, route.slice(1), "index.html"), "utf8"),
+        ).window.document;
+        const frames = [...page.querySelectorAll(".instruction-step__figure img")];
+        expect(frames.length, route).toBeGreaterThan(0);
+        for (const frame of frames) {
+          const src = frame.getAttribute("src") ?? "";
+          expect(src, route).toMatch(/^\/[^/]/u);
+          const bytes = readFileSync(path.join(outputDirectory, src.slice(1)));
+          const label = `${route}: ${src}`;
+          expect(bytes.subarray(1, 4).toString("ascii"), label).toBe("PNG");
+          expect(Number(frame.getAttribute("width")), label).toBe(bytes.readUInt32BE(16));
+          expect(Number(frame.getAttribute("height")), label).toBe(bytes.readUInt32BE(20));
+          expect(frame.getAttribute("alt")?.trim(), label).toBeTruthy();
+        }
       }
     }
   });
