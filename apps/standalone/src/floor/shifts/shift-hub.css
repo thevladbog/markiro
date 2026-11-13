@@ -952,26 +952,6 @@
   padding-bottom: var(--sp-1);
 }
 
-.new-shift__lot-keyboard {
-  display: grid;
-  gap: 4px;
-}
-
-.new-shift__lot-keys {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  justify-content: center;
-}
-
-.new-shift__lot .mk-btn.new-shift__lot-key {
-  width: 64px;
-  min-width: 64px;
-  height: 64px;
-  min-height: 64px;
-  padding-inline: 0;
-}
-
 .new-shift .new-shift__left {
   grid-column: 1;
   grid-row: 1;

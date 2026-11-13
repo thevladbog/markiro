@@ -2860,9 +2860,16 @@ const CLOSE_SUMMARY: &str =
 const OPEN_JOB_READ: &str =
     "SELECT id, shift_id, purpose, subject_id, sscc, state, verify, template_id, \
      template_rev, fields, printer, bytes_base64, error_code, attempts, operator_id, \
-     created_at, updated_at FROM floor_print_jobs WHERE host_id = ? AND device_id = ? AND \
+     created_at, updated_at FROM floor_print_jobs j WHERE host_id = ? AND device_id = ? AND \
      shift_id = ? AND (state IN ('prepared', 'sending', 'failed', 'unknown') OR (state = \
-     'sent' AND verify = 1)) ORDER BY created_at, purpose, id LIMIT 1";
+     'sent' AND verify = 1)) AND (j.purpose <> 'pallet' OR NOT EXISTS (SELECT 1 FROM \
+     floor_boxes b INDEXED BY floor_boxes_pallet JOIN floor_print_jobs box_job INDEXED BY \
+     floor_print_jobs_open ON box_job.subject_id = b.id AND box_job.host_id = b.host_id AND \
+     box_job.device_id = b.device_id AND box_job.shift_id = \
+     b.shift_id AND box_job.purpose = 'box' WHERE b.pallet_id = j.subject_id AND b.host_id = \
+     j.host_id AND b.device_id = j.device_id AND b.shift_id = j.shift_id AND b.disassembled_at \
+     IS NULL AND (state IN ('prepared', 'sending', 'failed', 'unknown') OR (state = 'sent' AND \
+     verify = 1)))) ORDER BY created_at, purpose, id LIMIT 1";
 
 /// The work screen's count of a shift's codes (`SHIFT_CODES_SQL`, `src/floor/work/work-reads.ts`),
 /// of a validation shift too, whose codes have no box (plan РЕЖ, migration `0014`).
@@ -3051,7 +3058,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 108] = [
+    let reads: [(&str, &str); 110] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -3440,6 +3447,11 @@ async fn the_floors_repeating_reads_search_an_index() {
         (
             OPEN_JOB_READ,
             "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
+        ),
+        (OPEN_JOB_READ, "floor_boxes_pallet (pallet_id=?)"),
+        (
+            OPEN_JOB_READ,
+            "floor_print_jobs_open (host_id=? AND device_id=? AND purpose=? AND subject_id=?)",
         ),
         (
             CLOSED_PALLETS,

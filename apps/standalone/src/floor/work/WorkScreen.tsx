@@ -322,7 +322,7 @@ type Stop =
   | { kind: "confirm_pallet" }
   /**
    * The early close found no pallet serial (the serials' reason), and waits for the operator's retry.
-   * `fromClose`: it was «Закрыть паллету и смену» that stopped here, so the shift is NOT closed.
+   * `fromClose`: it was a step of the shift's closure that stopped here.
    */
   | {
       kind: "pallet_no_serials";
@@ -852,10 +852,9 @@ export function WorkScreen(props: WorkScreenProps) {
   const pallets = validation ? null : shiftPallets(shift);
   const palletsMissing = !validation && shift.copy.palletsEnabled && pallets === null;
   const [stop, setStopState] = useState<Stop | null>(palletsMissing ? PALLETS_MISSING : null);
-  const [planReached, setPlanReached] = useState(false);
-  // A shared shift's plan notice was dismissed (plan 2b): it is derived from the whole shift's
-  // count, and comes back no more.
+  // The notice is offered once the local packaging and checks are complete.
   const [planDismissed, setPlanDismissed] = useState(false);
+  const [labelsSettled, setLabelsSettled] = useState(false);
   // The label the work stopped for: what its panel says under it, and whether a decision runs.
   const [labelNote, setLabelNote] = useState<LabelNote | null>(null);
   const [labelBusy, setLabelBusy] = useState(false);
@@ -982,36 +981,30 @@ export function WorkScreen(props: WorkScreenProps) {
   });
   // Read by a job in its turn, before React renders the stop it set.
   const stopRef = useRef<Stop | null>(stop);
-  // «Закрыть паллету и смену» whose pallet's label waits for the operator: the shift's
-  // close goes, with the reason chosen, once that label — the job `jobId` — is decided
-  // (plan ПЛ-Ц). `shown` is the summary the operator pressed on: the close goes on its
-  // numbers and on no others. The intention ends with that label's stop: a stop of
-  // anything else, another label included, drops it (`setStop`), and so does a check
-  // or a decision that found the label moved; the operator presses «Закрыть смену» again.
-  const pendingClose = useRef<{
-    reason: ShiftCloseReasonCode | null;
-    shown: CloseSummary;
-    jobId: string;
-  } | null>(null);
-  // The same, said to the operator: the label's panel tells the shift closes after it.
+  // Closing a box or pallet can produce one or more labels. When they are
+  // resolved, show the next step of the close with a fresh summary.
+  const resumingClose = useRef(false);
   const [closeAfterLabel, setCloseAfterLabel] = useState(false);
   // Which button opened the exceptions: the footer's, or one of the open box's own.
   const [exceptionsFrom, setExceptionsFrom] = useState<ExceptionsOpener>("exceptions");
-  const setPendingClose = useCallback((next: typeof pendingClose.current) => {
-    pendingClose.current = next;
-    setCloseAfterLabel(next !== null);
+  const resumeCloseAfterLabel = useCallback((resume: boolean) => {
+    resumingClose.current = resume;
+    setCloseAfterLabel(resume);
   }, []);
   const setStop = useCallback(
     (next: Stop | null) => {
       stopRef.current = next;
       setStopState(next);
-      // Only the intention's own label may stand while it waits; no stop at all is the
-      // decision of that label, which `afterLabel` reads next.
-      const pending = pendingClose.current;
-      if (pending === null || next === null) return;
-      if (next.kind !== "label" || next.job.id !== pending.jobId) setPendingClose(null);
+      if (
+        resumingClose.current &&
+        next !== null &&
+        next.kind !== "label" &&
+        next.kind !== "close"
+      ) {
+        resumeCloseAfterLabel(false);
+      }
     },
-    [setPendingClose],
+    [resumeCloseAfterLabel],
   );
   /**
    * A failed read of this computer's database at the entry (the first thing the
@@ -1028,7 +1021,6 @@ export function WorkScreen(props: WorkScreenProps) {
   // The computer stays awake while the screen is open (decision 34).
   const { awake } = props;
   useEffect(() => awake.hold(), [awake]);
-  const planShown = useRef(false);
   const unsure = useRef<string | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cueTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1189,6 +1181,7 @@ export function WorkScreen(props: WorkScreenProps) {
    * `UnreadableJobError`'s JSDoc.
    */
   const settleLabel = useCallback(async (): Promise<void> => {
+    if (alive.current) setLabelsSettled(false);
     const now = live.current;
     let job = await readOpenJob(now.local, pairingOf(now), now.shift.copy.id);
     while (job?.state === "prepared") {
@@ -1215,6 +1208,7 @@ export function WorkScreen(props: WorkScreenProps) {
       const next = live.current;
       job = await readOpenJob(next.local, pairingOf(next), next.shift.copy.id);
     }
+    if (alive.current) setLabelsSettled(job === null);
     showLabel(job);
   }, [showLabel]);
 
@@ -1478,8 +1472,7 @@ export function WorkScreen(props: WorkScreenProps) {
   );
 
   /**
-   * The shift's close itself (stage 2a spec §5.7.7), the one path of
-   * «Подтвердить закрытие» and of «Закрыть паллету и смену»: a local write that
+   * «Подтвердить закрытие»: a local write that
    * needs no host, with the open pallet's check of plan ПЛ-Ц in its
    * transaction — on every path, for the pallet may have changed since any
    * reading of the summary. A shift that changed since it shows the summary
@@ -1512,51 +1505,40 @@ export function WorkScreen(props: WorkScreenProps) {
     [showSummary, readSummaryNow, closeFailed, setStop],
   );
 
+  const nextCloseStep = useCallback(async (): Promise<void> => {
+    if (leavingNow()) return;
+    const current = stopRef.current;
+    setStop({
+      kind: "close",
+      summary: null,
+      note: null,
+      waitingSscc: null,
+      attempt: current?.kind === "close" ? current.attempt : 0,
+    });
+    try {
+      await showSummary(await readSummaryNow(), null);
+    } catch {
+      failSystem();
+    }
+  }, [failSystem, leavingNow, readSummaryNow, setStop, showSummary]);
+
   /**
-   * After a label is decided and nothing stops the work: the shift's close that
-   * waited for its pallet's label goes now (plan ПЛ-Ц), unless the leave began
-   * first — on the numbers the operator saw, read again; other numbers are shown
-   * with why instead. Otherwise a box a stop of the station left full closes,
-   * then a full pallet that waited. Only from the work queue.
+   * Continue with automatic packaging and any resulting labels, then return
+   * to the next step of shift closure if the operator opened it.
    */
   const afterLabel = useCallback(async (): Promise<void> => {
     if (stopRef.current !== null) return;
-    const pending = pendingClose.current;
-    if (pending !== null) {
-      setPendingClose(null);
-      // A leave that began first starts no close.
-      if (leavingNow()) return;
-      const { reason, shown } = pending;
-      setStop({ kind: "close", summary: null, note: null, waitingSscc: null, attempt: 0 });
-      if (alive.current) setClosing(true);
-      try {
-        // Only the open pallet the operator was asked about may have changed: it is closed now.
-        const fresh = await readSummaryNow();
-        if (!sameSummary({ ...shown, blocker: null }, fresh)) {
-          await showSummary(fresh, "stale");
-          return;
-        }
-        await finishClose(reason, shown);
-      } catch {
-        await closeFailed(shown);
-      } finally {
-        if (alive.current) setClosing(false);
-      }
+    if (leavingNow()) {
+      resumeCloseAfterLabel(false);
       return;
     }
     await closeBox(true);
     if (stopRef.current === null) await settlePalletSafely();
-  }, [
-    finishClose,
-    readSummaryNow,
-    showSummary,
-    closeFailed,
-    closeBox,
-    settlePalletSafely,
-    leavingNow,
-    setStop,
-    setPendingClose,
-  ]);
+    if (stopRef.current === null && resumingClose.current) {
+      resumeCloseAfterLabel(false);
+      await nextCloseStep();
+    }
+  }, [closeBox, settlePalletSafely, leavingNow, nextCloseStep, resumeCloseAfterLabel]);
 
   const settle = useCallback(
     async (outcome: ScanOutcome): Promise<void> => {
@@ -1569,12 +1551,11 @@ export function WorkScreen(props: WorkScreenProps) {
         if (outcome.boxId !== null && boxIsFull(outcome.itemCount, boxCapacity)) {
           await closeBox(true);
         }
-        const next = await refreshQuietly();
-        const planned = live.current.shift.copy.plannedQty;
-        if (next !== null && planned !== null && !planShown.current && next.accepted >= planned) {
-          planShown.current = true;
-          if (alive.current) setPlanReached(true);
+        // Publish the accepted count after the unit's print outcome and check are known.
+        if (outcome.boxId === null && outcome.label !== undefined) {
+          await sendUnitAccepted(outcome.label.id);
         }
+        await refreshQuietly();
         return;
       }
       if (outcome.kind === "duplicate") {
@@ -1595,7 +1576,7 @@ export function WorkScreen(props: WorkScreenProps) {
       // A validation shift's panel counts the refused scans too (plan РЕЖ).
       if (live.current.shift.copy.mode === "validation") await refreshQuietly();
     },
-    [closeBox, refreshQuietly, show],
+    [closeBox, refreshQuietly, sendUnitAccepted, show],
   );
 
   /** A scan that is not taken: said in words, by flash and by tone, and not written. */
@@ -1650,7 +1631,7 @@ export function WorkScreen(props: WorkScreenProps) {
       } catch (error) {
         if (!(error instanceof StaleJobError || error instanceof UnresolvableJobError)) throw error;
         // The label was not decided here: an intention to close after it ends.
-        setPendingClose(null);
+        resumeCloseAfterLabel(false);
         setLabelNote({ kind: "moved" });
         await settleSafely();
         return;
@@ -1677,7 +1658,7 @@ export function WorkScreen(props: WorkScreenProps) {
         null,
       );
     },
-    [settleSafely, show, showLabel, afterLabel, refreshQuietly, setPendingClose],
+    [settleSafely, show, showLabel, afterLabel, refreshQuietly, resumeCloseAfterLabel],
   );
 
   // The box choice of the exceptions, when it listens: a scan of a label picks the box.
@@ -1761,12 +1742,8 @@ export function WorkScreen(props: WorkScreenProps) {
       }
       live.current.onRecorded();
       await settle(outcome);
-      // The accepted unit's label goes at once (its first send), and its window follows it.
-      if (outcome.kind === "accepted" && outcome.boxId === null && outcome.label !== undefined) {
-        await sendUnitAccepted(outcome.label.id);
-      }
     },
-    [check, closeBox, refuse, settle, setStop, show, scanUnitWindow, sendUnitAccepted, unitRefused],
+    [check, closeBox, refuse, settle, setStop, show, scanUnitWindow, unitRefused],
   );
 
   /**
@@ -1804,7 +1781,7 @@ export function WorkScreen(props: WorkScreenProps) {
             else if (error instanceof LabelRenderError) setLabelNote({ kind: "render_failed" });
             else if (error instanceof StaleJobError || error instanceof UnresolvableJobError) {
               // Not this decision's label any more: an intention to close after it ends.
-              setPendingClose(null);
+              resumeCloseAfterLabel(false);
               setLabelNote({ kind: "moved" });
               await settleSafely();
             } else throw error;
@@ -2015,22 +1992,17 @@ export function WorkScreen(props: WorkScreenProps) {
    * serials ran out the host is asked for a block and the close tried once
    * more. What is left stops the work with its reason (`fromClose`: it was the
    * shift's close that asked, and the stop says the shift is not closed).
-   * Answers how it went. Only from the work queue.
+   * Only from the work queue.
    */
   const closePallet = useCallback(
-    async (fromClose = false): Promise<"closed" | "empty" | "stopped"> => {
+    async (fromClose = false): Promise<void> => {
       const now = live.current;
       const pallets = now.pallets;
-      if (pallets === null) return "empty";
-      // No screen flow reaches this check today: every caller arrives with no label waiting
-      // (the early-close button is off under any stop, the shift's summary names `label` before
-      // `open_pallet` and `sameSummary` re-reads it in the turn, the link-back calls this only
-      // under `pallet_no_serials`). It still keeps `pendingClose`'s job id the pallet's own: after
-      // this close the stop that holds is the label of the pallet just closed. A caller that
-      // skips the summary must keep it.
+      if (pallets === null) return;
+      // A pending label takes precedence over closing the pallet, including on retry.
       if ((await readOpenJob(now.local, pairingOf(now), now.shift.copy.id)) !== null) {
         await settleSafely();
-        return "stopped";
+        return;
       }
       // A serial that cannot label a pallet is lost and the next taken, up to three in a row,
       // as for a full pallet (plan ХП); a stale write is tried again inside each try.
@@ -2047,12 +2019,12 @@ export function WorkScreen(props: WorkScreenProps) {
           result = await close();
         }
       }
-      if (result.kind === "empty") return "empty";
+      if (result.kind === "empty") return;
       if (result.kind === "closed") {
         live.current.onRecorded();
         if (alive.current) setPalletWaits(null);
         await settleSafely();
-        return "closed";
+        return;
       }
       if (result.kind === "no_serials") {
         const reason =
@@ -2060,41 +2032,30 @@ export function WorkScreen(props: WorkScreenProps) {
             ? "failed"
             : supplied.kind;
         setStop({ kind: "pallet_no_serials", reason, fromClose });
-        return "stopped";
+        return;
       }
       // Three serials in a row could not label a pallet (each lost: «Повторить» takes the
       // next), or the pallet changed under three tries: nothing was closed.
       setStop({ kind: "pallet_failed", fromClose });
-      return "stopped";
     },
     [palletSupply, settleSafely, setStop],
   );
 
-  /**
-   * The summary of the close, read as the line's next piece of work: a scan
-   * taken before «Закрыть смену» was pressed has been written by then, and
-   * the summary counts it.
-   */
-  const readSummary = () =>
-    queue.run(async () => {
-      const now = live.current;
-      await showSummary(
-        await readCloseSummary(now.local, pairingOf(now), now.shift.copy.id, now.online),
-        null,
-      );
-    });
-
   /** «Закрыть смену», pressed while nothing stops the work: the summary first. */
   const openClose = () => {
     if (leavingNow() || stopRef.current !== null) return;
-    setPlanReached(false);
-    // Only a shared plan notice that was showing is dismissed (final review m5): opened before the
-    // plan was reached, the close takes away no notice that has yet to come.
-    if (sharedReached) setPlanDismissed(true);
+    if (planShowing) setPlanDismissed(true);
+    if (!validation) resumeCloseAfterLabel(true);
     setStop({ kind: "close", summary: null, note: null, waitingSscc: null, attempt: 0 });
     void live.current
-      .track(readSummary())
-      .catch(() => setStop({ kind: "system_error", cause: "read" }));
+      .track(
+        queue.run(async () => {
+          if (stopRef.current?.kind !== "close") return;
+          resumeCloseAfterLabel(false);
+          await nextCloseStep();
+        }),
+      )
+      .catch(failSystem);
   };
 
   /**
@@ -2108,15 +2069,13 @@ export function WorkScreen(props: WorkScreenProps) {
    * closed, not an error. The reason is the operator's, from the buttons.
    * It is queued although the `close` stop already refuses every scan taken
    * after the press: that is defence in depth today (a queued scan is refused
-   * in its turn either way). The pallet work of plan ПЛ-Ц queues before the
-   * close, in the same turn (`confirmPalletClose`); the order is pinned by
-   * «takes no scan queued behind the close: it meets the closed shift»
-   * (`test/floor-work-close-pallets.test.tsx`), which holds a job that is not
-   * a scan.
+   * in its turn either way).
    */
   const confirmClose = (reason: ShiftCloseReasonCode | null) => {
     const before = stopRef.current;
-    if (before?.kind !== "close" || before.summary === null) return;
+    if (before?.kind !== "close" || before.summary === null || before.summary.blocker !== null) {
+      return;
+    }
     if (closeRunning.current || leavingNow()) return;
     const shown = before.summary;
     closeRunning.current = true;
@@ -2125,6 +2084,7 @@ export function WorkScreen(props: WorkScreenProps) {
       .track(
         queue.run(async () => {
           try {
+            if (leavingNow()) return;
             const fresh = await readSummaryNow();
             // A shift found closed differs from the one shown, and is shown as closed.
             if (!sameSummary(shown, fresh)) {
@@ -2143,22 +2103,10 @@ export function WorkScreen(props: WorkScreenProps) {
       .catch(() => setStop({ kind: "system_error", cause: "write" }));
   };
 
-  /**
-   * «Закрыть паллету и смену» (plan ПЛ-Ц; the cloud station's
-   * `confirmShiftClosePallet`), as the line's next piece of work handed to the
-   * gate before it starts, like `confirmClose`: the summary is read again in
-   * the turn and a different one is shown instead of closing on what the
-   * operator did not see; then the open pallet closes and its label goes, and
-   * the shift closes with the reason chosen. A pallet label that waits — its
-   * check, a printer that failed — takes the screen first, and the shift's
-   * close follows once it is decided (`pendingClose`, `afterLabel`). No pallet
-   * serial, or a serial out of range, stops the work with its reason, and the
-   * shift stays open: the intention to close is not kept, the operator presses
-   * again.
-   */
-  const confirmPalletClose = (reason: ShiftCloseReasonCode | null) => {
+  /** Confirm only the box or pallet shown in this step, then read the next step. */
+  const confirmPackageClose = (kind: "open_box" | "open_pallet") => {
     const before = stopRef.current;
-    if (before?.kind !== "close" || before.summary === null) return;
+    if (before?.kind !== "close" || before.summary?.blocker?.kind !== kind) return;
     if (closeRunning.current || leavingNow()) return;
     const shown = before.summary;
     closeRunning.current = true;
@@ -2167,24 +2115,18 @@ export function WorkScreen(props: WorkScreenProps) {
       .track(
         queue.run(async () => {
           try {
+            if (leavingNow()) return;
             const fresh = await readSummaryNow();
             if (!sameSummary(shown, fresh)) {
               await showSummary(fresh, "stale");
               return;
             }
-            const closed = await closePallet(true);
-            // The explicit stop: the pallet did not close and `closePallet` left a stop of its
-            // own (a label to decide, no serial, a lost serial). Without this line the shift's
-            // close below would still be refused, but only by `closeShift`'s guards; do not
-            // delete it because the suite stays green.
-            if (closed === "stopped") return;
-            const waiting = stopRef.current;
-            if (waiting?.kind === "label") {
-              // Tied to the label that stopped the work: the pallet's own, just closed.
-              setPendingClose({ reason, shown, jobId: waiting.job.id });
-              return;
-            }
-            await finishClose(reason, shown);
+            if (kind === "open_box") await closeBox(false);
+            else await closePallet(true);
+            await refreshQuietly();
+            const stopped = stopRef.current;
+            if (stopped?.kind === "label") resumeCloseAfterLabel(true);
+            else if (stopped?.kind === "close") await nextCloseStep();
           } catch {
             await closeFailed(shown);
           } finally {
@@ -2264,8 +2206,22 @@ export function WorkScreen(props: WorkScreenProps) {
 
   /** From the summary to the label that keeps the shift open: its panel decides it. */
   const toLabel = () => {
+    if (leavingNow() || closeRunning.current) return;
     setStop(null);
-    resumeWork();
+    if (validation) {
+      resumeWork();
+      return;
+    }
+    resumeCloseAfterLabel(true);
+    void live.current
+      .track(
+        queue.run(async () => {
+          await settleSafely();
+          await afterLabel();
+          await refreshQuietly();
+        }),
+      )
+      .catch(failSystem);
   };
 
   /**
@@ -2324,6 +2280,7 @@ export function WorkScreen(props: WorkScreenProps) {
           // app lost, and opens the window of the station's label that waits, at once.
           if (live.current.shift.copy.mode === "validation") {
             if (printsUnitLabels(live.current.shift)) await settleUnitSafely(true);
+            if (alive.current) setLabelsSettled(true);
             return;
           }
           try {
@@ -2467,6 +2424,7 @@ export function WorkScreen(props: WorkScreenProps) {
 
   const openBox = totals?.openBox ?? null;
   const items = openBox?.itemCount ?? 0;
+  const palletBoxes = pallet?.boxCount ?? 0;
   const canClose = items > 0 && stop === null && !leaving;
   // Plan 2b: the whole shift's count — the others' part by the host and this station's own codes —
   // and the plan reached by it, said once until dismissed or the close opens.
@@ -2474,15 +2432,19 @@ export function WorkScreen(props: WorkScreenProps) {
     sharedPart === null
       ? null
       : sharedCount(sharedPart, props.pairing.deviceId, totals?.accepted ?? 0, lost);
-  const sharedReached =
-    shared !== null &&
+  const planShowing =
+    totals !== null &&
     plannedQty !== null &&
     plannedQty > 0 &&
-    shared.total >= plannedQty &&
+    (shared?.total ?? totals.accepted) >= plannedQty &&
     !planDismissed &&
-    stop?.kind !== "close" &&
-    stop?.kind !== "closed";
-  const planShowing = shared === null ? planReached : sharedReached;
+    !leaving &&
+    !closeAfterLabel &&
+    stop === null &&
+    labelsSettled &&
+    !unit.sending &&
+    items === 0 &&
+    palletBoxes === 0;
   // Plan 2b (final review I1): the host has this station's part as `left` and the other devices
   // hold every slot, by its last read — the station's return was refused. The work goes on (the
   // host takes the facts of a left part), and the floor tries the return again after every read.
@@ -2496,7 +2458,6 @@ export function WorkScreen(props: WorkScreenProps) {
       ? { active: othersActive, maxStations: participation.maxStations }
       : null;
   const closeLabel = t(shared === null ? "floor.close.open" : "floor.close.openPart");
-  const palletBoxes = pallet?.boxCount ?? 0;
   // The waiting message follows what `refresh` reads: with no open pallet, or one below
   // its capacity (it closed, or a box was taken off it), nothing waits any more.
   const palletWaitsNow =
@@ -2895,12 +2856,7 @@ export function WorkScreen(props: WorkScreenProps) {
               <Button
                 size="floor"
                 variant="secondary"
-                onClick={() =>
-                  dismiss(() => {
-                    setPlanReached(false);
-                    setPlanDismissed(true);
-                  })
-                }
+                onClick={() => dismiss(() => setPlanDismissed(true))}
               >
                 {t("floor.work.continue")}
               </Button>
@@ -3001,10 +2957,14 @@ export function WorkScreen(props: WorkScreenProps) {
               attempt={stop.attempt}
               busy={closing}
               onClose={confirmClose}
-              onBack={() => setStop(null)}
+              onBack={() => {
+                resumeCloseAfterLabel(false);
+                setStop(null);
+              }}
               onLabel={toLabel}
               palletCapacity={pallets?.capacity ?? null}
-              onClosePallet={confirmPalletClose}
+              onCloseBox={() => confirmPackageClose("open_box")}
+              onClosePallet={() => confirmPackageClose("open_pallet")}
               boxless={validation}
               ownPart={sharedPart !== null}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}

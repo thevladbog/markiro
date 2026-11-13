@@ -503,19 +503,18 @@ describe("the summary reads this station's own records only", () => {
     expect(await readCloseSummary(at.local, FOREIGN[1], SHIFT_ID, false)).toEqual(nothing);
   });
 
-  it("names the blocker in order: closed, then an open box with codes, then a label", async () => {
+  it("names the blocker in order: closed, then a waiting label, then an open box with codes", async () => {
     const at = await station(null);
     await closeBoxWithLabel(at); // its label waits: the job is prepared, nothing sent
     const context = scanContext(at.local, at.shift, { newId: () => crypto.randomUUID() });
     await fill(context, ["B1"]);
     expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID, false)).toMatchObject({
-      blocker: { kind: "open_box", items: 1 },
-    });
-    await undoLastCode(context);
-    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID, false)).toMatchObject({
       blocker: { kind: "label" },
     });
-    await fill(context, ["B2"]);
+    at.db.prepare("UPDATE floor_print_jobs SET state = 'sent', verify = 0").run();
+    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID, false)).toMatchObject({
+      blocker: { kind: "open_box", items: 1 },
+    });
     for (const state of ["closing", "closed"]) {
       at.db.prepare("UPDATE floor_shifts SET local_state = ?").run(state);
       expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID, false)).toMatchObject({

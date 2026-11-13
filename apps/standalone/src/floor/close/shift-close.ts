@@ -27,7 +27,7 @@ import { stationReasonRequired } from "./shared-reason.js";
  * shift that still waits for the printer or the operator (plan 2a7's
  * `shiftLabelsSettled`: a label decided after the close would reach the host
  * after `shift_closed` and mark the station's own shift late); an open
- * pallet with boxes (plan ПЛ-Ц), which «Закрыть паллету и смену» closes
+ * pallet with boxes (plan ПЛ-Ц), which «Закрыть паллету» closes
  * first; a unit label of the shift that is not resolved (plan РЕЖ part B,
  * the cloud station's `PRODUCT_LABEL_UNRESOLVED`: its outcome may be
  * unknown, and the retention keeps a shift with one); or this station has
@@ -201,10 +201,10 @@ export async function readCloseSummary(
       ? { kind: "closed" }
       : (row.draft_items ?? 0) > 0
         ? { kind: "open_set" }
-        : row.open_items > 0
-          ? { kind: "open_box", items: row.open_items }
-          : row.waiting > 0
-            ? { kind: "label" }
+        : row.waiting > 0
+          ? { kind: "label" }
+          : row.open_items > 0
+            ? { kind: "open_box", items: row.open_items }
             : (unresolved?.n ?? 0) > 0
               ? { kind: "label_unresolved" }
               : row.pallet_boxes > 0

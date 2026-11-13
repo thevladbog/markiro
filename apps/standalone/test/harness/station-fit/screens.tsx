@@ -258,6 +258,7 @@ function Stage() {
           onClose={noop}
           onBack={noop}
           onLabel={noop}
+          onCloseBox={noop}
           palletCapacity={
             variant === "pallet" || variant === "reason" || variant === "part-pallet" ? 2 : null
           }

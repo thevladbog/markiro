@@ -55,6 +55,7 @@ export async function palletStation(
   options: {
     capacity?: number;
     boxCapacity?: number;
+    plannedQty?: number;
     palletBlock?: boolean;
     settings?: Partial<WorkstationSettings>;
     /** What the host froze besides the layouts (plan А4): `snapshot.palletSheet` and `.organization`, as the wire has them. */
@@ -65,6 +66,7 @@ export async function palletStation(
   const shift = await enteredShift(executor, {
     ...PALLETS_ENTERED,
     boxCapacity: options.boxCapacity ?? PALLETS_ENTERED.boxCapacity,
+    plannedQty: options.plannedQty ?? PALLETS_ENTERED.plannedQty,
     palletBoxCapacity: options.capacity ?? 3,
     snapshot: { ...PALLETS_ENTERED.snapshot, ...options.frozen },
   });

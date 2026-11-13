@@ -500,7 +500,7 @@ describe("the close of a shift on the work screen", () => {
     await work.press("Подтвердить закрытие");
     expect(
       await screen.findByText(
-        `Сначала завершите работу с этикеткой короба ${formatSsccHri(FIRST_SSCC)}, затем закройте смену.`,
+        `Сначала завершите работу с этикеткой ${formatSsccHri(FIRST_SSCC)}, затем закройте смену.`,
       ),
     ).toBeTruthy();
     expect(screen.getByText(FAILED)).toBeTruthy();
@@ -669,7 +669,7 @@ describe("the close of a shift on the work screen", () => {
     await openSummary(work);
     expect(
       await screen.findByText(
-        `Сначала завершите работу с этикеткой короба ${formatSsccHri(FIRST_SSCC)}, затем закройте смену.`,
+        `Сначала завершите работу с этикеткой ${formatSsccHri(FIRST_SSCC)}, затем закройте смену.`,
       ),
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Подтвердить закрытие" })).toBeNull();
@@ -678,7 +678,7 @@ describe("the close of a shift on the work screen", () => {
     expect(screen.queryByRole("region", { name: TITLE })).toBeNull();
     await work.press("Продолжить без этикетки");
     await work.press("Продолжить без этикетки");
-    await openSummary(work);
+    expect(await screen.findByRole("region", { name: TITLE })).toBeTruthy();
     await work.press("Остановка оборудования");
     await work.press("Подтвердить закрытие");
     expect(await screen.findByText(CLOSED_TITLE)).toBeTruthy();
@@ -1004,7 +1004,7 @@ describe("the close of a shift on the work screen, in its races", () => {
     await work.press("Подтвердить закрытие");
     expect(
       await screen.findByText(
-        `Сначала завершите работу с этикеткой короба ${formatSsccHri(FIRST_SSCC)}, затем закройте смену.`,
+        `Сначала завершите работу с этикеткой ${formatSsccHri(FIRST_SSCC)}, затем закройте смену.`,
       ),
     ).toBeTruthy();
     expect(screen.getByText(STALE)).toBeTruthy();
@@ -1028,7 +1028,7 @@ describe("the close of a shift on the work screen, in its races", () => {
     unreadable = true;
     await openSummary(work);
     expect(
-      await screen.findByText("Сначала завершите работу с этикеткой короба, затем закройте смену."),
+      await screen.findByText("Сначала завершите работу с этикеткой, затем закройте смену."),
     ).toBeTruthy();
     unreadable = false;
     await work.press("Перейти к этикетке");

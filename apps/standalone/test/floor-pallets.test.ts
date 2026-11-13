@@ -759,7 +759,7 @@ describe("the open pallet is the shift's own, of this pairing (plan ПЛ-Ц)", (
 });
 
 describe("the close of a shift with pallets, in the order its blockers come (plan ПЛ-Ц)", () => {
-  it("names an open box before a waiting label before an open pallet", async () => {
+  it("names a waiting label before an open box before an open pallet", async () => {
     const at = await palletStation({ capacity: 40 });
     await closeBoxes(at, "A", 1);
     // A label waits (the box's), the pallet holds a box: the label first.
@@ -774,13 +774,17 @@ describe("the close of a shift with pallets, in the order its blockers come (pla
     ).resolves.toMatchObject({
       blocker: { kind: "open_pallet", boxes: 1 },
     });
-    // An open box with codes, on top of both.
+    // An open box with codes takes precedence over the pallet.
     await processScan(palletContext(at), km("B1"));
     await expect(
       readCloseSummary(at.local, PAIRING, at.shift.copy.id, false),
     ).resolves.toMatchObject({
       blocker: { kind: "open_box", items: 1 },
     });
+    at.db.prepare("UPDATE floor_print_jobs SET verify = 1").run();
+    await expect(
+      readCloseSummary(at.local, PAIRING, at.shift.copy.id, false),
+    ).resolves.toMatchObject({ blocker: { kind: "label" } });
   });
 
   it("is kept by the shift's own pallet alone, and by an open one alone", async () => {

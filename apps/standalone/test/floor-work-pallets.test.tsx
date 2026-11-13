@@ -248,6 +248,7 @@ describe("the work screen of a shift with pallets (plan ПЛ-Ц)", () => {
     const at = await palletStation({
       capacity: 1,
       boxCapacity: 1,
+      plannedQty: 1,
       settings: { verifyPrintedLabel: true },
     });
     const work = renderWork(at);
@@ -255,15 +256,48 @@ describe("the work screen of a shift with pallets (plan ПЛ-Ц)", () => {
     await work.settled();
     await work.scan(km("A1"));
     expect(screen.getByText("Отсканируйте SSCC на этикетке короба.")).toBeTruthy();
+    expect(screen.queryByText(/План выполнен/)).toBeNull();
     // The pallet's SSCC is no answer to the box's check.
     await work.scan(`(00)${PALLET_SSCC}`);
     expect(screen.getByText(/Это этикетка другого короба/)).toBeTruthy();
     await work.scan(`(00)${BOX_SSCC(1500)}`);
     expect(screen.getByText("Отсканируйте SSCC на этикетке паллеты.")).toBeTruthy();
     expect(screen.getByText(/SSCC паллеты:/)).toBeTruthy();
+    expect(screen.queryByText(/План выполнен/)).toBeNull();
     await work.scan(`(00)${PALLET_SSCC}`);
     expect(screen.queryByText("Отсканируйте SSCC на этикетке паллеты.")).toBeNull();
+    expect(screen.getByText("План выполнен: принято 1 из 1.")).toBeTruthy();
     expect(kinds(at)).toEqual(["box_closed", "pallet_closed", "box_label", "pallet_label"]);
+  });
+
+  it("keeps an older pallet job off the shared printer until the box on that pallet is verified", async () => {
+    const at = await palletStation({
+      capacity: 1,
+      boxCapacity: 1,
+      settings: { verifyPrintedLabel: true },
+    });
+    expect(await closeBoxOnPallet(at, ["A1"])).toMatchObject({ kind: "closed" });
+    expect(
+      at.db
+        .prepare(
+          "UPDATE floor_print_jobs SET created_at = ? WHERE purpose = 'pallet' AND state = 'prepared'",
+        )
+        .run("2026-10-01T00:00:00.000Z").changes,
+    ).toBe(1);
+    const work = renderWork(at);
+    await work.scanner.listening();
+    await work.settled();
+    const sentLabels = () => work.shell.sends.map((send) => send.text);
+    const box = renderedText(ZEBRA, BOX_SSCC(1500));
+    expect(sentLabels()).toEqual([box]);
+    expect(screen.getByText("Отсканируйте SSCC на этикетке короба.")).toBeTruthy();
+
+    await work.scan(`(00)${PALLET_SSCC}`);
+    expect(sentLabels()).toEqual([box]);
+
+    await work.scan(`(00)${BOX_SSCC(1500)}`);
+    expect(sentLabels()).toEqual([box, renderedText(ZEBRA, PALLET_SSCC, "100x150")]);
+    expect(screen.getByText("Отсканируйте SSCC на этикетке паллеты.")).toBeTruthy();
   });
 
   it("stops on a pallet's label that did not print, says why in the pallet's words, and goes on without it", async () => {

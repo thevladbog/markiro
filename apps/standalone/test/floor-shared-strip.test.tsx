@@ -5,7 +5,7 @@ import { ThemeProvider } from "@markiro/ui";
 
 import { formatClock, formatQuantity } from "../src/floor/shifts/shift-text.js";
 import { ShiftBand } from "../src/floor/work/WorkInstruments.js";
-import { enteredShift, km } from "./support/floor-work.js";
+import { enteredShift, km, seedBlock } from "./support/floor-work.js";
 import { openLocalDb } from "./support/local-db.js";
 import {
   enteredOf,
@@ -15,6 +15,7 @@ import {
   sharedShift,
   STATION_ROW,
 } from "./support/multi-station.js";
+import { PRINT_BLOCK, setUpPrinting } from "./support/printing.js";
 import { renderWork } from "./support/work-screen.js";
 
 // `formatQuantity` groups with a no-break space; the DOM queries normalize it to a plain one.
@@ -108,8 +109,10 @@ describe("the work screen of a shared shift (plan 2b)", () => {
         myState: "active",
       }),
     );
-    const { executor } = openLocalDb();
-    const shift = await enteredShift(executor, near);
+    const { db, executor } = openLocalDb();
+    await setUpPrinting(executor);
+    seedBlock(db, { blockId: PRINT_BLOCK, from: 1500, to: 3499 });
+    const shift = await enteredShift(executor, { ...near, boxCapacity: 1 });
     const work = renderWork({ local: executor, shift }, { overrides: { online: true } });
     await waitFor(() => expect(count()).toBe(formatQuantity(1199)));
     expect(screen.queryByText(/План выполнен/)).toBeNull();
@@ -137,8 +140,10 @@ describe("the work screen of a shared shift (plan 2b)", () => {
         myState: "active",
       }),
     );
-    const { executor } = openLocalDb();
-    const shift = await enteredShift(executor, below);
+    const { db, executor } = openLocalDb();
+    await setUpPrinting(executor);
+    seedBlock(db, { blockId: PRINT_BLOCK, from: 1500, to: 3499 });
+    const shift = await enteredShift(executor, { ...below, boxCapacity: 2 });
     const work = renderWork({ local: executor, shift }, { overrides: { online: true } });
     await waitFor(() => expect(count()).toBe(formatQuantity(1198)));
     await work.scanner.listening();
