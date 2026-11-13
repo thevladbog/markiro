@@ -115,8 +115,8 @@ gh secret set RELEASES_S3_SECRET_ACCESS_KEY --env station-release < "$secret_key
 
 ### Издатели stable с защищённых тегов
 
-Один раз после слияния и CI закрепите проверенный коммит издателей в тегах
-`handheld-publisher-v1` и `standalone-publisher-v1`. В GitHub настройте активный
+Для каждого настраиваемого издателя один раз после слияния и CI закрепите
+проверенный коммит в соответствующем теге. В GitHub настройте активный
 [tag ruleset](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository)
 с запретом изменения и удаления тегов издателей без исключений. Создание
 новой версии тега должно быть доступно только владельцу. Проверьте точный
@@ -134,7 +134,7 @@ gh secret set RELEASES_S3_SECRET_ACCESS_KEY --env station-release < "$secret_key
 добавьте четыре секрета действующего Android-ключа из
 [инструкции выпуска](handheld-release.md). Подпись Автонома выполняется локально.
 
-В конфигурации каталога добавьте по записи `mode: "pinned-tag"` в
+Для каждого настраиваемого издателя добавьте запись `mode: "pinned-tag"` в
 `RELEASE_CATALOG_PUBLISHERS_JSON`. Укажите соответствующие `product`, `environment`,
 OIDC `subject` и полные `workflowRef` и `jobWorkflowRef` вида
 `thevladbog/markiro/.github/workflows/<файл>@refs/tags/<тег>`. Для `workflowSha`
@@ -160,7 +160,8 @@ OIDC `subject` и полные `workflowRef` и `jobWorkflowRef` вида
 Вход связывает хеши прежнего журнала, квитанцию расхождения, состав контейнеров,
 новую конфигурацию, хеши Compose и параметры резервной копии.
 
-После развёртывания проверьте допуск обоих издателей из их защищённых тегов.
+После развёртывания проверьте допуск каждого настроенного издателя из его
+защищённого тега.
 
 ```bash
 gh workflow run handheld-stable-release.yml --ref handheld-publisher-v1 -f mode=verify

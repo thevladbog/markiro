@@ -11,6 +11,7 @@ import { readProtectedEnv } from "../preflight.mjs";
 import { verifyAdmission, verifyPlatformSmoke } from "./command.mjs";
 import { fingerprintHostConfiguration } from "./config.mjs";
 import { validateConfigurationContainer } from "./configuration-plan.mjs";
+import { createHealthyForwardFailureRecorder } from "./failure-diagnostic.mjs";
 import { readPrivateFile } from "./files.mjs";
 import { extractProductMigrationProof } from "./forward-product.mjs";
 import { observeHealthyForwardCatalogCustody } from "./healthy-forward-backup.mjs";
@@ -29,6 +30,7 @@ import { createHeldHealthyForwardBackup } from "./target-backup.mjs";
 import { validateUpgradeSchema } from "./upgrade-proofs.mjs";
 
 const same = (a, b) => ensure(canonical(a) === canonical(b));
+const direct = (_boundary, action) => action();
 const phase = "healthy-forward-rollout";
 const uuid = (value) =>
   typeof value === "string" &&
@@ -207,13 +209,20 @@ export async function executeHealthyForwardRolloutOperation(loaded, options = {}
   const op = record.operation;
   const { root, dockerConfig, predecessor, runtime, configuration } = op;
   const { identity } = op.admission;
-  const { predecessorIdentity, candidateRuntime } = await (
-    await validateHealthyForwardRolloutOperation(loaded)
-  )();
+  const preflightCheck = createHealthyForwardFailureRecorder(
+    operationDirectory,
+    identity.operationId,
+  );
+  const { predecessorIdentity, candidateRuntime } = await preflightCheck("validation", async () =>
+    (await validateHealthyForwardRolloutOperation(loaded))(),
+  );
   const operation = { root, dockerConfig, identity, configuration };
-  const tokenBytes = await readPrivateFile(operationDirectory, "github-token");
+  const tokenBytes = await preflightCheck("verifyDispatch", async () => {
+    const bytes = await readPrivateFile(operationDirectory, "github-token");
+    ensure(bytes.length > 0 && !/\s/u.test(bytes.toString()));
+    return bytes;
+  });
   const token = tokenBytes.toString();
-  ensure(token.length > 0 && !/\s/u.test(token));
   const verifyAuthority = async () => {
     await verifySources();
     ensure((await readPrivateFile(operationDirectory, "github-token")).equals(tokenBytes));
@@ -227,16 +236,20 @@ export async function executeHealthyForwardRolloutOperation(loaded, options = {}
     await verifyAuthority();
     return result;
   };
-  const verifyDispatch = async () => {
-    await verifyAuthority();
-    same(
-      await verifyUpgradeDispatch(record.dispatch, token, {
-        actorLogin: record.authorization.actorLogin,
-        request: options.request,
-      }),
-      record.authorization,
+  const verifyDispatch = async (check = direct) => {
+    await check("verifyDispatch", async () => {
+      await verifyAuthority();
+      same(
+        await verifyUpgradeDispatch(record.dispatch, token, {
+          actorLogin: record.authorization.actorLogin,
+          request: options.request,
+        }),
+        record.authorization,
+      );
+    });
+    await check("verifyCatalogPeers", () =>
+      assertNoCatalogPeers(record.dispatch, token, options.request),
     );
-    await assertNoCatalogPeers(record.dispatch, token, options.request);
   };
   const operationSha256 = digest(await readPrivateFile(operationDirectory, "operation.json"));
   const verifyMutation = async (enteredPhase) => {
@@ -251,24 +264,27 @@ export async function executeHealthyForwardRolloutOperation(loaded, options = {}
     );
   };
   const command = createDockerCommand(operation, runProcess);
-  const candidate = await createHealthyForwardCandidateObserver(
-    operation,
-    runtime.observationPolicy,
-    op.composeHashes,
-    { verifyAuthority, runProcess, ambient: options.ambient },
+  const candidate = await preflightCheck("inspectCandidate", () =>
+    createHealthyForwardCandidateObserver(operation, runtime.observationPolicy, op.composeHashes, {
+      verifyAuthority,
+      runProcess,
+      ambient: options.ambient,
+    }),
   );
   const observation = { verifyAuthority, runProcess, readMachineId: options.readMachineId };
   let preflightInput;
   async function initialize() {
-    await verifyDispatch();
-    await verifyAdmission(
-      {
-        operationDirectory,
-        receipt,
-        record: { installedRoot: record.installedRoot, deployment: operation },
-      },
-      runProcess,
-      options.request,
+    await verifyDispatch(preflightCheck);
+    await preflightCheck("verifyAdmission", () =>
+      verifyAdmission(
+        {
+          operationDirectory,
+          receipt,
+          record: { installedRoot: record.installedRoot, deployment: operation },
+        },
+        runProcess,
+        options.request,
+      ),
     );
     const migrationProof = (selected) =>
       extractProductMigrationProof({
@@ -277,8 +293,12 @@ export async function executeHealthyForwardRolloutOperation(loaded, options = {}
         verifySources: verifyAuthority,
         runProcess,
       });
-    const predecessorMigrationProof = await migrationProof(predecessorIdentity);
-    const candidateMigrationProof = await migrationProof(identity);
+    const predecessorMigrationProof = await preflightCheck("extractPredecessorMigrations", () =>
+      migrationProof(predecessorIdentity),
+    );
+    const candidateMigrationProof = await preflightCheck("extractCandidateMigrations", () =>
+      migrationProof(identity),
+    );
     preflightInput = {
       root,
       predecessor,
@@ -290,7 +310,7 @@ export async function executeHealthyForwardRolloutOperation(loaded, options = {}
       predecessorMigrationProof,
       candidateMigrationProof,
     };
-    await candidate.verifyCompose();
+    await preflightCheck("verifyCompose", () => candidate.verifyCompose());
   }
   const custody = async (api) => {
     const env = await readProtectedEnv(join(dirname(root), runtime.path));
@@ -311,18 +331,22 @@ export async function executeHealthyForwardRolloutOperation(loaded, options = {}
       command,
     );
   };
-  const observe = async (workload) => {
-    ensure(preflightInput);
-    const result = await verifyHealthyForwardPreflight(preflightInput, observation, workload);
-    await custody(result.containers.api);
+  const observe = async (workload, check = direct) => {
+    const result = await check("inspectSource", () => {
+      ensure(preflightInput);
+      return verifyHealthyForwardPreflight(preflightInput, observation, workload);
+    });
+    await check("verifyCatalogCustody", () => custody(result.containers.api));
     return result;
   };
   const sourceContainers = Object.fromEntries(
     Object.entries(runtime.containers).map(([service, container]) => [service, container.id]),
   );
-  const workloads = createHealthyForwardWorkloads(
-    { root, dockerConfig, sourceContainers: runtime.containers },
-    { candidate, observe, verifyAuthority, verifyMutation, runProcess },
+  const workloads = await preflightCheck("inspectCandidate", () =>
+    createHealthyForwardWorkloads(
+      { root, dockerConfig, sourceContainers: runtime.containers },
+      { candidate, observe, verifyAuthority, verifyMutation, runProcess },
+    ),
   );
   return withHealthyForwardRollout(
     {
@@ -339,7 +363,7 @@ export async function executeHealthyForwardRolloutOperation(loaded, options = {}
       verifyAuthority,
       preflight: async () => {
         if (!preflightInput) await initialize();
-        await observe({ phase: "source-healthy" });
+        await observe({ phase: "source-healthy" }, preflightCheck);
       },
       stopSource: workloads.stopSource,
       verifySourceStopped: workloads.verifySourceStopped,

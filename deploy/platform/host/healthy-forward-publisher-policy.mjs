@@ -27,7 +27,7 @@ function readEnvironment(input) {
   return value;
 }
 
-/** Bind a prepared runtime to the released images and the two reviewed catalog pins. */
+/** Bind a prepared runtime to the released images and the reviewed catalog pins. */
 export function validateHealthyForwardPublisherDelta(
   before,
   after,
@@ -40,12 +40,20 @@ export function validateHealthyForwardPublisherDelta(
     const approved = plain(pinnedPublisherConfig);
     keys(approved, [...repositoryFields, "workflows"]);
     ensure(approved.repository === "thevladbog/markiro");
-    ensure(Array.isArray(approved.workflows) && approved.workflows.length === products.length);
-    for (const product of products) {
-      const matches = approved.workflows.filter((record) => record?.product === product);
-      ensure(matches.length === 1);
-      keys(matches[0], pinFields);
-      ensure(matches[0].mode === "pinned-tag");
+    ensure(
+      Array.isArray(approved.workflows) &&
+        approved.workflows.length > 0 &&
+        approved.workflows.length <= products.length,
+    );
+    const approvedProducts = new Set();
+    for (const pin of approved.workflows) {
+      keys(pin, pinFields);
+      ensure(
+        pin.mode === "pinned-tag" &&
+          products.includes(pin.product) &&
+          !approvedProducts.has(pin.product),
+      );
+      approvedProducts.add(pin.product);
     }
 
     const previousPolicy = JSON.parse(current[publisherKey]);

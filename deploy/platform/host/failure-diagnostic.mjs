@@ -97,6 +97,18 @@ const boundaries = new Set([
   "cleanupOwnedWorkloads",
   "cleanupOwnedProbes",
 ]);
+const healthyForwardBoundaries = new Set([
+  "validation",
+  "verifyDispatch",
+  "verifyCatalogPeers",
+  "verifyAdmission",
+  "extractPredecessorMigrations",
+  "extractCandidateMigrations",
+  "verifyCompose",
+  "inspectCandidate",
+  "inspectSource",
+  "verifyCatalogCustody",
+]);
 const categories = new Set([
   "validation",
   "probe",
@@ -165,11 +177,14 @@ export function sanitizeHostFailure(error, context) {
     phase = own(context, "phase"),
     boundary = own(context, "boundary"),
     commandCategory = own(context, "commandCategory");
+  const validBoundary =
+    phase === "healthy-forward-rollout"
+      ? healthyForwardBoundaries.has(boundary)
+      : phases.has(phase) && boundaries.has(boundary);
   if (
     typeof operationId !== "string" ||
     !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u.test(operationId) ||
-    !phases.has(phase) ||
-    !boundaries.has(boundary) ||
+    !validBoundary ||
     !categories.has(commandCategory)
   )
     throw new Error("Invalid host failure context.");
@@ -195,4 +210,36 @@ export async function writeHostFailure(directory, record) {
   const bytes = Buffer.from(`${JSON.stringify(record)}\n`);
   if (bytes.length > 4096) throw new Error("Invalid host failure size.");
   await writePrivateFile(directory, "failure.json", bytes);
+}
+
+/** Record the first failed compiled preflight boundary before transport masks it. */
+export function createHealthyForwardFailureRecorder(directory, operationId) {
+  let attempted = false;
+  return async (boundary, action) => {
+    if (!healthyForwardBoundaries.has(boundary) || typeof action !== "function")
+      throw new Error("Invalid healthy forward preflight boundary.");
+    try {
+      return await action();
+    } catch (error) {
+      if (!attempted) {
+        attempted = true;
+        try {
+          await writeHostFailure(
+            directory,
+            sanitizeHostFailure(error, {
+              operationId,
+              phase: "healthy-forward-rollout",
+              boundary,
+              commandCategory: "validation",
+            }),
+          );
+        } catch {
+          const failure = carryHostFailure(error, new Error("Host diagnostic publication failed."));
+          failure.durabilityUncertain = true;
+          throw failure;
+        }
+      }
+      throw error;
+    }
+  };
 }
