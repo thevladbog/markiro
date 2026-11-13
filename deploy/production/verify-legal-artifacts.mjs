@@ -10,7 +10,7 @@ import { isMainModule } from "./cli-main.mjs";
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const execFile = promisify(execFileCallback);
-const RELEASE_ID = "MKR-LEGAL-2026.10-41-2026-10-30";
+const RELEASE_ID = "MKR-LEGAL-2026.11-45-2026-11-13";
 const EXPECTED_PDFS = Object.freeze([
   "markiro_mkr-adv-01_2026.10-01_ru.pdf",
   "markiro_mkr-brd-01_2026.08-01_en.pdf",
@@ -23,20 +23,24 @@ const EXPECTED_PDFS = Object.freeze([
   "markiro_mkr-ins-02_2026.10-01_ru.pdf",
   "markiro_mkr-ins-03_2026.10-02_en.pdf",
   "markiro_mkr-ins-03_2026.10-02_ru.pdf",
-  "markiro_mkr-ins-04_2026.10-02_en.pdf",
-  "markiro_mkr-ins-04_2026.10-02_ru.pdf",
-  "markiro_mkr-ins-08_2026.10-01_en.pdf",
-  "markiro_mkr-ins-08_2026.10-01_ru.pdf",
+  "markiro_mkr-ins-04_2026.11-01_en.pdf",
+  "markiro_mkr-ins-04_2026.11-01_ru.pdf",
+  "markiro_mkr-ins-08_2026.11-01_en.pdf",
+  "markiro_mkr-ins-08_2026.11-01_ru.pdf",
   "markiro_mkr-ins-09_2026.10-01_en.pdf",
   "markiro_mkr-ins-09_2026.10-01_ru.pdf",
   "markiro_mkr-ins-10_2026.10-01_en.pdf",
   "markiro_mkr-ins-10_2026.10-01_ru.pdf",
-  "markiro_mkr-ins-12_2026.10-02_en.pdf",
-  "markiro_mkr-ins-12_2026.10-02_ru.pdf",
+  "markiro_mkr-ins-12_2026.11-01_en.pdf",
+  "markiro_mkr-ins-12_2026.11-01_ru.pdf",
   "markiro_mkr-ins-13_2026.10-02_en.pdf",
   "markiro_mkr-ins-13_2026.10-02_ru.pdf",
-  "markiro_mkr-ins-14_2026.10-03_en.pdf",
-  "markiro_mkr-ins-14_2026.10-03_ru.pdf",
+  "markiro_mkr-ins-14_2026.11-01_en.pdf",
+  "markiro_mkr-ins-14_2026.11-01_ru.pdf",
+  "markiro_mkr-ins-15_2026.11-01_en.pdf",
+  "markiro_mkr-ins-15_2026.11-01_ru.pdf",
+  "markiro_mkr-ins-16_2026.11-01_en.pdf",
+  "markiro_mkr-ins-16_2026.11-01_ru.pdf",
   "markiro_mkr-lic-01_2026.10-01_ru.pdf",
   "markiro_mkr-pd-01_2026.08-01_en.pdf",
   "markiro_mkr-pd-01_2026.08-01_ru.pdf",

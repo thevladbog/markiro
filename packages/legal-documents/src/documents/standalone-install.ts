@@ -5,7 +5,7 @@ export const STANDALONE_INSTALL_CONTENT = {
     locale: "ru",
     title: "Администрирование: установка и первый запуск",
     summary:
-      "Инструкция для того, кто ставит Маркиро Автоном на площадке: роли компьютеров, сеть и постоянный адрес хоста, установка службы хоста, мастер первого запуска, вход в офис, пробный период и файл лицензии, подключение станций и ПК офиса, обновление из файла и что делать, если что-то не так.",
+      "Инструкция для того, кто ставит Маркиро Автоном на площадке: роли компьютеров, сеть и постоянный адрес хоста, установка службы хоста, мастер первого запуска, вход в офис, пробный период и файл лицензии, подключение станций и ПК офиса, обновление через интернет, из файла или с хоста и что делать, если что-то не так.",
     sections: [
       {
         id: "purpose",
@@ -275,18 +275,27 @@ export const STANDALONE_INSTALL_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Обновления приходят файлом от Маркиро и не загружаются из интернета автоматически. Для необязательных копий на Яндекс Диск нужен интернет (MKR-INS-13). Пакет обновления — два файла: установщик (.exe) и подписанный манифест (.update.jws). Порядок: сначала ПК хоста, затем станции и ПК офиса, между сменами.",
+            text: "Обновляйте компьютеры между сменами. Сначала обновите ПК хоста, затем станции и ПК офиса. Пакет состоит из установщика (.exe) и подписанного манифеста (.update.jws). Администратор может скачать пакет через программу или получить оба файла отдельно.",
           },
           {
             kind: "step",
-            title: "10.1. Обновите ПК хоста",
+            title: "10.1. Скачайте пакет через интернет",
+            text: "На ПК хоста войдите в офис администратором. Откройте «Информация» → «Обновление» → «Обновление через интернет». Оставьте канал «Стабильные выпуски» и нажмите «Проверить обновления». Если доступна нужная версия, нажмите «Скачать обновление». Программа проверит подпись и контрольную сумму пакета и передаст его на хост. При ошибке передачи нажмите «Повторить передачу на хост». После проверки нажмите «Установить обновление» и подтвердите действие. Windows запросит права администратора. Перед обновлением хоста создаётся резервная копия.",
+            image: {
+              id: "update-online",
+              caption: "Проверка стабильных обновлений в офисе Автонома",
+            },
+          },
+          {
+            kind: "step",
+            title: "10.2. Установите пакет из файла при отсутствии интернета",
             text: "Войдите в офис администратором, откройте «Информация», раздел «Обновление». «Открыть папку» создаёт и открывает папку для пакетов в «Документах» этого ПК; положите туда оба файла или вставьте флешку с ними и нажмите «Искать снова». У найденного пакета нажмите «Проверить» — программа проверит подпись и установщик, — затем «Установить обновление». Windows спросит права администратора; на ПК хоста перед установкой делается резервная копия.",
             image: { id: "update", caption: "Обновление из файла и версии устройств" },
           },
           {
             kind: "step",
-            title: "10.2. Обновите остальные компьютеры с хоста",
-            text: "У найденного пакета нажмите «Загрузить пакет на хост». Затем на каждой станции и ПК офиса администратор входит в офис, открывает «Информация» → «Обновление» и нажимает «Обновить с хоста», «Скачать с хоста» и «Установить обновление». Таблица «Устройства и версии» показывает, какие устройства уже обновлены.",
+            title: "10.3. Обновите остальные компьютеры с хоста",
+            text: "Если пакет получен из файла, нажмите «Загрузить пакет на хост». После обновления хоста на каждой станции и ПК офиса администратор входит в офис, открывает «Информация» → «Обновление» и нажимает «Обновить с хоста», «Скачать с хоста» и «Установить обновление». Таблица «Устройства и версии» показывает, какие устройства уже обновлены.",
           },
           {
             kind: "callout",
@@ -611,18 +620,27 @@ export const STANDALONE_INSTALL_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Updates come as a file from Markiro and are not downloaded automatically from the internet. Optional Yandex Disk backups require internet access (MKR-INS-13). An update package is two files: the installer (.exe) and the signed manifest (.update.jws). Order: the host PC first, then stations and office PCs, between shifts.",
+            text: "Update computers between shifts. Start with the host PC, then update the stations and office PCs. An update package contains an installer (.exe) and a signed manifest (.update.jws). Administrators can download the package in the app or obtain both files separately.",
           },
           {
             kind: "step",
-            title: "10.1. Update the host PC",
+            title: "10.1. Download the package online",
+            text: "On the host PC, sign in to the office as administrator. Open “Информация” (Information) → “Обновление” (Update) → “Обновление через интернет” (Online update). Keep “Стабильные выпуски” (Stable releases) selected and click “Проверить обновления” (Check for updates). If the required version is available, click “Скачать обновление” (Download update). The app verifies the signature and checksum and transfers the package to the host. If the transfer fails, click “Повторить передачу на хост” (Retry transfer to host). Once verified, click “Установить обновление” (Install update) and confirm. Windows asks for administrator rights. The host is backed up before the update.",
+            image: {
+              id: "update-online",
+              caption: "Checking for stable updates in the Autonom office",
+            },
+          },
+          {
+            kind: "step",
+            title: "10.2. Install from files when internet access is unavailable",
             text: "Sign in to the office as administrator and open “Информация” (Information), section “Обновление” (Update). “Открыть папку” (Open folder) creates and opens the packages folder in this PC's Documents; put both files there, or insert a USB stick with them, and press “Искать снова” (Search again). On the package found press “Проверить” (Check) — the program checks the signature and the installer — then “Установить обновление” (Install update). Windows asks for administrator rights; on the host PC a backup is made before installation.",
             image: { id: "update", caption: "Updating from a file and device versions" },
           },
           {
             kind: "step",
-            title: "10.2. Update the other computers from the host",
-            text: "On the package found press “Загрузить пакет на хост” (Upload package to host). Then on each station and office PC an administrator signs in to the office, opens “Информация” (Information) → “Обновление” (Update) and presses “Обновить с хоста” (Update from host), “Скачать с хоста” (Download from host) and “Установить обновление” (Install update). The “Устройства и версии” (Devices and versions) table shows which devices are already updated.",
+            title: "10.3. Update the other computers from the host",
+            text: "For a package obtained as files, click “Загрузить пакет на хост” (Upload package to host). After the host update, on each station and office PC an administrator signs in to the office, opens “Информация” (Information) → “Обновление” (Update) and presses “Обновить с хоста” (Update from host), “Скачать с хоста” (Download from host) and “Установить обновление” (Install update). The “Устройства и версии” (Devices and versions) table shows which devices are already updated.",
           },
           {
             kind: "callout",

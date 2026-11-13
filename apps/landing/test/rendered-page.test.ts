@@ -1532,9 +1532,9 @@ describe("rendered landing page", () => {
     const ruInstructionLinks = [...ruInstructions.querySelectorAll("[data-hub-item] a[href]")].map(
       (a) => a.getAttribute("href"),
     );
-    expect(ruInstructionLinks).toHaveLength(10);
+    expect(ruInstructionLinks).toHaveLength(12);
     expect(ruInstructionLinks.every((href) => href?.startsWith("/instruktsii/"))).toBe(true);
-    expect([...enInstructions.querySelectorAll("[data-hub-item] a[href]")]).toHaveLength(10);
+    expect([...enInstructions.querySelectorAll("[data-hub-item] a[href]")]).toHaveLength(12);
 
     for (const hub of [ruArticles, enArticles, ruInstructions, enInstructions]) {
       expect(hub.querySelectorAll("h1")).toHaveLength(1);
@@ -1676,15 +1676,15 @@ describe("rendered landing page", () => {
     }
   });
 
-  it("describes all 20 published instruction editions using their visible content and PDFs", () => {
-    const codes = ["01", "02", "03", "04", "08", "09", "10", "12", "13", "14"];
+  it("describes all 24 published instruction editions using their visible content and PDFs", () => {
+    const codes = ["01", "02", "03", "04", "08", "09", "10", "12", "13", "14", "15", "16"];
     for (const locale of ["ru", "en"]) {
       const hubRoute = locale === "ru" ? "/instruktsii/" : "/en/instructions/";
       const hub = documents.get(hubRoute);
       const links = [...(hub?.querySelectorAll<HTMLAnchorElement>(".legal-registry a[href]") ?? [])]
         .map((link) => link.getAttribute("href"))
         .filter((href): href is string => href !== null && href.startsWith(hubRoute));
-      expect(links, hubRoute).toHaveLength(10);
+      expect(links, hubRoute).toHaveLength(12);
       const foundCodes: string[] = [];
       for (const route of links) {
         const page = new JSDOM(
@@ -1758,9 +1758,12 @@ describe("rendered landing page", () => {
         "office-handheld-line",
         "pallet-printed",
         "pallet-print-failed",
-        "pallet-disassemble-scan",
-        "pallet-disassemble-reason",
-        "pallet-disassemble-confirm",
+        "sign-in",
+        "hub",
+        "printer-add",
+        "printer-assignments",
+        "pack-disassembly-scan",
+        "site-reprint-reason",
       ]) {
         const img = page.querySelector(`.instruction-document img[src*="/${frame}."]`);
         expect(img, `${route}: ${frame}`).not.toBeNull();

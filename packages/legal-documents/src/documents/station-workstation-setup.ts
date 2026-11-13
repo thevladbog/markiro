@@ -102,19 +102,22 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
           {
             kind: "step",
             title: "Добавьте принтер",
-            text: "На вкладке «Принтеры» нажмите «Добавить принтер». Задайте «Название» и «Подключение»: «Сеть» — адрес принтера и «Порт» (обычно 9100), «COM-порт» — порт и скорость, «Windows» — принтер, установленный в Windows с драйвером. Выберите «Язык принтера»: ZPL — принтеры Zebra, TSPL — принтеры TSC, и «Разрешение принтера» — 203 или 300 dpi, как у самого принтера. Нажмите «Готово».",
-            image: { id: "setup-printer-form", caption: "Новый сетевой принтер" },
+            text: "На вкладке «Принтеры» нажмите «Добавить принтер». Задайте «Название» и «Подключение»: «Сеть» — адрес принтера и «Порт» (обычно 9100), «COM-порт» — порт и скорость, «Windows» — принтер, установленный в Windows с драйвером. Выберите «Язык принтера»: ZPL — принтеры Zebra, TSPL — принтеры TSC, и «Разрешение принтера» — 203 или 300 dpi, как у самого принтера. Для термопринтера в поле «Размер пробной этикетки» укажите ширину и длину этикетки на установленном рулоне, например 75 × 120 мм. Если формата нет в списке, выберите «Свой размер» и введите размеры в миллиметрах. Нажмите «Готово».",
+            image: {
+              id: "setup-printer-form",
+              caption: "Сетевой принтер с пробной этикеткой 75 × 120 мм",
+            },
           },
           {
             kind: "step",
-            title: "Назначьте печать и проверьте принтер",
-            text: "В блоке «Что на каком принтере» выберите принтер для «Этикетка короба», «Этикетка паллеты» и «Дубль кода». «Пробная печать» печатает тестовую этикетку; отсканируйте её код — «Код совпал: принтер и сканер работают.». Переключатель «Проверять этикетку короба» включает проверку каждой этикетки короба сканом SSCC (MKR-INS-02). Нажмите «Сохранить».",
+            title: "Назначьте принтеры и проверьте пробную этикетку",
+            text: "В блоке «Что на каком принтере» выберите принтер для «Этикетка короба», «Этикетка паллеты» и «Дубль кода». У нужного принтера нажмите «Пробная печать». Если открылось окно настройки, выберите размер рулона, нажмите «Готово» и повторите пробу. Дождитесь выхода этикетки, отсканируйте напечатанный код и проверьте сообщение «Код совпал: принтер и сканер работают.». Переключатель «Проверять этикетку короба» включает проверку каждой этикетки короба сканом SSCC (MKR-INS-02). Нажмите «Сохранить».",
             image: { id: "setup-printers", caption: "Принтеры рабочего места и назначение печати" },
           },
           {
             kind: "callout",
             tone: "info",
-            text: "Лист А4 печатает паллету на обычном принтере: только назначение «Этикетка паллеты», 300 dpi, через драйвер Windows.",
+            text: "Размер пробной этикетки действует только для проверки. Размер рабочих этикеток задаётся выбранным шаблоном. Лист А4 печатает паллету на обычном принтере: только назначение «Этикетка паллеты», 300 dpi, через драйвер Windows.",
           },
         ],
       },
@@ -125,8 +128,15 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
           {
             kind: "step",
             title: "Подключите сканер и проверьте чтение",
-            text: "«Клавиатурный сканер» — USB-сканер в режиме клавиатуры — работает всегда, без настройки. Сканер на COM-порту добавьте: выберите «COM-порт» и «Скорость, бод» — как в настройке самого сканера — и нажмите «Добавить»; «Обновить список портов» перечитывает порты компьютера. Справа — «Проверка сканера»: станция показывает тестовый код («Простой код» или «DataMatrix с GS»), вы сканируете его с экрана, и станция сверяет, что пришло, символ в символ — в том числе разделители GS и раскладку. Нажмите «Сохранить».",
-            image: { id: "setup-scanners", caption: "Сканеры станции и проверка чтения" },
+            text: "«Сканер в режиме клавиатуры» — USB-сканер в режиме клавиатуры — работает всегда, без настройки. Сканер на COM-порту добавьте: выберите «COM-порт» и «Скорость, бод» — как в настройке самого сканера — и нажмите «Добавить»; «Обновить список портов» перечитывает порты компьютера. Справа — «Проверка сканера»: станция показывает тестовый код («Простой код» или «DataMatrix с GS»), вы сканируете его с экрана, и станция сверяет, что пришло, символ в символ — в том числе разделители GS и раскладку. Нажмите «Сохранить».",
+            image: {
+              id: "setup-scanners",
+              caption: "Сканеры станции и проверка DataMatrix с разделителем GS",
+            },
+          },
+          {
+            kind: "paragraph",
+            text: "Если сканер считывает только с бумаги, в блоке «Проверка сканера» выберите термопринтер и нажмите «Печать». Для выбранного принтера укажите размер пробной этикетки. Отсканируйте только что напечатанный тестовый код и проверьте результат на экране.",
           },
           {
             kind: "paragraph",
@@ -313,13 +323,16 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
           {
             kind: "step",
             title: "Add a printer",
-            text: "On the “Принтеры” (Printers) tab tap “Добавить принтер” (Add printer). Set “Название” (Name) and “Подключение” (Connection): “Сеть” (Network) — the printer's address and “Порт” (Port, usually 9100); “COM-порт” (COM port) — the port and speed; “Windows” — a printer installed in Windows with a driver. Choose “Язык принтера” (Printer language): ZPL for Zebra printers, TSPL for TSC printers, and “Разрешение принтера” (Printer resolution) — 203 or 300 dpi, as the printer itself has. Tap “Готово” (Done).",
-            image: { id: "setup-printer-form", caption: "A new network printer" },
+            text: "On the “Принтеры” (Printers) tab tap “Добавить принтер” (Add printer). Set “Название” (Name) and “Подключение” (Connection): “Сеть” (Network) — the printer's address and “Порт” (Port, usually 9100); “COM-порт” (COM port) — the port and speed; “Windows” — a printer installed in Windows with a driver. Choose “Язык принтера” (Printer language): ZPL for Zebra printers, TSPL for TSC printers, and “Разрешение принтера” (Printer resolution) — 203 or 300 dpi, as the printer itself has. For a thermal printer, use “Размер пробной этикетки” (Test label size) to match the width and feed length of the labels on the loaded roll, for example 75 × 120 mm. If the size is absent, choose “Свой размер” (Custom size) and enter the dimensions in millimetres. Tap “Готово” (Done).",
+            image: {
+              id: "setup-printer-form",
+              caption: "Network printer with a 75 × 120 mm test label",
+            },
           },
           {
             kind: "step",
             title: "Assign printing and test the printer",
-            text: "Under “Что на каком принтере” (What prints where) choose a printer for “Этикетка короба” (Box label), “Этикетка паллеты” (Pallet label) and “Дубль кода” (Code duplicate). “Пробная печать” (Test print) prints a test label; scan its code — “Код совпал: принтер и сканер работают.” (The code matches: the printer and the scanner work). The “Проверять этикетку короба” (Check the box label) switch turns on checking every box label with a scan of its SSCC (MKR-INS-02). Tap “Сохранить” (Save).",
+            text: "Under “Что на каком принтере” (What prints where) choose a printer for “Этикетка короба” (Box label), “Этикетка паллеты” (Pallet label) and “Дубль кода” (Code duplicate). Press “Пробная печать” (Test print) on that printer. If its settings open, select the roll size, tap “Готово” (Done), and run the test again. Wait for the label to come out, scan its printed code and look for “Код совпал: принтер и сканер работают.” (The code matches: the printer and the scanner work). The “Проверять этикетку короба” (Check the box label) switch turns on checking every box label with a scan of its SSCC (MKR-INS-02). Tap “Сохранить” (Save).",
             image: {
               id: "setup-printers",
               caption: "The workstation's printers and print assignment",
@@ -328,7 +341,7 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
           {
             kind: "callout",
             tone: "info",
-            text: "An A4 sheet prints a pallet on an ordinary printer: only for “Этикетка паллеты” (Pallet label), at 300 dpi, through the Windows driver.",
+            text: "The test label size applies to the test. The selected template sets the production label size. An A4 sheet prints a pallet on an ordinary printer: only for “Этикетка паллеты” (Pallet label), at 300 dpi, through the Windows driver.",
           },
         ],
       },
@@ -339,8 +352,15 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
           {
             kind: "step",
             title: "Connect the scanner and check the reading",
-            text: "“Клавиатурный сканер” (Keyboard scanner) — a USB scanner in keyboard mode — always works, with no setup. Add a scanner on a COM port: choose “COM-порт” (COM port) and “Скорость, бод” (Speed, baud) — as set in the scanner itself — and tap “Добавить” (Add); “Обновить список портов” (Refresh the port list) rereads the computer's ports. On the right is “Проверка сканера” (Scanner check): the station shows a test code (“Простой код” — Plain code, or “DataMatrix с GS” — DataMatrix with GS), you scan it from the screen, and the station compares what arrived with what is shown, character by character — including GS separators and the keyboard layout. Tap “Сохранить” (Save).",
-            image: { id: "setup-scanners", caption: "The station's scanners and the read check" },
+            text: "“Сканер в режиме клавиатуры” (Keyboard-mode scanner) — a USB scanner in keyboard mode — always works, with no setup. Add a scanner on a COM port: choose “COM-порт” (COM port) and “Скорость, бод” (Speed, baud) — as set in the scanner itself — and tap “Добавить” (Add); “Обновить список портов” (Refresh the port list) rereads the computer's ports. On the right is “Проверка сканера” (Scanner check): the station shows a test code (“Простой код” — Plain code, or “DataMatrix с GS” — DataMatrix with GS), you scan it from the screen, and the station compares what arrived with what is shown, character by character — including GS separators and the keyboard layout. Tap “Сохранить” (Save).",
+            image: {
+              id: "setup-scanners",
+              caption: "Station scanners and the DataMatrix check with a GS separator",
+            },
+          },
+          {
+            kind: "paragraph",
+            text: "If the scanner reads only from paper, select a thermal printer under “Проверка сканера” (Scanner check) and click “Печать” (Print). Set the test label size for the selected printer. Scan the test code just printed and check the result on screen.",
           },
           {
             kind: "paragraph",

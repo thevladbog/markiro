@@ -1,0 +1,20 @@
+---
+import warehouseMenu from "@markiro/legal-documents/assets/instructions/mkr-ins-15/en/warehouse-menu.png?url";
+import palletBoxes from "@markiro/legal-documents/assets/instructions/mkr-ins-15/en/pallet-boxes.png?url";
+import palletClose from "@markiro/legal-documents/assets/instructions/mkr-ins-15/en/pallet-close.png?url";
+import palletLabel from "@markiro/legal-documents/assets/instructions/mkr-ins-15/en/pallet-label.png?url";
+import officePallet from "@markiro/legal-documents/assets/instructions/mkr-ins-15/en/office-pallet.png?url";
+
+import { getLegalDocumentPage } from "../../../../content/legal-pages";
+import InstructionDocument from "../../../../components/InstructionDocument.astro";
+
+const images = {
+  "warehouse-menu": warehouseMenu,
+  "pallet-boxes": palletBoxes,
+  "pallet-close": palletClose,
+  "pallet-label": palletLabel,
+  "office-pallet": officePallet,
+};
+---
+
+<InstructionDocument page={getLegalDocumentPage("MKR-INS-15", "en")} images={images} />

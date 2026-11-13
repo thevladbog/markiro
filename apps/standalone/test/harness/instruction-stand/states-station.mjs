@@ -643,6 +643,9 @@ export const STATION_STATES = {
       await page.getByRole("button", { name: "Добавить принтер" }).click();
       await page.getByLabel("Название").fill("TSC TE210");
       await page.getByLabel("Адрес принтера").fill("192.168.10.22");
+      await page.getByRole("radio", { name: "TSPL", exact: true }).click();
+      await page.getByRole("combobox", { name: "Размер пробной этикетки" }).click();
+      await page.getByRole("option", { name: "75 × 120 мм" }).click();
       await page.waitForTimeout(800);
       await shoot(page);
     },

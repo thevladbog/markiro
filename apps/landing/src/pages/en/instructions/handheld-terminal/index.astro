@@ -1,4 +1,6 @@
 ---
+import siteReprintReason from "@markiro/legal-documents/assets/instructions/mkr-ins-14/en/site-reprint-reason.png?url";
+import packDisassemblyScan from "@markiro/legal-documents/assets/instructions/mkr-ins-14/en/pack-disassembly-scan.png?url";
 import officePairingCode from "@markiro/legal-documents/assets/instructions/mkr-ins-14/en/office-pairing-code.png?url";
 import pairingSource from "@markiro/legal-documents/assets/instructions/mkr-ins-14/en/pairing-source.png?url";
 import pairingForm from "@markiro/legal-documents/assets/instructions/mkr-ins-14/en/pairing-form.png?url";
@@ -16,9 +18,6 @@ import palletVerdict from "@markiro/legal-documents/assets/instructions/mkr-ins-
 import palletCloseConfirm from "@markiro/legal-documents/assets/instructions/mkr-ins-14/en/pallet-close-confirm.png?url";
 import palletPrinted from "@markiro/legal-documents/assets/instructions/mkr-ins-14/en/pallet-printed.png?url";
 import palletPrintFailed from "@markiro/legal-documents/assets/instructions/mkr-ins-14/en/pallet-print-failed.png?url";
-import palletDisassembleScan from "@markiro/legal-documents/assets/instructions/mkr-ins-14/en/pallet-disassemble-scan.png?url";
-import palletDisassembleReason from "@markiro/legal-documents/assets/instructions/mkr-ins-14/en/pallet-disassemble-reason.png?url";
-import palletDisassembleConfirm from "@markiro/legal-documents/assets/instructions/mkr-ins-14/en/pallet-disassemble-confirm.png?url";
 import hubOffline from "@markiro/legal-documents/assets/instructions/mkr-ins-14/en/hub-offline.png?url";
 import hostQueue from "@markiro/legal-documents/assets/instructions/mkr-ins-14/en/host-queue.png?url";
 
@@ -27,6 +26,8 @@ import InstructionDocument from "../../../../components/InstructionDocument.astr
 
 // The handheld's frames are portrait screens; the office's are 1280×800.
 const images = {
+  "site-reprint-reason": { src: siteReprintReason, width: 720, height: 1600 },
+  "pack-disassembly-scan": { src: packDisassemblyScan, width: 720, height: 1600 },
   "office-pairing-code": officePairingCode,
   "pairing-source": { src: pairingSource, width: 720, height: 1280 },
   "pairing-form": { src: pairingForm, width: 720, height: 1280 },
@@ -34,19 +35,16 @@ const images = {
   "pairing-done": { src: pairingDone, width: 720, height: 1280 },
   "office-devices": officeDevices,
   "office-handheld-line": officeHandheldLine,
-  "sign-in": { src: signIn, width: 720, height: 1440 },
-  "hub": { src: hub, width: 720, height: 1280 },
-  "printer-add": { src: printerAdd, width: 720, height: 1280 },
-  "printer-assignments": { src: printerAssignments, width: 720, height: 1280 },
+  "sign-in": { src: signIn, width: 720, height: 1600 },
+  "hub": { src: hub, width: 720, height: 1600 },
+  "printer-add": { src: printerAdd, width: 720, height: 1600 },
+  "printer-assignments": { src: printerAssignments, width: 720, height: 1600 },
   "pallet-empty": { src: palletEmpty, width: 720, height: 1280 },
   "pallet-boxes": { src: palletBoxes, width: 720, height: 1280 },
   "pallet-verdict": { src: palletVerdict, width: 720, height: 1280 },
   "pallet-close-confirm": { src: palletCloseConfirm, width: 720, height: 1280 },
   "pallet-printed": { src: palletPrinted, width: 720, height: 1600 },
   "pallet-print-failed": { src: palletPrintFailed, width: 720, height: 1600 },
-  "pallet-disassemble-scan": { src: palletDisassembleScan, width: 720, height: 1600 },
-  "pallet-disassemble-reason": { src: palletDisassembleReason, width: 720, height: 1600 },
-  "pallet-disassemble-confirm": { src: palletDisassembleConfirm, width: 720, height: 1600 },
   "hub-offline": { src: hubOffline, width: 720, height: 1280 },
   "host-queue": { src: hostQueue, width: 720, height: 1280 },
 };

@@ -2116,6 +2116,11 @@ input:focus-visible {
 }
 
 /* Instruction documents (MKR-INS-*) */
+.instruction-page .legal-hero__inner {
+  grid-template-columns: minmax(0, 1fr);
+  overflow-wrap: anywhere;
+}
+
 .instruction-step {
   margin: var(--sp-7) 0;
   padding-left: var(--sp-4);
