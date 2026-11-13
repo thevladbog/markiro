@@ -13,10 +13,10 @@ const legacy = {
   subject: `repo:${repository}:environment:handheld-release`,
 };
 
-function fixtures() {
+function fixtures(products = ["handheld", "standalone"]) {
   const approved = {
     ...identity,
-    workflows: ["handheld", "standalone"].map((product) => {
+    workflows: products.map((product) => {
       const environment = `${product}-stable-publisher`;
       const workflowRef = `${repository}/.github/workflows/${product}-stable-release.yml@refs/tags/${product}-publisher-v1`;
       return {
@@ -82,6 +82,31 @@ test("binds the image pair and adds only the two approved publisher pins", () =>
   );
   const wrongImage = { ...after, MARKIRO_API_IMAGE_DIGEST: before.MARKIRO_API_IMAGE_DIGEST };
   assert.throws(() => validateHealthyForwardPublisherDelta(before, wrongImage, manifest, approved));
+});
+
+test("admits either reviewed stable publisher separately", () => {
+  for (const product of ["handheld", "standalone"]) {
+    const { before, after, manifest, approved } = fixtures([product]);
+    assert.doesNotThrow(() =>
+      validateHealthyForwardPublisherDelta(before, after, manifest, approved),
+    );
+  }
+});
+
+test("rejects empty approval and multiple approved tags for one product", () => {
+  const empty = fixtures([]);
+  assert.throws(() =>
+    validateHealthyForwardPublisherDelta(empty.before, empty.after, empty.manifest, empty.approved),
+  );
+
+  const { before, after, manifest, approved } = fixtures(["handheld", "handheld"]);
+  const duplicate = approved.workflows[1];
+  duplicate.workflowRef = duplicate.jobWorkflowRef = duplicate.workflowRef.replace(/-v1$/u, "-v2");
+  after.RELEASE_CATALOG_PUBLISHERS_JSON = JSON.stringify({
+    ...identity,
+    workflows: [legacy, ...approved.workflows],
+  });
+  assert.throws(() => validateHealthyForwardPublisherDelta(before, after, manifest, approved));
 });
 
 test("refuses changes to the database, storage credentials, or writer switch without exposing values", () => {

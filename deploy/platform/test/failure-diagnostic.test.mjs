@@ -147,6 +147,42 @@ test("fixed Python ZIP verifier origin records only basename and numeric status"
   assert.doesNotMatch(JSON.stringify(record), new RegExp(secret, "u"));
 });
 
+test("healthy forward preflight records the first bounded failure before it is masked", async (t) => {
+  const { createHealthyForwardFailureRecorder } = await import("../host/failure-diagnostic.mjs");
+  const { withAdmissionReadStage } = await import("../host/admission-read-failure.mjs");
+  const f = await privateFixture(t);
+  const run = createHealthyForwardFailureRecorder(f.root, context.operationId);
+  assert.equal(await run("verifyDispatch", async () => true), true);
+  await assert.rejects(readFile(join(f.root, "failure.json")), { code: "ENOENT" });
+  await assert.rejects(
+    run("verifyAdmission", () =>
+      withAdmissionReadStage("artifact-download", (reject) =>
+        reject("http", { status: 403, headers: { authorization: secret }, args: [secret] }),
+      ),
+    ),
+  );
+  const bytes = await readFile(join(f.root, "failure.json"));
+  const record = JSON.parse(bytes);
+  assert.equal(record.phase, "healthy-forward-rollout");
+  assert.equal(record.boundary, "verifyAdmission");
+  assert.equal(record.admissionRead.stage, "artifact-download");
+  assert.equal(record.admissionRead.status, 403);
+  assert.equal((await lstat(join(f.root, "failure.json"))).mode & 0o777, 0o600);
+  assert.doesNotMatch(String(bytes), new RegExp(secret, "u"));
+  await assert.rejects(
+    run("inspectSource", () => {
+      throw new Error(secret);
+    }),
+  );
+  assert.deepEqual(await readFile(join(f.root, "failure.json")), bytes);
+  await assert.rejects(
+    run(secret, async () => assert.fail("invalid boundary was invoked")),
+    {
+      message: "Invalid healthy forward preflight boundary.",
+    },
+  );
+});
+
 test("only constructor-captured validation sites survive wrappers without private stack text", async (t) => {
   const { preparedFixture } = await import("./prepared-target-fixture.mjs");
   const { validatePreparedTarget } = await import("../host/prepared-target.mjs");
