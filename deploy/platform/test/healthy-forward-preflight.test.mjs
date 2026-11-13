@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { digest } from "../backup/schemas.mjs";
 import { containerRecipe } from "../host/container-recipe.mjs";
-import { forwardMigrationQuery } from "../host/forward-ledger.mjs";
+import { buildProductMigrationProof, forwardMigrationQuery } from "../host/forward-ledger.mjs";
 import { withForwardActivationState, withForwardPreparationState } from "../host/forward-state.mjs";
 import {
   verifyHealthyForwardPreflight,
@@ -12,6 +12,8 @@ import {
 } from "../host/healthy-forward-preflight.mjs";
 import { forwardEdgeSuccessorFixture } from "./forward-edge-successor-fixture.mjs";
 import { forwardDecision, forwardPrepared } from "./forward-fixture.mjs";
+import { productFiles } from "./forward-product-fixture.mjs";
+import { writeCompletedHealthyRollout } from "./healthy-forward-predecessor-fixture.mjs";
 
 async function fixture(t) {
   const f = await forwardEdgeSuccessorFixture(t);
@@ -315,6 +317,105 @@ async function fixture(t) {
     putEnv,
   };
 }
+
+test("preflight accepts the completed rollout as the source of the next admitted release", async (t) => {
+  const f = await fixture(t);
+  const { drift: _drift, ...input } = f.input;
+  const prior = input.candidateIdentity;
+  const admitted = prior.admission;
+  const manifest = admitted.manifest;
+  Object.assign(f.inspected.api, { Image: admitted.registry.api.imageId });
+  f.inspected.api.Config.Image = manifest.api;
+  f.inspected.api.Config.Env = Object.entries(f.candidateEnvironment).map(
+    ([name, value]) => `${name}=${value}`,
+  );
+  Object.assign(f.inspected.edge, { Image: admitted.registry.edge.imageId });
+  f.inspected.edge.Config.Image = manifest.edge;
+  f.inspected.edge.Config.Env = [`MARKIRO_RELEASE_SHA=${manifest.sourceSha}`];
+  const containers = Object.fromEntries(
+    Object.entries(f.inspected).map(([name, row]) => [
+      name,
+      { id: row.Id, imageId: row.Image, recipeSha256: containerRecipe(row) },
+    ]),
+  );
+  const completed = await writeCompletedHealthyRollout(f, {
+    identity: prior,
+    runtime: input.runtime,
+    predecessor: input.predecessor,
+    containers,
+    runtimeBytes: await readFile(join(f.host, input.candidateRuntime.path)),
+  });
+  const nextSha = "1".repeat(40);
+  const nextApiDigest = `sha256:${"2".repeat(64)}`;
+  const nextEdgeDigest = `sha256:${"3".repeat(64)}`;
+  const next = structuredClone(prior);
+  next.operationId = "4dd08687-d11e-4bce-9100-41b2d4e6d352";
+  const { manifest: nextManifest, verified, registry, publisher } = next.admission;
+  Object.assign(nextManifest, {
+    sourceSha: nextSha,
+    toolingSha: nextSha,
+    workflowRunId: "987",
+    api: `ghcr.io/thevladbog/markiro-api@${nextApiDigest}`,
+    edge: `ghcr.io/thevladbog/markiro-platform-edge@${nextEdgeDigest}`,
+  });
+  Object.assign(verified, { sourceSha: nextSha, toolingSha: nextSha, workflowRunId: "987" });
+  publisher.runId = "987";
+  for (const [role, letter] of [
+    ["api", "4"],
+    ["edge", "5"],
+  ]) {
+    verified.images[role].id = `sha256:${letter.repeat(64)}`;
+    verified.images[role].tag =
+      `${nextManifest[role].split("@")[0]}:platform-${nextSha}-987-${publisher.runAttempt}`;
+    registry[role].reference = nextManifest[role];
+    registry[role].imageId = verified.images[role].id;
+  }
+  const nextEnv = {
+    ...f.candidateEnvironment,
+    MARKIRO_SOURCE_SHA: nextSha,
+    MARKIRO_TOOLING_SHA: nextSha,
+    MARKIRO_API_IMAGE_DIGEST: nextApiDigest,
+    MARKIRO_PLATFORM_EDGE_IMAGE_DIGEST: nextEdgeDigest,
+  };
+  await f.putEnv(input.candidateRuntime.path, nextEnv);
+  const candidateMigrationProof = buildProductMigrationProof({
+    productSha: nextSha,
+    imageId: registry.api.imageId,
+    imageReference: nextManifest.api,
+    files: productFiles(),
+  });
+  const successor = {
+    ...input,
+    predecessor: completed.predecessor,
+    runtime: completed.runtime,
+    candidateIdentity: next,
+    candidateMigrationProof,
+    candidateRuntime: {
+      ...input.candidateRuntime,
+      sha256: digest(await readFile(join(f.host, input.candidateRuntime.path))),
+    },
+    pinnedPublisherConfig: { ...input.pinnedPublisherConfig, workflows: [] },
+  };
+  const result = await verifyHealthyForwardPreflight(successor, f.dependencies);
+  assert.equal(result.predecessorOperationId, prior.operationId);
+  assert.equal(result.sourceSha, manifest.sourceSha);
+  assert.deepEqual(result.containers, containers);
+  assert.notEqual(input.predecessorMigrationProof.proofSha256, candidateMigrationProof.proofSha256);
+  const [journal, firstMigration, ...otherMigrations] = productFiles();
+  const divergentProof = buildProductMigrationProof({
+    productSha: manifest.sourceSha,
+    imageId: admitted.registry.api.imageId,
+    imageReference: manifest.api,
+    files: [journal, { ...firstMigration, bytes: Buffer.from("SELECT 42;\n") }, ...otherMigrations],
+  });
+  await assert.rejects(
+    verifyHealthyForwardPreflight(
+      { ...successor, predecessorMigrationProof: divergentProof },
+      f.dependencies,
+    ),
+    { code: "ERR_HEALTHY_FORWARD_PREFLIGHT" },
+  );
+});
 
 test("preflight validates healthy forward rollout evidence", async (t) => {
   const f = await fixture(t);

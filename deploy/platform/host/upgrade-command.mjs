@@ -44,7 +44,7 @@ export const UPGRADE_BUNDLE_FILES = Object.freeze([
   "deploy/platform/host/forward-ledger.mjs",
   "deploy/platform/host/forward-index-handoff.py",
 ]);
-// This one-phase successor has its own exact closure. Preserve the file set
+// This rollout has its own exact closure. Preserve the file set
 // and receipts used by the original upgrade and forward-recovery phases.
 const HEALTHY_FORWARD_BUNDLE_FILES = Object.freeze([
   ...RECOVERY_BUNDLE_FILES,
@@ -67,6 +67,7 @@ const HEALTHY_FORWARD_BUNDLE_FILES = Object.freeze([
   "deploy/platform/host/forward-successor-admission.mjs",
   "deploy/platform/host/healthy-forward-backup.mjs",
   "deploy/platform/host/healthy-forward-candidate.mjs",
+  "deploy/platform/host/healthy-forward-predecessor.mjs",
   "deploy/platform/host/healthy-forward-preflight.mjs",
   "deploy/platform/host/healthy-forward-publisher-policy.mjs",
   "deploy/platform/host/healthy-forward-rollout-runtime.mjs",

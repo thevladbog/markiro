@@ -153,3 +153,49 @@ test("refuses to replace a legacy publisher or admit an unapproved stable tag", 
     );
   }
 });
+
+test("a verified successor may retain the complete publisher configuration unchanged", () => {
+  const { after, manifest, approved, before } = fixtures();
+  const retainedPolicy = after.RELEASE_CATALOG_PUBLISHERS_JSON;
+  const live = { ...before, RELEASE_CATALOG_PUBLISHERS_JSON: retainedPolicy };
+  const noNewPins = { ...approved, workflows: [] };
+  const refusal = { code: "ERR_HEALTHY_FORWARD_PUBLISHER_DELTA" };
+
+  assert.throws(
+    () => validateHealthyForwardPublisherDelta(live, after, manifest, noNewPins),
+    refusal,
+  );
+  assert.doesNotThrow(() =>
+    validateHealthyForwardPublisherDelta(live, after, manifest, noNewPins, {
+      allowUnchanged: true,
+    }),
+  );
+
+  for (const [candidate, approval] of [
+    [after, approved],
+    [after, { ...noNewPins, ownerId: "3" }],
+    [
+      { ...after, RELEASE_CATALOG_PUBLISHERS_JSON: before.RELEASE_CATALOG_PUBLISHERS_JSON },
+      noNewPins,
+    ],
+    [{ ...after, RELEASE_CATALOG_PUBLISHERS_JSON: retainedPolicy + " " }, noNewPins],
+    [{ ...after, MARKIRO_API_IMAGE_DIGEST: before.MARKIRO_API_IMAGE_DIGEST }, noNewPins],
+    [{ ...after, RELEASE_CATALOG_WRITERS_ENABLED: "false" }, noNewPins],
+  ]) {
+    assert.throws(
+      () =>
+        validateHealthyForwardPublisherDelta(live, candidate, manifest, approval, {
+          allowUnchanged: true,
+        }),
+      refusal,
+    );
+  }
+
+  assert.throws(
+    () =>
+      validateHealthyForwardPublisherDelta(before, after, manifest, approved, {
+        allowUnchanged: true,
+      }),
+    refusal,
+  );
+});

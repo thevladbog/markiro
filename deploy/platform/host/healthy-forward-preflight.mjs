@@ -17,6 +17,10 @@ import {
   validateProductMigrationLedger,
 } from "./forward-ledger.mjs";
 import { forwardPhaseReceipt, validateForwardJournal } from "./forward-state.mjs";
+import {
+  isHealthyRolloutPredecessor,
+  readHealthyRolloutPredecessor,
+} from "./healthy-forward-predecessor.mjs";
 import { validateHealthyForwardPublisherDelta } from "./healthy-forward-publisher-policy.mjs";
 import { createDockerCommand, validateObservationPolicy } from "./observe.mjs";
 import { historicalOperationNow } from "./operation-authority.mjs";
@@ -295,10 +299,11 @@ export function withStoppedHealthyForwardSource(input, dependencies, inspect) {
 
 async function preflight(input, dependencies, workload, inspect) {
   try {
+    const successor = isHealthyRolloutPredecessor(input.predecessor);
     keys(input, [
       "root",
       "predecessor",
-      "drift",
+      ...(successor ? [] : ["drift"]),
       "runtime",
       "candidateRuntime",
       "pinnedPublisherConfig",
@@ -333,16 +338,18 @@ async function preflight(input, dependencies, workload, inspect) {
       "operationId",
       "indexSha256",
       "stateSha256",
-      "beforeActivationSha256",
-      "prepareConsumptionSha256",
-      "activateConsumptionSha256",
+      ...(successor
+        ? ["kind"]
+        : ["beforeActivationSha256", "prepareConsumptionSha256", "activateConsumptionSha256"]),
     ]);
     ensure(uuid(predecessor.operationId));
-    keys(drift, ["receiptPath", "receiptSha256"]);
-    ensure(
-      typeof drift.receiptPath === "string" &&
-        /^manual-configurations\/[A-Za-z0-9_-]+\/result\.json$/u.test(drift.receiptPath),
-    );
+    if (!successor) {
+      keys(drift, ["receiptPath", "receiptSha256"]);
+      ensure(
+        typeof drift.receiptPath === "string" &&
+          /^manual-configurations\/[A-Za-z0-9_-]+\/result\.json$/u.test(drift.receiptPath),
+      );
+    }
     keys(runtime, ["path", "sha256", "containers", "observationPolicy", "schema"]);
     keys(candidateRuntime, ["path", "sha256"]);
     ensure(
@@ -387,31 +394,59 @@ async function preflight(input, dependencies, workload, inspect) {
       await requireAbsent(join(root, "config-pending.json"));
     };
     await verifyUncontested();
-    const admission = await readHealthyPredecessor(
-      root,
-      predecessor,
-      predecessorMigrationProof,
-      readPinned,
-    );
-    same(admission.identity.target, candidateIdentity.target);
-    ensure(
-      candidateIdentity.operationId !== admission.identity.operationId &&
-        runtime.containers.postgres.id === admission.baseline.containers.postgres,
-    );
-
-    const receipt = JSON.parse(await readPinned(host, drift.receiptPath, drift.receiptSha256));
-    ensure(
-      receipt.runtimePath === join(host, runtime.path) && receipt.runtimeSha256 === runtime.sha256,
-    );
-    for (const service of services) {
-      const recorded = service === "api" ? receipt.api : receipt.preserved[service];
+    const readPredecessor = async () => {
+      if (successor) {
+        const { identity } = await readHealthyRolloutPredecessor(
+          root,
+          predecessor,
+          runtime,
+          candidateIdentity,
+          readPinned,
+        );
+        ensure(
+          predecessorMigrationProof.productSha === identity.admission.manifest.sourceSha &&
+            predecessorMigrationProof.imageReference === identity.admission.manifest.api &&
+            predecessorMigrationProof.imageId === identity.admission.registry.api.imageId,
+        );
+        return identity;
+      }
+      const admission = await readHealthyPredecessor(
+        root,
+        predecessor,
+        predecessorMigrationProof,
+        readPinned,
+      );
+      same(admission.identity.target, candidateIdentity.target);
       ensure(
-        recorded.id === runtime.containers[service].id &&
-          recorded.image === runtime.containers[service].imageId,
+        candidateIdentity.operationId !== admission.identity.operationId &&
+          runtime.containers.postgres.id === admission.baseline.containers.postgres,
+      );
+      const receipt = JSON.parse(await readPinned(host, drift.receiptPath, drift.receiptSha256));
+      ensure(
+        receipt.runtimePath === join(host, runtime.path) &&
+          receipt.runtimeSha256 === runtime.sha256,
+      );
+      for (const service of services) {
+        const recorded = service === "api" ? receipt.api : receipt.preserved[service];
+        ensure(
+          recorded.id === runtime.containers[service].id &&
+            recorded.image === runtime.containers[service].imageId,
+        );
+      }
+      return admission.identity;
+    };
+    const predecessorIdentity = await readPredecessor();
+    await readPinned(host, runtime.path, runtime.sha256);
+    const environment = await readProtectedEnv(join(host, runtime.path));
+    if (successor) {
+      const manifest = predecessorIdentity.admission.manifest;
+      ensure(
+        environment.MARKIRO_SOURCE_SHA === manifest.sourceSha &&
+          environment.MARKIRO_TOOLING_SHA === manifest.toolingSha &&
+          environment.MARKIRO_API_IMAGE_DIGEST === manifest.api.split("@")[1] &&
+          environment.MARKIRO_PLATFORM_EDGE_IMAGE_DIGEST === manifest.edge.split("@")[1],
       );
     }
-    await readPinned(host, runtime.path, runtime.sha256);
-    const environment = await readProtectedEnv(receipt.runtimePath);
     await readPinned(host, candidateRuntime.path, candidateRuntime.sha256);
     const candidateEnvironment = await readProtectedEnv(join(host, candidateRuntime.path));
     validateHealthyForwardPublisherDelta(
@@ -419,6 +454,7 @@ async function preflight(input, dependencies, workload, inspect) {
       candidateEnvironment,
       candidateIdentity.admission.manifest,
       pinnedPublisherConfig,
+      { allowUnchanged: successor },
     );
     ensure(sha(environment.MARKIRO_SOURCE_SHA) && sha(environment.MARKIRO_TOOLING_SHA));
     for (const key of [
@@ -447,9 +483,10 @@ async function preflight(input, dependencies, workload, inspect) {
       runProcess: guardedRun,
     });
     same(ledger.schema, runtime.schema);
+    if (successor) validateProductMigrationLedger(ledger.rows, predecessorMigrationProof);
     if (inspect) await inspect({ owned, config: Object.freeze({ ...environment }) });
     await observe();
-    await readHealthyPredecessor(root, predecessor, predecessorMigrationProof, readPinned);
+    await readPredecessor();
     for (const { directory, path, expectedSha256 } of pins.values())
       await readPinned(directory, path, expectedSha256);
     await verifyUncontested();

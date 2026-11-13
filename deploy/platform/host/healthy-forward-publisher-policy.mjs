@@ -33,6 +33,7 @@ export function validateHealthyForwardPublisherDelta(
   after,
   manifest,
   pinnedPublisherConfig,
+  { allowUnchanged = false } = {},
 ) {
   try {
     const current = readEnvironment(before);
@@ -40,30 +41,33 @@ export function validateHealthyForwardPublisherDelta(
     const approved = plain(pinnedPublisherConfig);
     keys(approved, [...repositoryFields, "workflows"]);
     ensure(approved.repository === "thevladbog/markiro");
-    ensure(
-      Array.isArray(approved.workflows) &&
-        approved.workflows.length > 0 &&
-        approved.workflows.length <= products.length,
-    );
-    const approvedProducts = new Set();
-    for (const pin of approved.workflows) {
-      keys(pin, pinFields);
-      ensure(
-        pin.mode === "pinned-tag" &&
-          products.includes(pin.product) &&
-          !approvedProducts.has(pin.product),
-      );
-      approvedProducts.add(pin.product);
-    }
+    ensure(typeof allowUnchanged === "boolean" && Array.isArray(approved.workflows));
 
     const previousPolicy = JSON.parse(current[publisherKey]);
     keys(previousPolicy, [...repositoryFields, "workflows"]);
     for (const name of repositoryFields) ensure(previousPolicy[name] === approved[name]);
-    const nextPolicy = {
-      ...previousPolicy,
-      workflows: [...previousPolicy.workflows, ...approved.workflows],
-    };
-    ensure(canonical(JSON.parse(candidate[publisherKey])) === canonical(nextPolicy));
+    if (allowUnchanged) {
+      // A successor can replace images while retaining the exact admitted policy.
+      ensure(approved.workflows.length === 0 && candidate[publisherKey] === current[publisherKey]);
+    } else {
+      ensure(approved.workflows.length > 0 && approved.workflows.length <= products.length);
+      const approvedProducts = new Set();
+      for (const pin of approved.workflows) {
+        keys(pin, pinFields);
+        ensure(
+          pin.mode === "pinned-tag" &&
+            products.includes(pin.product) &&
+            !approvedProducts.has(pin.product),
+        );
+        approvedProducts.add(pin.product);
+      }
+
+      const nextPolicy = {
+        ...previousPolicy,
+        workflows: [...previousPolicy.workflows, ...approved.workflows],
+      };
+      ensure(canonical(JSON.parse(candidate[publisherKey])) === canonical(nextPolicy));
+    }
 
     const admittedManifest = plain(manifest);
     const release = parsePlatformManifest(
