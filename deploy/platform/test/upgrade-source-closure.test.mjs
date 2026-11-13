@@ -25,6 +25,7 @@ for (const [kind, files, ...entries] of [
     "deploy/platform/host/healthy-forward-rollout-state.mjs",
     "deploy/platform/host/healthy-forward-backup.mjs",
     "deploy/platform/host/healthy-forward-candidate.mjs",
+    "deploy/platform/host/healthy-forward-predecessor.mjs",
     "deploy/platform/upgrade-transport.mjs",
   ],
 ])

@@ -33,13 +33,25 @@ export async function withHealthyForwardRollout(input, adapters) {
     "operationId",
     "predecessorOperationId",
     "predecessorIndexSha256",
+    ...(Object.hasOwn(operation, "predecessorKind") ? ["predecessorKind"] : []),
     "operationSha256",
     "executorSha",
     "backupRuntimeSha256",
     "postgresId",
   ]);
-  const { root, operationId, predecessorOperationId, predecessorIndexSha256, operationSha256 } =
-    operation;
+  const {
+    root,
+    operationId,
+    predecessorOperationId,
+    predecessorIndexSha256,
+    predecessorKind = "platform-forward-recovery-index",
+    operationSha256,
+  } = operation;
+  ensure(
+    ["platform-forward-recovery-index", "platform-healthy-forward-rollout-index"].includes(
+      predecessorKind,
+    ),
+  );
   ensure(
     uuid(operationId) && uuid(predecessorOperationId) && operationId !== predecessorOperationId,
   );
@@ -71,7 +83,7 @@ export async function withHealthyForwardRollout(input, adapters) {
         const predecessor = JSON.parse(predecessorBytes);
         ensure(
           digest(predecessorBytes) === predecessorIndexSha256 &&
-            predecessor.kind === "platform-forward-recovery-index" &&
+            predecessor.kind === predecessorKind &&
             predecessor.operationId === predecessorOperationId,
         );
         const verifyPredecessor = async () => {

@@ -79,6 +79,68 @@ test("a fresh verified backup and healthy observed replacement are required to m
   assert.equal(f.calls.filter((name) => name === "api").length, 1);
 });
 
+test("a successor archives a completed rollout before publishing its own healthy index", async (t) => {
+  const f = await fixture(t);
+  await withHealthyForwardRollout(f.input, f.adapters);
+  const predecessor = await readFile(f.head);
+  const predecessorState = await readFile(join(f.directory, "state.json"));
+  const operationId = "10000000-0000-4000-8000-000000000003";
+  const next = {
+    ...f.input,
+    operationId,
+    operationSha256: "9".repeat(64),
+    predecessorOperationId: f.input.operationId,
+    predecessorIndexSha256: digest(predecessor),
+  };
+  const result = { ...f.result, api: "7".repeat(64), edge: "8".repeat(64) };
+  const adapters = {
+    ...f.adapters,
+    verifyBackup: (capability) =>
+      withHealthyForwardBackupState(capability, async (held) => {
+        assert.equal(held.operation.operationId, operationId);
+        await held.verify();
+        return "a".repeat(64);
+      }),
+    activateApi: async () => result.api,
+    activateEdge: async () => result.edge,
+    verifyHealth: async () => result,
+  };
+  await assert.rejects(withHealthyForwardRollout(next, adapters), {
+    durabilityUncertain: false,
+  });
+  assert.deepEqual(await readFile(f.head), predecessor);
+
+  const successor = { ...next, predecessorKind: "platform-healthy-forward-rollout-index" };
+  assert.deepEqual(await withHealthyForwardRollout(successor, adapters), result);
+
+  const directory = join(f.input.root, "healthy-forward-rollouts", operationId);
+  assert.deepEqual(await readFile(join(directory, "predecessor-index.json")), predecessor);
+  assert.deepEqual(await readFile(join(f.directory, "state.json")), predecessorState);
+  const state = await readFile(join(directory, "state.json"));
+  assert.equal(JSON.parse(state).phase, "healthy");
+  assert.deepEqual(JSON.parse(await readFile(f.head)), {
+    version: 1,
+    kind: "platform-healthy-forward-rollout-index",
+    operationId,
+    predecessorIndexSha256: digest(predecessor),
+    stateSha256: digest(state),
+  });
+});
+
+test("successor state guards require the matching live predecessor kind", async (t) => {
+  const f = await fixture(t);
+  await assert.rejects(
+    withHealthyForwardRollout(
+      { ...f.input, predecessorKind: "platform-healthy-forward-rollout-index" },
+      f.adapters,
+    ),
+    { durabilityUncertain: false },
+  );
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(await readFile(f.head), f.prior);
+  await assert.rejects(readFile(join(f.input.root, ".deploy.lock")), { code: "ENOENT" });
+});
+
 test("a backup refusal cannot start either application or move ownership", async (t) => {
   const f = await fixture(t);
   f.adapters.verifyBackup = async () => {

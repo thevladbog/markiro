@@ -20,6 +20,10 @@ import {
   verifyHealthyForwardPreflight,
   withStoppedHealthyForwardSource,
 } from "./healthy-forward-preflight.mjs";
+import {
+  isHealthyRolloutPredecessor,
+  readHealthyRolloutPredecessor,
+} from "./healthy-forward-predecessor.mjs";
 import { withHealthyForwardRollout } from "./healthy-forward-rollout-state.mjs";
 import { createHealthyForwardWorkloads } from "./healthy-forward-workloads.mjs";
 import { createDockerCommand, validateObservationPolicy } from "./observe.mjs";
@@ -39,6 +43,8 @@ const uuid = (value) =>
 export async function validateHealthyForwardRolloutOperation(loaded) {
   const { record, verifyInstalledSources } = loaded;
   const op = record.operation;
+  const { admission, predecessor, drift, runtime, configuration } = op;
+  const successor = isHealthyRolloutPredecessor(predecessor);
   ensure(
     record.kind === "platform-healthy-forward-rollout-host-operation" &&
       record.phase === phase &&
@@ -49,7 +55,7 @@ export async function validateHealthyForwardRolloutOperation(loaded) {
     "dockerConfig",
     "admission",
     "predecessor",
-    "drift",
+    ...(successor ? [] : ["drift"]),
     "runtime",
     "configuration",
     "composeHashes",
@@ -57,7 +63,6 @@ export async function validateHealthyForwardRolloutOperation(loaded) {
     "backupPolicy",
     "catalogCustody",
   ]);
-  const { admission, predecessor, drift, runtime, configuration } = op;
   keys(admission, ["version", "authority", "identity", "executorCi", "dispatch"]);
   ensure(admission.version === 2);
   validateOperationAuthority(admission);
@@ -72,24 +77,24 @@ export async function validateHealthyForwardRolloutOperation(loaded) {
     "operationId",
     "indexSha256",
     "stateSha256",
-    "beforeActivationSha256",
-    "prepareConsumptionSha256",
-    "activateConsumptionSha256",
+    ...(successor
+      ? ["kind"]
+      : ["beforeActivationSha256", "prepareConsumptionSha256", "activateConsumptionSha256"]),
   ]);
-  const { operationId, ...predecessorPins } = predecessor;
+  const { operationId, kind: _kind, ...predecessorPins } = predecessor;
   ensure(uuid(operationId) && operationId !== identity.operationId);
   ensure(Object.values(predecessorPins).every(hash));
-  keys(drift, ["receiptPath", "receiptSha256"]);
-  ensure(
-    typeof drift.receiptPath === "string" &&
-      /^manual-configurations\/[a-zA-Z0-9_-]+\/result\.json$/u.test(drift.receiptPath) &&
-      hash(drift.receiptSha256),
-  );
   keys(runtime, ["path", "sha256", "containers", "observationPolicy", "schema"]);
-  ensure(
-    runtime.path === drift.receiptPath.replace(/result\.json$/u, "runtime.env") &&
-      hash(runtime.sha256),
-  );
+  ensure(hash(runtime.sha256));
+  if (!successor) {
+    keys(drift, ["receiptPath", "receiptSha256"]);
+    ensure(
+      typeof drift.receiptPath === "string" &&
+        /^manual-configurations\/[a-zA-Z0-9_-]+\/result\.json$/u.test(drift.receiptPath) &&
+        hash(drift.receiptSha256) &&
+        runtime.path === drift.receiptPath.replace(/result\.json$/u, "runtime.env"),
+    );
+  }
   same(runtime.observationPolicy, record.observationPolicy);
   const policy = validateObservationPolicy(record.observationPolicy);
   ensure(
@@ -149,9 +154,8 @@ export async function validateHealthyForwardRolloutOperation(loaded) {
     ensure(digest(bytes) === expected);
     return bytes;
   };
-  const verify = async () => {
-    await verifyInstalledSources();
-    const root = op.root;
+  const root = op.root;
+  const readRecoveryPredecessor = async () => {
     const host = dirname(root);
     const predecessorDir = `forward-recovery-operations/${operationId}`;
     const index = JSON.parse(await read(root, "upgrade-index.json", predecessor.indexSha256));
@@ -177,6 +181,13 @@ export async function validateHealthyForwardRolloutOperation(loaded) {
       receipt.runtimePath === join(host, runtime.path) && receipt.runtimeSha256 === runtime.sha256,
     );
     await read(host, runtime.path, runtime.sha256);
+    return { identity: previous.admission.identity, custodyOperationId: operationId };
+  };
+  const verify = async () => {
+    await verifyInstalledSources();
+    const previous = successor
+      ? await readHealthyRolloutPredecessor(root, predecessor, runtime, identity, read)
+      : await readRecoveryPredecessor();
     await read(
       root,
       `healthy-forward-backup-runtime-${identity.operationId}.json`,
@@ -193,7 +204,8 @@ export async function validateHealthyForwardRolloutOperation(loaded) {
     );
     await verifyInstalledSources();
     return {
-      predecessorIdentity: previous.admission.identity,
+      predecessorIdentity: previous.identity,
+      custodyOperationId: previous.custodyOperationId,
       candidateRuntime: {
         path: `${basename(root)}/candidates/${identity.operationId}/runtime.env`,
         sha256: configuration.runtimeSnapshot.sha256,
@@ -213,8 +225,9 @@ export async function executeHealthyForwardRolloutOperation(loaded, options = {}
     operationDirectory,
     identity.operationId,
   );
-  const { predecessorIdentity, candidateRuntime } = await preflightCheck("validation", async () =>
-    (await validateHealthyForwardRolloutOperation(loaded))(),
+  const { predecessorIdentity, custodyOperationId, candidateRuntime } = await preflightCheck(
+    "validation",
+    async () => (await validateHealthyForwardRolloutOperation(loaded))(),
   );
   const operation = { root, dockerConfig, identity, configuration };
   const tokenBytes = await preflightCheck("verifyDispatch", async () => {
@@ -302,7 +315,7 @@ export async function executeHealthyForwardRolloutOperation(loaded, options = {}
     preflightInput = {
       root,
       predecessor,
-      drift: op.drift,
+      ...(op.drift ? { drift: op.drift } : {}),
       runtime,
       candidateRuntime,
       pinnedPublisherConfig: op.pinnedPublisherConfig,
@@ -317,7 +330,7 @@ export async function executeHealthyForwardRolloutOperation(loaded, options = {}
     await observeHealthyForwardCatalogCustody(
       {
         hostRoot: dirname(root),
-        acceptedOperationId: predecessor.operationId,
+        acceptedOperationId: custodyOperationId,
         api,
         postgres: runtime.containers.postgres,
         observationPolicy: runtime.observationPolicy,
@@ -354,6 +367,7 @@ export async function executeHealthyForwardRolloutOperation(loaded, options = {}
       operationId: identity.operationId,
       predecessorOperationId: predecessor.operationId,
       predecessorIndexSha256: predecessor.indexSha256,
+      ...(predecessor.kind ? { predecessorKind: predecessor.kind } : {}),
       operationSha256,
       executorSha: identity.executorSha,
       backupRuntimeSha256: op.backupPolicy.runtimeSha256,
