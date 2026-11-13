@@ -71,6 +71,15 @@ export function nextHandheldRelease({
   const current = empty
     ? HANDHELD_LAST_DISTRIBUTED
     : parseHandheldManifest(publishedText, { channel });
+  // Run 43345787160 signed 1.10.0 (27) and reserved that version in the catalog
+  // before publication failed. Advance past both identifiers from the stable baseline.
+  if (
+    channel === "stable" &&
+    bump === "minor" &&
+    current.versionName === "1.9.1" &&
+    current.versionCode === 26
+  )
+    return { versionName: "1.11.0", versionCode: 28 };
   const versionCode = current.versionCode + 1;
   if (versionCode > MAX_VERSION_CODE) throw new Error("versionCode has run out of Android int");
   if (versionCode <= HANDHELD_LAST_DISTRIBUTED.versionCode) {
