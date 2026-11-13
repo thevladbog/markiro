@@ -363,6 +363,30 @@ describe("the lot-number step", () => {
     expect(handlers.create.mock.calls[0]?.[0]?.boxTemplateId).toBe(MILK_TEMPLATE);
   });
 
+  function physicalKey(field: HTMLInputElement, character: string, timeStamp: number) {
+    const event = createEvent.keyDown(field, { key: character });
+    Object.defineProperty(event, "timeStamp", { value: timeStamp });
+    fireEvent(field, event);
+    return event.defaultPrevented;
+  }
+
+  it("keeps a fast pair in the lot number and allows subsequent typing and Enter", async () => {
+    renderNew(await copiesOf(LOT_CATALOG));
+    await chooseMilk();
+    next();
+    const field = screen.getByRole<HTMLInputElement>("textbox", { name: /номер партии/i });
+    expect(physicalKey(field, "A", 100)).toBe(false);
+    fireEvent.change(field, { target: { value: "A" } });
+    expect(physicalKey(field, "B", 107)).toBe(false);
+    fireEvent.change(field, { target: { value: "AB" } });
+    expect(physicalKey(field, "C", 180)).toBe(false);
+    fireEvent.change(field, { target: { value: "ABC" } });
+    expect(physicalKey(field, "D", 187)).toBe(false);
+    fireEvent.change(field, { target: { value: "ABCD" } });
+    expect(physicalKey(field, "Enter", 194)).toBe(false);
+    expect(field.value).toBe("ABCD");
+  });
+
   it("rolls back a wedge scanner burst without losing the manual lot number or caret", async () => {
     renderNew(await copiesOf(LOT_CATALOG));
     await chooseMilk();
@@ -370,18 +394,16 @@ describe("the lot-number step", () => {
     const field = screen.getByRole<HTMLInputElement>("textbox", { name: /номер партии/i });
     fireEvent.change(field, { target: { value: "Б7" } });
     field.setSelectionRange(1, 1);
-    const key = (character: string, timeStamp: number) => {
-      const event = createEvent.keyDown(field, { key: character });
-      Object.defineProperty(event, "timeStamp", { value: timeStamp });
-      fireEvent(field, event);
-      return event.defaultPrevented;
-    };
+    const key = (character: string, timeStamp: number) => physicalKey(field, character, timeStamp);
     expect(key("0", 100)).toBe(false);
     fireEvent.change(field, { target: { value: "Б07" } });
     field.setSelectionRange(2, 2);
-    expect(key("1", 107)).toBe(true);
+    expect(key("1", 107)).toBe(false);
+    fireEvent.change(field, { target: { value: "Б017" } });
+    field.setSelectionRange(3, 3);
     expect(key("2", 114)).toBe(true);
-    expect(key("Enter", 121)).toBe(true);
+    expect(key("3", 121)).toBe(true);
+    expect(key("Enter", 128)).toBe(true);
     expect(field.value).toBe("Б7");
     expect(field.selectionStart).toBe(1);
     expect(key("A", 270)).toBe(false);

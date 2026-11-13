@@ -19,6 +19,7 @@ const LETTER_ROWS = {
   en: ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"],
 };
 const SYMBOL_ROWS = ["!\"#$%&'()*+", ",-./:;<=>?", "@[\\]^_`{|}~"];
+const SCAN_BURST_MIN_KEYS = 3;
 
 type Language = keyof typeof LETTER_ROWS;
 type Layout = Language | "symbols";
@@ -55,7 +56,7 @@ export function TextKeyboardInput({
   const rows = layout === "symbols" ? SYMBOL_ROWS : LETTER_ROWS[layout];
   const typing = useRef({
     at: Number.NEGATIVE_INFINITY,
-    scan: false,
+    keys: 0,
     value: "",
     selection: [0, 0] as [number, number],
   });
@@ -100,31 +101,36 @@ export function TextKeyboardInput({
   const onPhysicalKey = (event: KeyboardEvent<HTMLInputElement>) => {
     const state = typing.current;
     const gap = event.timeStamp - state.at;
+    const scan = state.keys >= SCAN_BURST_MIN_KEYS;
     if (event.key === "Enter") {
-      if (state.scan && gap < SCAN_END_GAP_MS) event.preventDefault();
+      if (scan && gap < SCAN_END_GAP_MS) event.preventDefault();
       state.at = Number.NEGATIVE_INFINITY;
-      state.scan = false;
+      state.keys = 0;
       return;
     }
     if (event.ctrlKey || event.altKey || event.metaKey || event.nativeEvent.isComposing) return;
     if (event.key.length !== 1) return;
-    if (state.scan && gap < SCAN_END_GAP_MS) {
+    if (scan && gap < SCAN_END_GAP_MS) {
       event.preventDefault();
       state.at = event.timeStamp;
       return;
     }
     if (!event.repeat && gap < SCAN_KEY_GAP_MS) {
-      event.preventDefault();
-      state.scan = true;
+      state.keys += 1;
       state.at = event.timeStamp;
-      changeAt(state.value, ...state.selection);
+      // Keep a fast pair as native input. A third key confirms the burst and
+      // restores the text and selection from before the first key.
+      if (state.keys === SCAN_BURST_MIN_KEYS) {
+        event.preventDefault();
+        changeAt(state.value, ...state.selection);
+      }
       return;
     }
     const start = event.currentTarget.selectionStart ?? value.length;
     state.selection = [start, event.currentTarget.selectionEnd ?? start];
     state.value = value;
-    state.at = event.timeStamp;
-    state.scan = false;
+    state.at = event.repeat ? Number.NEGATIVE_INFINITY : event.timeStamp;
+    state.keys = event.repeat ? 0 : 1;
   };
 
   return (
