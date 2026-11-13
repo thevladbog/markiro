@@ -5178,7 +5178,8 @@ and notices share one polite region that is on the screen before any of them.
 While a message stops the work — a failed write, no serials, a failed close, a
 close to confirm — or the operator leaves, a scan is not taken, and the screen
 says so: nothing is dropped silently. The plan notice «План выполнен» comes once
-per entry and does not stop the scanning.
+per entry, after the station has closed its box and pallet with contents and
+resolved pending labels. The notice does not stop scanning.
 
 What the floor tells the screen beyond the gate (see "Shifts"): `isLeaving()`
 answers true synchronously from the moment a leave is asked, where the render's
@@ -5699,10 +5700,12 @@ most 200 code points, no control character (`reasonWords`, the host's
 «Закрыть смену» (`ShiftClosePanel`, `Stop` `close`) shows the summary — the
 product, the plan of the station's copy now, the fact (the codes it holds),
 the deviation, the closed boxes and the units per box — read as the line's
-next piece of work, so a scan taken before the press is counted. An open box
-with codes or a label that waits keeps the shift open (`readCloseSummary`'s
-blocker) and sends the operator back to the work, where both are resolved;
-the plan not met needs one of the domain's six reasons. The close
+next piece of work, so a scan taken before the press is counted. Before the
+final summary, `readCloseSummary` presents a waiting label, an open box with
+codes, or an open pallet with boxes, in that order. The operator can close the
+box or pallet directly from this flow. After any resulting label checks, the
+station reads the next step. The final summary asks for one of the domain's
+six reasons when the plan differs from the actual count. The close
 (`closeShift`) is local and needs no host: ONE transaction drops the empty
 open box, writes the `shift_closed` record (the plan it saw, the fact, the
 closed boxes, the reason, the moment) and marks the copy `closing`, but only
@@ -6020,9 +6023,10 @@ lacks the capacity or the layout, and the work screen then stops
   stops the work with its reason (`pallet_no_serials`); three `invalid_serial`
   in a row are the stop `pallet_failed` with «Повторить». The button is off while any stop
   stands or the floor is leaving.
-- Labels: `settleLabel` sends every label written and not sent, the box's
-  before its pallet's (`readOpenJob` orders jobs of one moment by purpose);
-  one that waits stops the work, and the next waits behind it. A pallet's
+- Labels: `settleLabel` sends prepared labels in order. `readOpenJob` keeps a
+  pallet's label behind any pending label of a box on that pallet, including a
+  required scan. The saved membership determines this order after a restart.
+  One that waits stops the work, and the next waits behind it. A pallet's
   label is checked by a scan of its SSCC, skipped, or printed again by the
   same decisions as a box's (plan 2a7), its panel says «паллеты», and its
   records are `pallet_label`; printing again a label that may exist writes
@@ -6051,16 +6055,11 @@ lacks the capacity or the layout, and the work screen then stops
   pallet's label open, else `LabelWaitingError` with nothing written), for a
   job written between the read and the write.
 - The shift's close: an open pallet with a box not taken apart keeps it open
-  (`readCloseSummary`'s blocker `open_pallet`, after an open box and a
-  waiting label); an empty open pallet does not, and costs no serial. The
-  summary asks «На паллете N из M коробов — закрыть?», and «Закрыть паллету и
-  смену» closes the pallet, sends its label and then closes the shift with
-  the reason chosen — after the label is decided when it waits. `closeShift`
-  takes `openPalletGuard` in its transaction (plan 2a8's `guards`), on every
-  close path (`finishClose`). The intention to close the shift is kept only
-  over the label of the pallet that this press closed (`pendingClose` carries
-  its job id); any other stop, a changed summary or a began leave drops it and
-  the operator presses «Закрыть смену» again.
+  (`readCloseSummary`'s blocker `open_pallet`, after waiting labels and an open
+  box). An empty open pallet costs no serial. «Закрыть паллету» closes the
+  pallet and sends its label. After the label is resolved, the station returns
+  to the shift summary for final confirmation. `closeShift` takes
+  `openPalletGuard` in its transaction on every close path (`finishClose`).
 - A new shift on the station offers «С паллетами» / «Без паллет» for a product
   with boxes per pallet (1 to 10 000, `palletCapacityOffered`) and a pallet
   template that is enabled, of the pallet purpose and covers the product's
@@ -6087,15 +6086,13 @@ Known limits of the pallets, and who carries each:
   jsdom with `node:sqlite` behind `LocalExecutor` and a fake `HostApi`; the host
   met the station's records only through the scenario (`floor_scenario.rs`).
   The by-hand list is under «Verification».
-- The intention to close the shift is not kept across a pallet stop (no serial,
-  a lost serial, a label error): the operator presses again (question ВЦ3 of
-  the plan, recommended answer). After a pallet stop of «Закрыть паллету и
-  смену» the shift stays open, and the stop says so («Смена не закрыта…»; the
-  stop carries `fromClose`, which «Повторить» and the link-back keep).
+- A pallet stop for a missing or lost serial keeps the shift open. The stop
+  says so («Смена не закрыта…»; `fromClose` is carried through «Повторить» and
+  the link-back). The operator can reopen the shift summary after recovery.
 - A full pallet waiting for serials never holds the work queue (plan ХП): the
   top-up after each box close asks the host in the background, and a block
   that comes queues the pallet's close (`palletArrived`). The early close
-  («Закрыть паллету досрочно», «Закрыть паллету и смену») still asks the host
+  («Закрыть паллету досрочно», «Закрыть паллету») still asks the host
   inside the queue when no serial is left — up to 2 × 10 s with a hung host, as
   a box close waiting for box serials does: the operator pressed it and waits
   for its answer.
@@ -6148,6 +6145,12 @@ a sample preview; the organization's default (or the only enabled template)
 is chosen at first. A session pauses on «К сменам» and is continued by the
 next entry, by any operator; «Завершить сеанс» needs a confirmation and no
 waiting job; a finished session is never continued (`wh_sessions_open`).
+
+«Ввести код вручную» opens a form with a physical or on-screen keyboard.
+The touch keyboard is shared with the lot-number step. In the reprint form
+it starts in Latin and offers «Символы» with a GS separator key for a
+marking code. «Найти и напечатать» or Enter submits through the same
+queue as a scan. Scanning is paused while the form is open.
 
 A scan or a typed code is read by the domain's warehouse rule
 (`resolveWarehouseReprintScan`: a KM by its `kmHash`, an SSCC, and the old
@@ -7400,7 +7403,7 @@ either; a file log is stage 5.
   - a full pallet with the host's PC switched off and no pallet serials
     left: the message, the next boxes on it, its close once the link is
     back;
-  - «Закрыть паллету и смену» with the label check on, and a pallet's
+  - shift closure through «Закрыть паллету» with the label check on, and a pallet's
     reprint and disassembly chosen by a scan of its label;
   - a new shift with pallets on the touch panel, and the office's totals
     of its pallets.

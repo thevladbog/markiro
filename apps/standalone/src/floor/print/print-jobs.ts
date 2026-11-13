@@ -220,17 +220,25 @@ export async function readPrintJob(
  * The reading of `readOpenJob`; parameters: host id, device id, shift id. It
  * runs whenever a label may be due, so its plan is pinned in both lists of
  * plans: the shift's jobs through `floor_print_jobs_shift`, sorted for the
- * few that wait.
+ * few that wait. A pallet tests its members through `floor_boxes_pallet`
+ * and each member's pending label through `floor_print_jobs_open`.
  */
 export const OPEN_JOB_READ_SQL =
-  `SELECT ${COLUMNS} FROM floor_print_jobs WHERE host_id = ? AND device_id = ? ` +
-  `AND shift_id = ? AND ${OPEN_JOB_SQL} ORDER BY created_at, purpose, id LIMIT 1`;
+  `SELECT ${COLUMNS} FROM floor_print_jobs j WHERE host_id = ? AND device_id = ? ` +
+  `AND shift_id = ? AND ${OPEN_JOB_SQL} AND (j.purpose <> 'pallet' OR NOT EXISTS (` +
+  "SELECT 1 FROM floor_boxes b INDEXED BY floor_boxes_pallet " +
+  "JOIN floor_print_jobs box_job INDEXED BY floor_print_jobs_open ON box_job.subject_id = b.id " +
+  "AND box_job.host_id = b.host_id AND box_job.device_id = b.device_id " +
+  "AND box_job.shift_id = b.shift_id AND box_job.purpose = 'box' " +
+  "WHERE b.pallet_id = j.subject_id AND b.host_id = j.host_id AND b.device_id = j.device_id " +
+  `AND b.shift_id = j.shift_id AND b.disassembled_at IS NULL AND ${OPEN_JOB_SQL})) ` +
+  "ORDER BY created_at, purpose, id LIMIT 1";
 
 /**
  * The oldest job of the shift that waits for the printer or the operator, or
- * `null`. A box's job before a pallet's of the same moment (`purpose`): the
- * box that fills a pallet writes both in its close (plan ПЛ-Ц), and the box's
- * label goes first.
+ * `null`. A pallet's label is eligible once the labels of its boxes are settled,
+ * including any required verification. The stored box-to-pallet relation keeps
+ * that order when resuming work from jobs with different timestamps.
  */
 export async function readOpenJob(
   local: LocalExecutor,

@@ -609,7 +609,8 @@ describe("the work screen of a shift", () => {
   });
 
   it("says once that the plan is reached", async () => {
-    const at = await station({ ...ENTERED, plannedQty: 2 });
+    const at = await station({ ...ENTERED, plannedQty: 2, boxCapacity: 2 });
+    seedBlock(at.db, { blockId: BLOCK_ID, from: 1500, to: 3499 });
     const screenWork = work(at);
     await screenWork.scanner.listening();
     await screenWork.scan(km("L1"));
@@ -1544,8 +1545,9 @@ describe("the work screen: the focus after a message is answered", () => {
     expect(document.activeElement).toBe(document.querySelector(".work-screen__last"));
   });
 
-  it("returns the focus to «Закрыть короб» after the notice of the plan", async () => {
-    const at = await station({ ...ENTERED, plannedQty: 2 });
+  it("returns the focus to the last scan after the notice of the plan", async () => {
+    const at = await station({ ...ENTERED, plannedQty: 2, boxCapacity: 2 });
+    seedBlock(at.db, { blockId: BLOCK_ID, from: 1500, to: 3499 });
     const screenWork = work(at);
     await screenWork.scanner.listening();
     await screenWork.scan(km("P1"));
@@ -1553,7 +1555,7 @@ describe("the work screen: the focus after a message is answered", () => {
     const next = screen.getByRole("button", { name: "Продолжить" });
     next.focus();
     fireEvent.click(next);
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Закрыть короб" }));
+    expect(document.activeElement).toBe(document.querySelector(".work-screen__last"));
   });
 
   it("returns the focus to the last-scan line when the box is empty and there is nothing to close", async () => {

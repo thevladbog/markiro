@@ -650,16 +650,17 @@ describe("the typed code", () => {
     const calls = manual("12");
     fireEvent.click(screen.getByRole("button", { name: "3" }));
     expect(calls.onChange).toHaveBeenLastCalledWith("123");
-    fireEvent.click(screen.getByRole("button", { name: "Стереть цифру" }));
+    fireEvent.click(screen.getByRole("button", { name: "Удалить знак слева" }));
     expect(calls.onChange).toHaveBeenLastCalledWith("1");
     fireEvent.click(screen.getByRole("button", { name: "Очистить" }));
     expect(calls.onChange).toHaveBeenLastCalledWith("");
   });
 
-  it("takes a unit's whole code from a hardware keyboard and shuts the keypad for it", () => {
-    manual(KM);
+  it("can edit a marking code entered with a hardware keyboard on the touch keyboard", () => {
+    const calls = manual(KM);
     expect(screen.queryByText(/ \/ 18/)).toBeNull();
-    expect(screen.getByRole("button", { name: "3" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "3" }));
+    expect(calls.onChange).toHaveBeenLastCalledWith(`${KM}3`);
     expect(
       screen.getByRole("button", { name: "Найти и напечатать" }).hasAttribute("disabled"),
     ).toBe(false);

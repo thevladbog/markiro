@@ -538,12 +538,34 @@ describe("the session", () => {
 });
 
 describe("the typed code", () => {
+  it("enters a full marking code with letters and a GS separator on the touch keyboard", async () => {
+    const at = await startedWarehouse({
+      lookup: async () => ({ status: "found", source: UNIT_SOURCE }),
+    });
+    await at.press("Ввести код вручную");
+    const key = (name: string) => fireEvent.click(screen.getByRole("button", { name }));
+    for (const character of "010460068200001321S000001") key(character);
+    key("Символы");
+    key("Разделитель групп GS");
+    key("Eng");
+    for (const character of "93T") key(character);
+    key("Регистр");
+    for (const character of "ail") key(character);
+
+    await at.press("Найти и напечатать");
+
+    expect(at.lookup).toHaveBeenCalledExactlyOnceWith({ codeHash: UNIT_SOURCE.identity });
+    expect(await screen.findByLabelText("Единица · дубликат Data Matrix")).toBeTruthy();
+    expect(at.shell.sends).toHaveLength(1);
+  });
+
   it("stays closed to an empty field, is left by Escape, and sends a typed code on Enter", async () => {
     const at = await startedWarehouse();
     await at.press("Ввести код вручную");
     const field = screen.getByLabelText(
       "Номер короба или паллеты (18 цифр) либо полный код единицы",
     );
+    expect(document.activeElement).toBe(field);
     expect(
       screen.getByRole("button", { name: "Найти и напечатать" }).hasAttribute("disabled"),
     ).toBe(true);

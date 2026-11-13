@@ -9,12 +9,12 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Input } from "@markiro/ui";
+import { Button } from "@markiro/ui";
 
 import { WAREHOUSE_REASONS } from "../../host/protocol.js";
 import { Glyph, type GlyphName } from "../kit/StatusIcons.js";
 import { ModeSegment } from "../kit/ModeSegment.js";
-import { NumericKeypad } from "../kit/NumericKeypad.js";
+import { TextKeyboardInput } from "../kit/TextKeyboardInput.js";
 import type { WarehouseJob, WarehouseReason } from "./warehouse-store.js";
 import {
   JOURNAL_FILTERS,
@@ -663,94 +663,63 @@ export function FooterButton({
   );
 }
 
+export const MANUAL_FORM_ID = "warehouse-manual-form";
 const MANUAL_DIGITS = 18;
 
 /**
- * The typed code: a readout that takes a hardware keyboard too (a unit's code is typed whole), the
- * flat keypad beside it, and the answer. The scanner is quiet while it is open (the screen
- * gives it back on leaving).
+ * A code entered with the screen's keyboard or a physical one. The scanner is quiet while the
+ * form is open.
  */
 export function ManualEntry({
   value,
   onChange,
   onSubmit,
   online,
-  submitProps,
 }: {
   value: string;
   onChange: (next: string) => void;
   onSubmit: () => void;
   online: boolean;
-  submitProps: PressProps;
 }) {
   const { t } = useTranslation();
-  const digits = /^\d*$/.test(value);
-  const need = digits && value.length > 0 && value.length < MANUAL_DIGITS;
-  const empty = value.trim() === "";
+  const showCount = /^\d*$/.test(value) && value.length <= MANUAL_DIGITS;
+  const need = showCount && value.length > 0 && value.length < MANUAL_DIGITS;
   return (
-    <div className="rp-manual">
-      <form
-        className="rp-manual__form"
-        id="warehouse-manual-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!empty) onSubmit();
-        }}
-      >
-        <Input
-          size="floor"
-          mono
-          label={t("floor.warehouse.manualLabel")}
-          value={value}
-          autoFocus
-          spellCheck={false}
-          className="rp-manual__field"
-          suffix={
-            digits ? (
-              <span className="rp-manual__count">
-                {t("floor.warehouse.manualCounter", {
-                  n: Math.min(value.length, MANUAL_DIGITS),
-                  max: MANUAL_DIGITS,
-                })}
-              </span>
-            ) : undefined
-          }
-          onChange={(event) => onChange(event.target.value)}
-        />
-        <p className="rp-manual__need">
-          {need
+    <form
+      className="rp-manual"
+      id={MANUAL_FORM_ID}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (value.trim() !== "") onSubmit();
+      }}
+    >
+      <TextKeyboardInput
+        mono
+        initialLanguage="en"
+        allowSymbols
+        label={t("floor.warehouse.manualLabel")}
+        hint={
+          need
             ? t("floor.warehouse.manualNeed", { n: MANUAL_DIGITS - value.length })
-            : t("floor.warehouse.manualHint")}
-        </p>
+            : t("floor.warehouse.manualHint")
+        }
+        value={value}
+        onChange={onChange}
+        className="rp-manual__field"
+        suffix={
+          showCount ? (
+            <span className="rp-manual__count">
+              {t("floor.warehouse.manualCounter", { n: value.length, max: MANUAL_DIGITS })}
+            </span>
+          ) : undefined
+        }
+      />
+      <div className="rp-manual__status">
         <Tag tone="info" glyph="keyboard" className="rp-manual__muted">
           {t("floor.warehouse.manualMuted")}
         </Tag>
-        <p className="rp-manual__host">{online ? t("floor.warehouse.manualHost") : null}</p>
-      </form>
-      <div className="rp-manual__pad">
-        <NumericKeypad
-          value={digits ? value : ""}
-          onChange={onChange}
-          maxLength={MANUAL_DIGITS}
-          leadingZero
-          disabled={!digits}
-          ariaLabel={t("floor.warehouse.manualKeypad")}
-          clearLabel={t("floor.warehouse.manualClear")}
-          backspaceLabel={t("floor.warehouse.manualBackspace")}
-        />
-        <Button
-          size="floor"
-          variant="primary"
-          type="submit"
-          form="warehouse-manual-form"
-          className="floor-primary"
-          icon={<Glyph name="search" size={26} />}
-          disabled={empty}
-          {...submitProps}
-        >
-          {t("floor.warehouse.manualSubmit")}
-        </Button>
+        {online ? <p>{t("floor.warehouse.manualHost")}</p> : null}
       </div>
-    </div>
+    </form>
   );
 }

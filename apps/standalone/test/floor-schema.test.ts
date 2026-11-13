@@ -1095,7 +1095,14 @@ describe("the shape of the production tables (migration 0006)", () => {
       ],
       [OPEN_PALLET_GUARD_SQL, [SHIFT_KEY, OPEN_PALLET_INDEX, PALLET_BOXES_INDEX]],
       [CLOSE_SUMMARY_SQL, [SHIFT_KEY, OPEN_PALLET_INDEX, PALLET_BOXES_INDEX]],
-      [OPEN_JOB_READ_SQL, ["floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"]],
+      [
+        OPEN_JOB_READ_SQL,
+        [
+          "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
+          "floor_boxes_pallet (pallet_id=?)",
+          "floor_print_jobs_open (host_id=? AND device_id=? AND purpose=? AND subject_id=?)",
+        ],
+      ],
     ] as const) {
       for (const key of keys) expect(plan(sql), sql).toContain(key);
       expect(

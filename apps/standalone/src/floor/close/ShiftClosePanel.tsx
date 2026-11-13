@@ -162,11 +162,8 @@ export interface ShiftClosePanelProps {
   onLabel: () => void;
   /** Boxes per pallet of a shift with pallets (plan ПЛ-Ц); `null` — none. */
   palletCapacity?: number | null;
-  /**
-   * «Закрыть паллету и смену»: the open pallet first, then the shift with this
-   * reason. Without it an open pallet only keeps the shift open.
-   */
-  onClosePallet?: (reason: ShiftCloseReasonCode | null) => void;
+  onCloseBox?: () => void;
+  onClosePallet?: () => void;
   /** Milliseconds from a clock that does not go back; the guard after a change of view reads it. */
   clock?: () => number;
   /** A validation shift (plan РЕЖ): its codes have no box, and the summary names none. */
@@ -187,11 +184,8 @@ export interface ShiftClosePanelProps {
  * a label that waits, named by its SSCC — and sends the operator back to the
  * work, or to the label, where both are resolved. When the plan is given and
  * not met, one of the domain's six reasons is chosen from the buttons before
- * «Подтвердить закрытие». An open pallet with boxes (plan ПЛ-Ц) shows the
- * whole summary and asks «На паллете N из M коробов — закрыть?» under it, and
- * the close becomes «Закрыть паллету и смену», as at the cloud station; the
- * question names the counts, since the press closes the pallet, prints its
- * label and closes the shift, none of which can be taken back. It sits in the
+ * «Подтвердить закрытие». The box and pallet steps precede the final summary
+ * and its confirmation. This panel sits in the
  * work screen's polite region, so its alerts have no role of their own; the
  * work screen's «Выйти из смены» stays outside it, so nobody is held here.
  */
@@ -207,6 +201,7 @@ export function ShiftClosePanel({
   onBack,
   onLabel,
   palletCapacity = null,
+  onCloseBox,
   onClosePallet,
   clock = realClock,
   boxless = false,
@@ -238,23 +233,46 @@ export function ShiftClosePanel({
         </>
       );
     }
-    // An open pallet that «Закрыть паллету и смену» can close is asked about under
-    // the summary; without that button it only keeps the shift open, like any blocker.
-    const openPallet = summary.blocker?.kind === "open_pallet" ? summary.blocker : null;
-    const palletAsked =
-      openPallet !== null && onClosePallet !== undefined && palletCapacity !== null;
-    if (summary.blocker !== null && !palletAsked) {
+    if (summary.blocker !== null) {
       const { blocker } = summary;
+      const palletAsked =
+        blocker.kind === "open_pallet" && onClosePallet !== undefined && palletCapacity !== null;
+      const boxAsked = blocker.kind === "open_box" && onCloseBox !== undefined;
       return (
         <>
-          <Alert tone="warn" role="presentation" title={t("floor.close.blockedTitle")}>
-            <p>{blockerText(blocker, waitingSscc, t)}</p>
+          <Alert
+            tone="warn"
+            role="presentation"
+            title={
+              palletAsked
+                ? t("floor.close.palletOpen", {
+                    quantity: formatQuantity(blocker.boxes),
+                    capacity: formatQuantity(palletCapacity),
+                  })
+                : t("floor.close.blockedTitle")
+            }
+          >
+            <p>
+              {palletAsked
+                ? t("floor.close.palletIrreversible")
+                : blockerText(blocker, waitingSscc, t)}
+            </p>
           </Alert>
           <div className="shift-close__actions">
             {back}
             {(blocker.kind === "label" || blocker.kind === "label_unresolved") && (
               <Button size="floor" {...press(onLabel)}>
                 {t("floor.close.toLabel")}
+              </Button>
+            )}
+            {boxAsked && (
+              <Button size="floor" {...press(onCloseBox)}>
+                {t("floor.work.closeBox")}
+              </Button>
+            )}
+            {palletAsked && (
+              <Button size="floor" {...press(onClosePallet)}>
+                {t("floor.work.closePallet")}
               </Button>
             )}
           </div>
@@ -365,41 +383,15 @@ export function ShiftClosePanel({
           <p className="shift-close__note">
             {t(part === null ? "floor.close.irreversible" : "floor.close.part.irreversible")}
           </p>
-          {palletAsked && (
-            <Alert
-              tone="warn"
-              role="presentation"
-              title={t("floor.close.palletOpen", {
-                quantity: formatQuantity(openPallet.boxes),
-                capacity: formatQuantity(palletCapacity),
-              })}
-            >
-              <p>
-                {t(
-                  part === null
-                    ? "floor.close.palletIrreversible"
-                    : "floor.close.part.palletIrreversible",
-                )}
-              </p>
-            </Alert>
-          )}
         </div>
         <div className="shift-close__actions">
           {back}
           <Button
             size="floor"
             disabled={summary.reasonRequired && chosen === null}
-            {...press(() => (palletAsked ? onClosePallet(chosen) : onClose(chosen)))}
+            {...press(() => onClose(chosen))}
           >
-            {t(
-              palletAsked
-                ? part === null
-                  ? "floor.close.confirmPallet"
-                  : "floor.close.part.confirmPallet"
-                : part === null
-                  ? "floor.close.confirm"
-                  : "floor.close.part.confirm",
-            )}
+            {t(part === null ? "floor.close.confirm" : "floor.close.part.confirm")}
           </Button>
         </div>
       </>
@@ -422,9 +414,11 @@ export function ShiftClosePanel({
           {t(
             summary?.blocker?.kind === "open_pallet"
               ? "floor.close.closingPallet"
-              : own
-                ? "floor.close.part.closing"
-                : "floor.close.closing",
+              : summary?.blocker?.kind === "open_box"
+                ? "floor.close.closingBox"
+                : own
+                  ? "floor.close.part.closing"
+                  : "floor.close.closing",
           )}
         </p>
       )}

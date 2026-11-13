@@ -769,7 +769,6 @@ export function WarehouseScreen({
   if (panel.kind === "manual") {
     return (
       <ManualView
-        viewRef={viewRef}
         value={manual}
         onChange={setManual}
         online={online}

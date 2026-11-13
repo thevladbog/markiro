@@ -210,7 +210,7 @@ describe("the close panel of a part (plan 2b)", () => {
     expect(onClose).toHaveBeenCalledWith("equipment_stop");
   });
 
-  it("closes an open pallet with the part, and says that cannot be taken back", () => {
+  it("offers to close the open pallet before the part", () => {
     const onClosePallet = vi.fn();
     const { onClose, pause } = panel(
       { ...PART, blocker: { kind: "open_pallet", boxes: 4 } },
@@ -218,12 +218,13 @@ describe("the close panel of a part (plan 2b)", () => {
     );
     expect(
       screen.getByText(
-        "Паллета закроется с этими коробами, её этикетка уйдёт на печать, а ваша часть закроется. Отменить нельзя.",
+        "Этикетка паллеты уйдёт на печать. После работы с этикеткой вы вернётесь к закрытию смены.",
       ),
     ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Подтвердить закрытие части" })).toBeNull();
     pause();
-    fireEvent.click(screen.getByRole("button", { name: "Закрыть паллету и мою часть" }));
-    expect(onClosePallet).toHaveBeenCalledWith(null);
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть паллету" }));
+    expect(onClosePallet).toHaveBeenCalledExactlyOnceWith();
     expect(onClose).not.toHaveBeenCalled();
   });
 

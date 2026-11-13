@@ -13,6 +13,7 @@ import {
   JobSubject,
   Journal,
   JournalEmpty,
+  MANUAL_FORM_ID,
   ManualEntry,
   ReasonList,
   ReprintDialog,
@@ -743,7 +744,7 @@ export function JobView({
   );
 }
 
-/** The typed code: its own screen, the reason beside the title, «Отмена» the only way back. */
+/** The typed code: the shared floor keyboard and the session's actions. */
 export function ManualView({
   value,
   onChange,
@@ -752,7 +753,6 @@ export function ManualView({
   submitProps,
   reasonText,
   press,
-  viewRef,
   onCancel,
   onLeave,
   onFinish,
@@ -771,14 +771,12 @@ export function ManualView({
   submitProps: PressProps;
   reasonText: string;
   press: Press;
-  viewRef?: Ref<HTMLElement>;
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
   const heading = useHeading();
   return (
     <ReprintFrame
-      {...(viewRef === undefined ? {} : { viewRef })}
       head={heading(
         false,
         <Tag tone="neutral" glyph="info">
@@ -788,18 +786,12 @@ export function ManualView({
       )}
       body={
         <div
-          className="rp-body"
+          className="rp-body rp-body--manual"
           onKeyDown={(event) => {
             if (event.key === "Escape") onCancel();
           }}
         >
-          <ManualEntry
-            value={value}
-            onChange={onChange}
-            online={online}
-            onSubmit={onSubmit}
-            submitProps={submitProps}
-          />
+          <ManualEntry value={value} onChange={onChange} online={online} onSubmit={onSubmit} />
         </div>
       }
       footer={
@@ -812,6 +804,16 @@ export function ManualView({
         >
           <FooterButton glyph="x" {...press(onCancel)}>
             {t("floor.warehouse.cancel")}
+          </FooterButton>
+          <FooterButton
+            primary
+            glyph="search"
+            type="submit"
+            form={MANUAL_FORM_ID}
+            disabled={value.trim() === ""}
+            {...submitProps}
+          >
+            {t("floor.warehouse.manualSubmit")}
           </FooterButton>
         </SessionFooter>
       }

@@ -1,0 +1,19 @@
+.floor-text-keyboard {
+  display: grid;
+  gap: 4px;
+}
+
+.floor-text-keyboard__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+}
+
+.floor-text-keyboard .mk-btn.floor-text-keyboard__key {
+  width: 64px;
+  min-width: 64px;
+  height: 64px;
+  min-height: 64px;
+  padding-inline: 0 !important;
+}
