@@ -10,17 +10,18 @@ import {
   nextHandheldRelease,
 } from "../version.mjs";
 
-const published = (versionName, versionCode) =>
+const published = (versionName, versionCode, channel = "stable") =>
   JSON.stringify(
     buildHandheldManifest({
       versionName,
       versionCode,
       sha256: "a".repeat(64),
       bytes: 10,
-      url: handheldArtifactUrl({ channel: "stable", versionName }),
+      url: handheldArtifactUrl({ channel, versionName }),
       notes: "предыдущая",
       releasedAt: "2026-09-11T10:00:00.000Z",
       sourceSha: "b".repeat(40),
+      channel,
     }),
   );
 
@@ -55,6 +56,25 @@ test("the recorded last build is the one terminals in the field may run", () => 
   // (15) is newer and may have been installed by hand.
   assert.deepEqual(HANDHELD_LAST_DISTRIBUTED, { versionName: "1.6.1", versionCode: 15 });
   assert.equal(HANDHELD_EMPTY_CHANNEL_CONFIRMATION, "1.6.1 (15)");
+});
+
+test("stable minor skips the reserved 1.10.0 and its signed versionCode", () => {
+  assert.deepEqual(nextHandheldRelease({ publishedText: published("1.9.1", 26), bump: "minor" }), {
+    versionName: "1.11.0",
+    versionCode: 28,
+  });
+  assert.deepEqual(nextHandheldRelease({ publishedText: published("1.11.0", 28), bump: "minor" }), {
+    versionName: "1.12.0",
+    versionCode: 29,
+  });
+  assert.deepEqual(
+    nextHandheldRelease({
+      publishedText: published("1.9.1", 26, "beta"),
+      bump: "minor",
+      channel: "beta",
+    }),
+    { versionName: "1.10.0", versionCode: 27 },
+  );
 });
 
 test("an empty channel continues after the recorded build, never from versionCode 1", () => {
