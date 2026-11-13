@@ -5,7 +5,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
     locale: "ru",
     title: "Офис: линии, станции и планирование смены",
     summary:
-      "Инструкция администратора и технолога Маркиро Автоном: линии цеха и число устройств в смене, станции на линии, требования к товару, планирование смены в режимах «Агрегация» и «Проверка», паллеты, печать дубликата, изменение и удаление смены.",
+      "Инструкция администратора и технолога Маркиро Автоном: линии цеха и число устройств в смене, станции на линии, требования к товару, планирование смены в режимах «Агрегация» и «Проверка», номера партий, паллеты, печать дубликата, изменение и удаление смены.",
     sections: [
       {
         id: "purpose",
@@ -132,7 +132,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
           {
             kind: "step",
             title: "Откройте раздел «Смены»",
-            text: "Вкладка «Местные смены» показывает смены этого хоста; «Облачная история» — смены, перенесённые из облачного Маркиро. Отбор: «Поиск по номеру и товару», «Статус», «Линия», периоды «Дата производства» и «Дата смены». Без периода офис показывает запланированные и активные смены и закрытые за последний 31 день. В строке: номер, товар и название для печати, линия, даты, статус и режим, выпуск и план. Глаз открывает запланированную смену, меню «…» — действия над ней.",
+            text: "Вкладка «Местные смены» показывает смены этого хоста; «Облачная история» — смены, перенесённые из облачного Маркиро. Поле «Поиск по сменам» ищет по номеру смены, номеру партии, товару и названию для печати. Для отбора есть «Статус», «Линия» и периоды «Дата производства» и «Дата смены». Без периода офис показывает запланированные и активные смены и закрытые за последний 31 день. В строке: номер, товар и название для печати, линия, даты, статус и режим, выпуск и план. Глаз открывает запланированную смену, меню «…» — действия над ней.",
             image: { id: "shifts-list", caption: "Раздел «Смены»" },
           },
           {
@@ -155,6 +155,33 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
             kind: "callout",
             tone: "info",
             text: "Две даты не дублируют друг друга. «Дата смены» — «Рабочий день, в который идёт смена. Номер смены считается по дате производства.» «Дата производства» печатается на этикетках и попадает в выгрузки. Если ночная смена выпускает продукцию следующего дня, укажите обе даты.",
+          },
+          {
+            kind: "step",
+            title: "Включите номера партий",
+            text: "Если на площадке указывают партии на этикетках, администратор открывает «Организация» → «Профиль», включает «Использовать номера партий» и нажимает «Сохранить». Технолог видит состояние настройки в профиле и может указать номер при планировании смены.",
+            image: {
+              id: "org-lot-numbers",
+              caption: "Профиль организации с включёнными номерами партий",
+            },
+          },
+          {
+            kind: "step",
+            title: "Укажите партию при планировании",
+            text: "В панели «Новая смена» после дат появится поле «Номер партии (необязательно)». Введите русские или латинские буквы и цифры 0–9, например 00А42. Регистр и ведущие нули сохраняются. Пробелы внутри номера, дефисы и другие знаки вызовут ошибку. Оставьте поле пустым, если партия не нужна.",
+            image: {
+              id: "shift-lot-number",
+              caption: "Номер партии в форме новой смены",
+            },
+          },
+          {
+            kind: "paragraph",
+            text: "При сохранении офис проверяет, что номер целиком помещается в выбранные для смены макеты с полем «Номер партии». В агрегации проверьте этикетку короба, а при работе с паллетами также этикетку паллеты и выбранный или подставленный лист А4. В режиме «Проверка» эта проверка относится к шаблону дубликата, если включена его печать. Если поле отсутствует или номер не помещается, выберите подходящий макет в форме смены или исправьте макет в разделе «Шаблоны».",
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "Сохранённый номер показан в списке и карточке смены как «Партия …». Изменить или убрать его можно до открытия смены через «Изменить». После открытия смена использует сохранённый номер для печати этикеток.",
           },
         ],
       },
@@ -221,7 +248,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
           {
             kind: "step",
             title: "Измените запланированную смену",
-            text: "«Изменить» превращает карточку в форму. Товар не меняется — офис пишет «Товар: … Товар смены не меняется.» Режим, даты, план, линию, контрагента, шаблоны и паллеты менять можно. Нажмите «Сохранить».",
+            text: "«Изменить» превращает карточку в форму. Товар не меняется — офис пишет «Товар: … Товар смены не меняется.» Можно изменить режим, даты, номер партии, план, линию, контрагента, шаблоны и настройки паллет. Нажмите «Сохранить».",
             image: { id: "shift-planned-edit", caption: "Изменение запланированной смены" },
             expected: "Офис сообщил «Изменения сохранены.»",
           },
@@ -299,7 +326,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
     locale: "en",
     title: "Office: lines, stations and shift planning",
     summary:
-      "This is an informational translation. The matching Russian revision is authoritative. Guide for Markiro Autonom office administrators and technologists: shop-floor lines and the number of devices in a shift, stations on a line, product requirements, planning a shift in the Aggregation and Validation modes, pallets, duplicate printing, changing and deleting a shift.",
+      "This is an informational translation. The matching Russian revision is authoritative. Guide for Markiro Autonom office administrators and technologists: shop-floor lines and the number of devices in a shift, stations on a line, product requirements, planning a shift in the Aggregation and Validation modes, lot numbers, pallets, duplicate printing, changing and deleting a shift.",
     sections: [
       {
         id: "purpose",
@@ -433,7 +460,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
           {
             kind: "step",
             title: "Open the «Смены» (Shifts) section",
-            text: "The «Местные смены» (Local shifts) tab shows this host's shifts; «Облачная история» (Cloud history) shows shifts carried over from cloud Markiro. Filters: «Поиск по номеру и товару» (Search by number and product), «Статус» (Status), «Линия» (Line), and the «Дата производства» (Production date) and «Дата смены» (Shift date) periods. Without a period the office shows planned and active shifts plus those closed in the last 31 days. A row shows the number, product and print name, line, dates, status and mode, output and plan. The eye opens a planned shift; the «…» menu holds the actions on it.",
+            text: "The «Местные смены» (Local shifts) tab shows this host's shifts; «Облачная история» (Cloud history) shows shifts carried over from cloud Markiro. Use «Поиск по сменам» (Search shifts) to find a shift by its number, lot number, product or print name. Filter by «Статус» (Status), «Линия» (Line), or by the «Дата производства» (Production date) and «Дата смены» (Shift date) periods. Without a period the office shows planned and active shifts plus those closed in the last 31 days. A row shows the number, product and print name, line, dates, status and mode, output and plan. The eye opens a planned shift; the «…» menu holds the actions on it.",
             image: { id: "shifts-list", caption: "The «Смены» (Shifts) section" },
           },
           {
@@ -459,6 +486,33 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
             kind: "callout",
             tone: "info",
             text: "The two dates do not duplicate each other. The shift date is the working day of the shift, and the shift number is derived from the production date. The production date is printed on labels and goes into the exports. If a night shift produces the next day's goods, set both dates.",
+          },
+          {
+            kind: "step",
+            title: "Enable lot numbers",
+            text: "If your site prints lot numbers on labels, an administrator opens «Организация» (Organization) → «Профиль» (Profile), selects «Использовать номера партий» (Use lot numbers) and clicks «Сохранить» (Save). A technologist can see the setting in the profile and enter the number when planning a shift.",
+            image: {
+              id: "org-lot-numbers",
+              caption: "Organization profile with lot numbers enabled",
+            },
+          },
+          {
+            kind: "step",
+            title: "Enter the lot number while planning",
+            text: "In «Новая смена» (New shift), find «Номер партии (необязательно)» (Lot number, optional) after the dates. Enter Russian or Latin letters and digits 0–9, for example 00А42. Letter case and leading zeros are preserved. Spaces within the number, hyphens and other characters cause a validation error. Leave the field blank if a lot number is unnecessary.",
+            image: {
+              id: "shift-lot-number",
+              caption: "Lot number in the new shift form",
+            },
+          },
+          {
+            kind: "paragraph",
+            text: "On save, the office checks that the whole number fits in the shift's selected layouts and that they have a «Номер партии» (Lot number) field. In Aggregation, check the box label. If the shift uses pallets, also check the pallet label and the selected or default A4 sheet. In Validation, the check applies to the duplicate template when duplicate printing is enabled. If the field is missing or the number does not fit, choose a suitable layout in the shift form or edit the layout in «Шаблоны» (Templates).",
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "The shift list and card show the saved number as «Партия …» (Lot …). Use «Изменить» (Edit) to change or clear it before the shift opens. Once open, the shift uses the saved number for its labels.",
           },
         ],
       },
@@ -525,7 +579,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
           {
             kind: "step",
             title: "Change a planned shift",
-            text: "«Изменить» (Edit) turns the card into a form. The product does not change — the office writes «Товар: … Товар смены не меняется.» (Product: … The shift's product does not change.) Mode, dates, plan, line, counterparty, templates and pallets can be changed. Click «Сохранить» (Save).",
+            text: "«Изменить» (Edit) turns the card into a form. The product does not change — the office writes «Товар: … Товар смены не меняется.» (Product: … The shift's product does not change.) You can change the mode, dates, lot number, plan, line, counterparty, templates and pallet settings. Click «Сохранить» (Save).",
             image: { id: "shift-planned-edit", caption: "Changing a planned shift" },
             expected: "The office reports «Изменения сохранены.» (Changes saved.)",
           },

@@ -37,7 +37,7 @@ async function office(computer, { licensed = false } = {}) {
     await page.reload();
   }
   await page.getByRole("heading", { name: "Вход в офис" }).waitFor();
-  await page.getByLabel("Логин").fill(ADMIN.login);
+  await page.getByRole("textbox", { name: "Логин", exact: true }).fill(ADMIN.login);
   await page.getByRole("textbox", { name: "Пароль" }).fill(ADMIN.password);
   await page.getByRole("button", { name: "Войти" }).click();
   await page.getByRole("heading", { name: "Обзор" }).waitFor();
@@ -196,7 +196,7 @@ export const INSTALL_STATES = {
     async run({ computer, shoot }) {
       const { page } = await computer("host", "host");
       await page.getByRole("heading", { name: "Вход в офис" }).waitFor();
-      await page.getByLabel("Логин").fill(ADMIN.login);
+      await page.getByRole("textbox", { name: "Логин", exact: true }).fill(ADMIN.login);
       await settle(page);
       await shoot(page);
     },
@@ -236,6 +236,12 @@ export const INSTALL_STATES = {
   "ins12/update": officeState("Офис: обновление из файла", async (page) => {
     await section(page, "Информация");
     await scrollToHeading(page, "Обновление");
+  }),
+  "ins12/update-online": officeState("Офис: обновление через интернет", async (page) => {
+    await section(page, "Информация");
+    const hideTrial = page.getByRole("button", { name: "Скрыть до конца сеанса" });
+    if (await hideTrial.isVisible()) await hideTrial.click();
+    await scrollToHeading(page, "Обновление через интернет");
   }),
   "ins13/backups": licensedState("Офис: резервные копии", async (page) => {
     await backupsPage(page);

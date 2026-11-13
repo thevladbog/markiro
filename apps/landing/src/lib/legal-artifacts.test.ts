@@ -44,8 +44,8 @@ describe("loadLegalArtifacts", () => {
   it("loads the complete release set and verifies current bytes and hashes", async () => {
     const artifacts = await loadLegalArtifacts(publicRoot);
 
-    expect(artifacts).toHaveLength(41);
-    expect(artifacts.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(36);
+    expect(artifacts).toHaveLength(45);
+    expect(artifacts.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(40);
     expect(artifacts.filter(({ kind }) => kind === "template-docx")).toHaveLength(5);
     expect(artifacts.every(({ href }) => href.startsWith("/legal/files/"))).toBe(true);
     // The current dash-separated naming scheme (period-sequence); the period

@@ -10,6 +10,8 @@ import { STATION_EXCEPTIONS_CONTENT } from "./documents/station-exceptions.js";
 import { STATION_OPERATOR_SHIFT_CONTENT } from "./documents/station-operator-shift.js";
 import { STATION_WORK_CYCLE_CONTENT } from "./documents/station-work-cycle.js";
 import { STANDALONE_BACKUPS_CONTENT } from "./documents/standalone-backups.js";
+import { STANDALONE_MARKED_SETS_CONTENT } from "./documents/standalone-marked-sets.js";
+import { STANDALONE_WAREHOUSE_CONTENT } from "./documents/standalone-warehouse.js";
 import { STANDALONE_INSTALL_CONTENT } from "./documents/standalone-install.js";
 import { STATION_WORKSTATION_SETUP_CONTENT } from "./documents/station-workstation-setup.js";
 import { TENANT_PROCESSING_CONTENT } from "./documents/tenant-processing.js";
@@ -45,6 +47,8 @@ const LEGAL_DOCUMENT_CODES = [
   "MKR-INS-12",
   "MKR-INS-13",
   "MKR-INS-14",
+  "MKR-INS-15",
+  "MKR-INS-16",
 ] as const;
 const LEGAL_DOCUMENT_STATUSES = ["draft", "active", "superseded", "withdrawn"] as const;
 
@@ -67,6 +71,8 @@ export const LEGAL_DOCUMENT_KIND_BY_CODE = {
   "MKR-INS-12": "instruction",
   "MKR-INS-13": "instruction",
   "MKR-INS-14": "instruction",
+  "MKR-INS-15": "instruction",
+  "MKR-INS-16": "instruction",
 } as const satisfies Record<LegalDocumentCode, LegalDocumentKind>;
 
 export function legalDocumentKind(code: LegalDocumentCode): LegalDocumentKind {
@@ -87,6 +93,8 @@ const INSTRUCTION_EN_PUBLISHED: ReadonlySet<LegalDocumentCode> = new Set([
   "MKR-INS-12",
   "MKR-INS-13",
   "MKR-INS-14",
+  "MKR-INS-15",
+  "MKR-INS-16",
 ]);
 
 const RUSSIAN_ONLY_LEGAL: ReadonlySet<LegalDocumentCode> = new Set([
@@ -188,8 +196,8 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-04",
-    revision: "2026.10/02",
-    effectiveDate: "2026-10-30",
+    revision: "2026.11/01",
+    effectiveDate: "2026-11-13",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
@@ -199,8 +207,8 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-08",
-    revision: "2026.10/01",
-    effectiveDate: "2026-10-29",
+    revision: "2026.11/01",
+    effectiveDate: "2026-11-13",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
@@ -232,8 +240,8 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-12",
-    revision: "2026.10/02",
-    effectiveDate: "2026-10-30",
+    revision: "2026.11/01",
+    effectiveDate: "2026-11-13",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
@@ -254,13 +262,35 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-14",
-    revision: "2026.10/03",
-    effectiveDate: "2026-10-30",
+    revision: "2026.11/01",
+    effectiveDate: "2026-11-13",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
       ru: "/instruktsii/tsd/",
       en: "/en/instructions/handheld-terminal/",
+    },
+  },
+  {
+    code: "MKR-INS-15",
+    revision: "2026.11/01",
+    effectiveDate: "2026-11-13",
+    status: "active",
+    operatorProfileId: "operator-2026-10-30",
+    routes: {
+      ru: "/instruktsii/skladskie-palety-na-stantsii/",
+      en: "/en/instructions/warehouse-pallets-at-station/",
+    },
+  },
+  {
+    code: "MKR-INS-16",
+    revision: "2026.11/01",
+    effectiveDate: "2026-11-13",
+    status: "active",
+    operatorProfileId: "operator-2026-10-30",
+    routes: {
+      ru: "/instruktsii/markirovannye-nabory/",
+      en: "/en/instructions/marked-sets/",
     },
   },
   {
@@ -344,13 +374,15 @@ export const LEGAL_DOCUMENTS: readonly LegalDocumentSource[] = [
   { releaseKey: "MKR-INS-01/2026.10/02", content: STATION_OPERATOR_SHIFT_CONTENT },
   { releaseKey: "MKR-INS-02/2026.10/01", content: STATION_WORK_CYCLE_CONTENT },
   { releaseKey: "MKR-INS-03/2026.10/02", content: STATION_EXCEPTIONS_CONTENT },
-  { releaseKey: "MKR-INS-04/2026.10/02", content: STATION_WORKSTATION_SETUP_CONTENT },
-  { releaseKey: "MKR-INS-08/2026.10/01", content: CABINET_SHIFT_PLANNING_CONTENT },
+  { releaseKey: "MKR-INS-04/2026.11/01", content: STATION_WORKSTATION_SETUP_CONTENT },
+  { releaseKey: "MKR-INS-08/2026.11/01", content: CABINET_SHIFT_PLANNING_CONTENT },
   { releaseKey: "MKR-INS-09/2026.10/01", content: CABINET_SHIFT_CLOSE_CONTENT },
   { releaseKey: "MKR-INS-10/2026.10/01", content: CABINET_CATALOG_PRODUCT_CONTENT },
-  { releaseKey: "MKR-INS-12/2026.10/02", content: STANDALONE_INSTALL_CONTENT },
+  { releaseKey: "MKR-INS-12/2026.11/01", content: STANDALONE_INSTALL_CONTENT },
   { releaseKey: "MKR-INS-13/2026.10/02", content: STANDALONE_BACKUPS_CONTENT },
-  { releaseKey: "MKR-INS-14/2026.10/03", content: HANDHELD_WAREHOUSE_CONTENT },
+  { releaseKey: "MKR-INS-14/2026.11/01", content: HANDHELD_WAREHOUSE_CONTENT },
+  { releaseKey: "MKR-INS-15/2026.11/01", content: STANDALONE_WAREHOUSE_CONTENT },
+  { releaseKey: "MKR-INS-16/2026.11/01", content: STANDALONE_MARKED_SETS_CONTENT },
 ];
 
 function compareLegalRevisions(left: LegalRevision, right: LegalRevision): number {

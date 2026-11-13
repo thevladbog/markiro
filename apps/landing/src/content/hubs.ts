@@ -54,7 +54,7 @@ export const HUB_PAGES: readonly HubPageDefinition[] = [
       "Каждая инструкция опубликована как редакция с кодом, датой вступления в силу и неизменяемым PDF/A. Здесь они собраны по рабочим местам Маркиро Автоном: станция сканирования на линии, офис и ТСД на складе, а также установка и резервные копии для администратора.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: "Маркиро Автоном — печатные инструкции для станции сканирования, офиса и ТСД",
-    reviewedAt: "2026-10-30",
+    reviewedAt: "2026-11-13",
   },
   {
     path: "/en/articles/",
@@ -89,7 +89,7 @@ export const HUB_PAGES: readonly HubPageDefinition[] = [
     socialImage: SHARED_IMAGE,
     socialImageAlt:
       "Markiro Autonom — printable instructions for the scanning station, the office and the handheld",
-    reviewedAt: "2026-10-30",
+    reviewedAt: "2026-11-13",
   },
 ];
 

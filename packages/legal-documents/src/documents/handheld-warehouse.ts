@@ -5,7 +5,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
     locale: "ru",
     title: "ТСД: подключение и работа на складе",
     summary:
-      "Пошаговая инструкция для склада Маркиро Автоном: привязка ТСД к хосту по коду из офиса, вход оператора, принтер этикеток, сборка паллеты из коробов, печать этикетки паллеты и работа без связи с хостом.",
+      "Пошаговая инструкция для склада Маркиро Автоном: привязка ТСД к хосту по коду из офиса, вход оператора, принтер этикеток, сборка паллеты из коробов, печать, расформирование упаковки, перепечать и работа без связи с хостом.",
     sections: [
       {
         id: "purpose",
@@ -13,11 +13,11 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Инструкция описывает складской режим «Паллеты» на ТСД (терминале сбора данных) в Маркиро Автоном. Оператор сканирует SSCC готовых коробов, ТСД закрывает паллету и печатает её этикетку на назначенный принтер. Работа ТСД в производственной смене в эту инструкцию не входит. Работа на станции линии описана в MKR-INS-01–03.",
+            text: "Инструкция описывает складской режим «Палеты» на ТСД (терминале сбора данных) в Маркиро Автоном. Оператор сканирует SSCC готовых коробов, ТСД закрывает паллету и печатает её этикетку на назначенный принтер. Работа ТСД в производственной смене в эту инструкцию не входит. Работа на станции линии описана в MKR-INS-01–03.",
           },
           {
             kind: "paragraph",
-            text: "ТСД работает с хостом — главным компьютером площадки — по локальной сети. Связь с интернетом не нужна. Пока хост недоступен, ТСД продолжает работу и отправляет накопленное, когда связь вернётся.",
+            text: "Инструкция рассчитана на ТСД 1.11.0 и хост Маркиро Автоном 1.7.0. ТСД связывается с хостом по локальной сети. Для складской работы интернет не нужен. Сборка палетов может продолжаться без связи с хостом в пределах ранее загруженного реестра и запаса SSCC.",
           },
           {
             kind: "callout",
@@ -89,7 +89,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
           {
             kind: "step",
             title: "3.7. При необходимости назначьте линию",
-            text: "Если ТСД будет работать в производственной смене, администратор нажимает карандаш в строке ТСД, выбирает «Линия» и сохраняет изменение. ТСД получит линию при связи с хостом; плитка «Смена» покажет запланированные и активные смены этой линии. Для складского режима «Паллеты» линия не нужна. Если поля «Линия» нет, обновите приложение на ПК офиса до версии с назначением линии ТСД.",
+            text: "Если ТСД будет работать в производственной смене, администратор нажимает карандаш в строке ТСД, выбирает «Линия» и сохраняет изменение. ТСД получит линию при связи с хостом; плитка «Смена» покажет запланированные и активные смены этой линии. Для складского режима «Палеты» линия не нужна. Если поля «Линия» нет, обновите приложение на ПК офиса до версии с назначением линии ТСД.",
             image: {
               id: "office-handheld-line",
               caption: "Офис: назначение линии ТСД",
@@ -129,13 +129,13 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
           {
             kind: "step",
             title: "Войдите по бейджу или табельному номеру",
-            text: "На экране входа отсканируйте бейдж или введите «Табельный №» на клавиатуре экрана и PIN. Если номер не помните, нажмите «Найти по имени». Список операторов хранится на ТСД, поэтому вход работает и без связи с хостом; строка вверху показывает, сколько операторов в списке и когда он обновлён, «Обновить список» загружает его заново.",
+            text: "На экране входа отсканируйте бейдж или введите «Табельный №» на клавиатуре экрана и PIN. Если номер не помните, нажмите «Найти по имени». Список операторов хранится на ТСД, поэтому вход работает и без связи с хостом. При наличии связи значок «Обновить список» в верхней панели загружает список заново.",
             image: { id: "sign-in", caption: "ТСД: вход оператора" },
           },
           {
             kind: "step",
             title: "Главный экран",
-            text: "После входа ТСД показывает главный экран. В строке состояния — связь с хостом («Хост на связи»), «Очередь» неотправленных записей, принтер и сканер. Плитки: «Смена», «Паллеты» и «Настройки». Кнопка выхода справа от имени завершает работу оператора.",
+            text: "После входа откроется экран «Работа». В меню есть «Смена», «Палеты», «Расформирование» и «Перепечать». Индикатор вверху открывает сведения о связи и очереди хоста, шестерёнка открывает настройки. Чтобы завершить сеанс, нажмите имя оператора и выберите «Сменить оператора».",
             image: { id: "hub", caption: "ТСД: главный экран без назначенной линии" },
           },
         ],
@@ -147,17 +147,26 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
           {
             kind: "step",
             title: "Добавьте принтер",
-            text: "Откройте «Настройки» → «Принтер» и нажмите «Добавить по адресу». Задайте «Название принтера», выберите «По сети (Wi-Fi)» или «Bluetooth», для сети — «IP-адрес» и «Порт» (обычно 9100). Выберите «Язык принтера»: ZPL — принтеры Zebra, TSPL — принтеры TSC, и «Плотность» — 203 или 300 dpi, как у принтера. Нажмите «Проверить связь»: принтер сохранится на ТСД.",
-            image: { id: "printer-add", caption: "ТСД: новый сетевой принтер" },
+            text: "На экране «Работа» нажмите шестерёнку. В настройках откройте «Принтеры и этикетки» → «Добавить по адресу». Для сетевого принтера выберите «По сети (Wi-Fi)» и укажите название, IP-адрес и порт (обычно 9100). Укажите язык ZPL или TSPL и плотность 203 или 300 dpi по настройкам принтера. Нажмите «Проверить связь» для сохранения.",
+            image: { id: "printer-add", caption: "ТСД: добавление сетевого принтера" },
+          },
+          {
+            kind: "step",
+            title: "Подключите Bluetooth-принтер",
+            text: "Сначала сопрягите принтер с ТСД в системных настройках Android. Затем в форме добавления выберите «Bluetooth». На Android 12 и новее нажмите «Разрешить» и предоставьте доступ к устройствам поблизости. Если системный запрос больше не появляется, нажмите «Открыть настройки приложения» и разрешите доступ там. Выберите принтер из списка и проверьте связь.",
           },
           {
             kind: "step",
             title: "Назначьте принтер",
-            text: "На экране «Принтеры» нажмите «Назначения» и для каждого вида этикетки — «Короб», «Дубль кода», «Паллета» — нажмите «Выбрать принтер». Для склада обязательно назначение «Паллета». Пока у вида нет принтера, плитка «Настройки» на главном экране пишет, что не назначено.",
+            text: "На экране «Принтеры» откройте «Назначения». Для сборки складских палетов нажмите «Выбрать принтер» в строке «Палет». Для перепечати других этикеток назначьте принтеры в строках «Короб» и «Коды маркировки». Один принтер может обслуживать все три вида.",
             image: {
               id: "printer-assignments",
               caption: "ТСД: назначение принтера по видам этикеток",
             },
+          },
+          {
+            kind: "paragraph",
+            text: "В списке принтеров нажмите «Тест» у нужного устройства. Проверьте отпечаток и читаемость штрихкода. Чтобы выбрать другой шаблон, нажмите «Этикетки» у принтера, выберите вид этикетки и проверьте размер в предварительном просмотре перед назначением. Очередь сохраняет прежние шаблоны. Режим «Выдача этикетки» задавайте по оборудованию принтера: для отделения и резки нужны соответствующие модули.",
           },
         ],
       },
@@ -168,7 +177,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
           {
             kind: "step",
             title: "Откройте сборку паллеты",
-            text: "На главном экране нажмите «Паллеты». ТСД ждёт первый короб: «Отсканируйте короб». Первый короб задаёт товар паллеты. Строка «данные на …» показывает, когда ТСД последний раз загрузил с хоста реестр коробов; «Обновить реестр» вверху экрана загружает его заново.",
+            text: "На главном экране нажмите «Палеты». ТСД ждёт первый короб: «Отсканируйте короб». Первый короб задаёт товар паллеты. Строка «данные на …» показывает, когда ТСД последний раз загрузил с хоста реестр коробов; «Обновить реестр» вверху экрана загружает его заново.",
             image: { id: "pallet-empty", caption: "ТСД: новая паллета ждёт первый короб" },
           },
           {
@@ -192,13 +201,13 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
             columns: ["Сообщение", "Что сделать"],
             columnRatios: [2, 3],
             rows: [
-              ["«Уже на этой паллете …»", "Ничего: короб уже в списке."],
+              ["«Уже на этом палете …»", "Ничего: короб уже в списке."],
               [
-                "«Уже на паллете …», «Уже на открытой паллете другого устройства»",
+                "«Уже на палете …», «Уже на открытом палете другого устройства»",
                 "Короб числится на другой паллете. Отложите его и сообщите старшему.",
               ],
               [
-                "«Уже на другой паллете этого ТСД»",
+                "«Уже на другом палете этого ТСД»",
                 "Короб на другой паллете этого ТСД. Отложите его и сообщите старшему.",
               ],
               ["«Другой товар: …»", "На паллету идут коробы одного товара. Отложите короб."],
@@ -211,7 +220,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
                 "Сканируйте этикетку короба, а не код на единице товара.",
               ],
               [
-                "«Это паллета, не короб»",
+                "«Это палет, не короб»",
                 "Отсканирована этикетка паллеты. Сканируйте этикетку короба.",
               ],
             ],
@@ -219,13 +228,13 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
           {
             kind: "step",
             title: "Закройте паллету",
-            text: "Когда число коробов дойдёт до ёмкости паллеты, ТСД закроет её сам. Чтобы закрыть раньше, нажмите «Закрыть паллету досрочно» и подтвердите «Закрыть паллету».",
+            text: "Когда число коробов дойдёт до ёмкости паллеты, ТСД закроет её сам. Чтобы закрыть раньше, нажмите «Закрыть палет досрочно» и подтвердите «Закрыть палет».",
             image: { id: "pallet-close-confirm", caption: "ТСД: досрочное закрытие паллеты" },
           },
           {
             kind: "step",
             title: "Наклейте этикетку паллеты",
-            text: "После закрытия ТСД печатает этикетку паллеты на принтер, назначенный для «Паллета»: экран «Паллета закрыта» показывает SSCC паллеты, число коробов и «Напечатано». Наклейте этикетку на паллету. Затем ТСД снова ждёт первый короб следующей паллеты.",
+            text: "После закрытия ТСД печатает этикетку паллеты на принтер, назначенный для «Палет»: экран «Палет закрыт» показывает SSCC паллеты, число коробов и «Напечатано». Проверьте, что этикетка вышла, сверьте SSCC с экраном и наклейте её на палет. Затем ТСД снова ждёт первый короб.",
             image: { id: "pallet-printed", caption: "ТСД: паллета закрыта, этикетка напечатана" },
           },
           {
@@ -236,71 +245,77 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
           },
           {
             kind: "paragraph",
-            text: "Над результатом закрытия показано имя принтера, записанного для этой паллеты. В прежних версиях здесь могло стоять «Не назначен» даже при настроенной печати; имя также может отсутствовать в старых данных паллеты. Проверьте назначение «Паллета» в настройках и фактическую этикетку на принтере.",
+            text: "Над результатом закрытия показано имя принтера, записанного для этой паллеты. В прежних версиях здесь могло стоять «Не назначен» даже при настроенной печати; имя также может отсутствовать в старых данных паллеты. Проверьте назначение «Палет» в настройках и фактическую этикетку на принтере.",
           },
           {
             kind: "callout",
             tone: "warning",
-            text: "Если хост не принял короб, на экране «Паллеты» появится «Снимите с паллеты N короба» со списком коробов и причиной. Снимите эти коробы с паллеты и нажмите «Принято»; если паллета уже закрыта и маркирована, нажмите «Перепечатать этикетку» и замените этикетку.",
+            text: "Если хост не принял короб, на экране «Палеты» появится «Снимите с паллеты N короба» со списком коробов и причиной. Снимите эти коробы с паллеты и нажмите «Принято»; если паллета уже закрыта и маркирована, нажмите «Перепечатать этикетку» и замените этикетку.",
           },
         ],
       },
       {
         id: "warehouse-disassembly",
-        heading: "7. Расформирование складской паллеты",
+        heading: "7. Расформирование упаковки",
         blocks: [
+          {
+            kind: "paragraph",
+            text: "На главном экране откройте «Расформирование». Этот режим требует связи с хостом. Подходит закрытый короб или палет площадки, в том числе собранный на другом устройстве. Для упаковки из производственной смены сначала завершите смену.",
+          },
+          {
+            kind: "step",
+            title: "Отсканируйте SSCC",
+            text: "На экране «Сканируйте SSCC упаковки» отсканируйте ярлык. Проверьте товар, SSCC и количество коробов или кодов. Выберите причину из списка хоста. Если список пуст, обратитесь в офис.",
+            image: { id: "pack-disassembly-scan", caption: "ТСД: сканирование SSCC упаковки" },
+          },
+          {
+            kind: "step",
+            title: "Подтвердите и дождитесь документа",
+            text: "Нажмите «Расформировать». После сообщения «Упаковка расформирована» снимите старый ярлык. У расформированного короба освободятся коды, у палета — короба с собственными SSCC. Номер документа появится на ТСД, акт и XML доступны в офисе. На других ТСД обновите реестр перед сборкой палета из освобождённых коробов.",
+          },
           {
             kind: "callout",
             tone: "warning",
-            text: "Выполняйте этот порядок только после согласованного обновления ТСД и хоста: передача расформирования требует, чтобы хост поддерживал протокол 8 или выше. Совместимость проверьте с администратором. До обновления локальное расформирование может не передаваться хосту и не освобождать короба в его учёте.",
+            text: "Если ТСД показывает «Результат пока неизвестен», восстановите связь и нажмите «Проверить результат». ТСД проверит сохранённый запрос. Перед новой операцией убедитесь, что получили результат, или сверьте состояние упаковки в офисе.",
           },
-          {
-            kind: "paragraph",
-            text: "Порядок относится только к своей закрытой складской паллете, собранной на этом ТСД. Перед операцией убедитесь с администратором, что её закрытие уже подтверждено хостом. Расформирование паллет производственной смены, исключения коробов и исключения перепечатки паллет этим порядком не охватываются: ТСД пока не передаёт их хосту.",
-          },
-          {
-            kind: "step",
-            title: "Отсканируйте паллету",
-            text: "Откройте «Паллеты» и нажмите значок слоёв «Расформировать паллету» в верхней панели. Отсканируйте этикетку своей закрытой складской паллеты. Даже если экран предлагает паллету производственной смены, не используйте для неё этот порядок.",
-            image: {
-              id: "pallet-disassemble-scan",
-              caption: "ТСД: сканирование паллеты для расформирования",
-            },
-          },
+        ],
+      },
+      {
+        id: "site-reprint",
+        heading: "8. Перепечать этикетки",
+        blocks: [
           {
             kind: "step",
             title: "Выберите причину",
-            text: "На экране «Почему расформировываем?» выберите подходящую причину из списка. Над ним показаны последние цифры SSCC паллеты и число коробов.",
-            image: {
-              id: "pallet-disassemble-reason",
-              caption: "ТСД: причина расформирования складской паллеты",
-            },
+            text: "На главном экране откройте «Перепечать». Выберите причину для текущего сеанса и нажмите «Далее к сканированию». Принтеры и шаблоны можно проверить по шестерёнке на экране выбора причины.",
+            image: { id: "site-reprint-reason", caption: "ТСД: выбор причины перепечати" },
           },
           {
             kind: "step",
-            title: "Подтвердите и проверьте приём хостом",
-            text: "Сверьте последние цифры SSCC и число коробов и подтвердите расформирование. После сообщения «Паллета расформирована» снимите старую этикетку. Это сообщение подтверждает локальную операцию: хост освобождает короба после приёма записи. Дождитесь связи с хостом и проверьте приём с администратором; пустая очередь сразу после операции ещё не доказывает приём. При отклонении в «Очереди хоста» передайте запись администратору. На других ТСД затем нажмите «Обновить реестр», прежде чем собирать новую паллету из этих коробов.",
-            image: {
-              id: "pallet-disassemble-confirm",
-              caption: "ТСД: подтверждение SSCC и числа коробов",
-            },
+            title: "Найдите этикетку по коду",
+            text: "При связи с хостом отсканируйте полный код маркировки или SSCC короба либо палета. Для ручного ввода нажмите «Ввести код вручную», введите полный код и нажмите «Найти и напечатать». По совпавшему коду печать начнётся сразу. Расформированную упаковку и освобождённый код перепечатать нельзя.",
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "Если результат печати неизвестен и этикетка вышла, нажмите «Проверить этикетку» и отсканируйте отпечаток. Проверка не печатает ещё одну этикетку. Если отпечатка нет, выберите «Напечатать ещё раз» и прочитайте предупреждение о возможном дубликате.",
           },
         ],
       },
       {
         id: "offline",
-        heading: "8. Работа без связи с хостом",
+        heading: "9. Работа без связи с хостом",
         blocks: [
           {
             kind: "step",
             title: "Продолжайте работу",
-            text: "Без связи ТСД показывает «Нет связи с хостом — работа продолжается». Доступны только короба из ранее загруженного реестра; для закрытия паллет нужны оставшиеся номера SSCC. Если номера закончились, подключитесь к хосту: паллета остаётся открытой. В этих пределах сборка паллеты и печать этикеток продолжаются: записи копятся на ТСД, строка «Очередь хоста» показывает, сколько ждут отправки. На плитке «Паллеты» видно, сколько коробов не отправлено.",
+            text: "Без связи ТСД показывает «Нет связи с хостом — работа продолжается». Доступны только короба из ранее загруженного реестра; для закрытия паллет нужны оставшиеся номера SSCC. Если номера закончились, подключитесь к хосту: паллета остаётся открытой. В этих пределах сборка паллеты и печать этикеток продолжаются: записи копятся на ТСД, строка «Очередь хоста» показывает, сколько ждут отправки. В строке «Палеты» видно, сколько коробов не отправлено.",
             image: { id: "hub-offline", caption: "ТСД без связи с хостом" },
           },
           {
             kind: "step",
             title: "Проверьте очередь",
-            text: "Нажмите строку «Очередь хоста»: экран «Очередь хоста» перечисляет записи, которые «Ждут отправки», и записи, «Отклонено хостом». Когда связь вернётся, ТСД отправит очередь сам; «Отправить сейчас» отправляет её без ожидания. Если хост отклонил запись, нажмите «Передать в поддержку» и сообщите администратору.",
+            text: "Нажмите индикатор в верхней панели и выберите «Открыть очередь хоста». Экран очереди перечисляет записи, которые «Ждут отправки», и записи, «Отклонено хостом». Когда связь вернётся, ТСД отправит очередь сам; «Отправить сейчас» отправляет её без ожидания. Если хост отклонил запись, нажмите «Передать в поддержку» и сообщите администратору.",
             image: { id: "host-queue", caption: "ТСД: очередь записей для хоста" },
           },
           {
@@ -312,7 +327,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
       },
       {
         id: "faq",
-        heading: "9. Частые вопросы",
+        heading: "10. Частые вопросы",
         blocks: [
           {
             kind: "table",
@@ -321,12 +336,12 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
             columnRatios: [2, 3],
             rows: [
               [
-                "В плитке «Смена» написано «смен нет»",
-                "Проверьте, назначена ли ТСД линия и есть ли на ней запланированные или активные смены. Администратор выбирает «Линия» в окне ТСД в разделе «Устройства» и сохраняет изменение; ТСД получит её при связи с хостом (шаг 3.7). Если поля нет, сначала обновите приложение на ПК офиса. Складской режим «Паллеты» работает и без назначенной линии.",
+                "В строке «Смена» написано «смен нет»",
+                "Проверьте, назначена ли ТСД линия и есть ли на ней запланированные или активные смены. Администратор выбирает «Линия» в окне ТСД в разделе «Устройства» и сохраняет изменение; ТСД получит её при связи с хостом (шаг 3.7). Если поля нет, сначала обновите приложение на ПК офиса. Складской режим «Палеты» работает и без назначенной линии.",
               ],
               [
-                "«Справочник ещё не загружен» в «Паллеты»",
-                "ТСД ещё не получил с хоста товары и шаблоны. Вернитесь на главный экран и откройте «Паллеты» снова, когда ТСД на связи с хостом.",
+                "«Справочник ещё не загружен» в «Палеты»",
+                "ТСД ещё не получил с хоста товары и шаблоны. Вернитесь на главный экран и откройте «Палеты» снова, когда ТСД на связи с хостом.",
               ],
               [
                 "«Сертификат хоста изменился — нажмите, чтобы привязать ТСД заново»",
@@ -339,6 +354,10 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
               [
                 "«Хост восстанавливается из копии — работа продолжается»",
                 "Администратор восстанавливает хост из резервной копии. Продолжайте работу: очередь уйдёт на хост после восстановления.",
+              ],
+              [
+                "Нужно проверить версию или обновление ТСД",
+                "В настройках откройте «Об устройстве». Для проверки и загрузки обновления нужен интернет. Перед установкой дождитесь отправки очереди и подтвердите установку в Android.",
               ],
             ],
           },
@@ -354,7 +373,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
     locale: "en",
     title: "Handheld: pairing and warehouse work",
     summary:
-      "This is an informational translation. The matching Russian revision is authoritative. Step-by-step warehouse instruction for Markiro Autonom: pairing a handheld terminal with the host by a code from the office, operator sign-in, the label printer, building a pallet from boxes, printing the pallet label, and working without a link to the host.",
+      "This is an informational translation. The matching Russian revision is authoritative. Step-by-step warehouse instruction for Markiro Autonom: pairing a handheld terminal with the host by a code from the office, operator sign-in, the label printer, building a pallet from boxes, printing labels, disassembling packs, reprinting labels and working without a link to the host.",
     sections: [
       {
         id: "purpose",
@@ -362,11 +381,11 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "This instruction covers the warehouse «Паллеты» (Pallets) mode on the handheld terminal (ТСД) in Markiro Autonom. The operator scans finished boxes' SSCC labels; the handheld closes the pallet and prints its label on the assigned printer. Production-shift work on the handheld is outside this instruction's scope. Line-station work is covered in MKR-INS-01–03.",
+            text: "This instruction covers the warehouse «Палеты» (Pallets) mode on the handheld terminal (ТСД) in Markiro Autonom. The operator scans finished boxes' SSCC labels; the handheld closes the pallet and prints its label on the assigned printer. Production-shift work on the handheld is outside this instruction's scope. Line-station work is covered in MKR-INS-01–03.",
           },
           {
             kind: "paragraph",
-            text: "The handheld works with the host, the site's main computer, over the local network. No internet connection is needed. While the host is unavailable, the handheld keeps working and sends what it has collected once the link returns.",
+            text: "This guide covers Handheld 1.11.0 with Markiro Autonom host 1.7.0. The handheld connects to the host over the local network. Warehouse work does not require internet access. When the host is offline, pallet building can continue with the downloaded registry and remaining SSCCs.",
           },
           {
             kind: "callout",
@@ -444,7 +463,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
           {
             kind: "step",
             title: "3.7. Assign a line if needed",
-            text: "If the handheld will work in a production shift, the administrator presses the pencil in its device row, chooses «Линия» (Line), and saves the change. The handheld receives the line when connected to the host; the «Смена» (Shift) tile lists that line's planned and active shifts. The warehouse «Паллеты» (Pallets) mode needs no line. If the «Линия» field is absent, update the office PC application to a version that supports handheld line assignment.",
+            text: "If the handheld will work in a production shift, the administrator presses the pencil in its device row, chooses «Линия» (Line), and saves the change. The handheld receives the line when connected to the host; the «Смена» (Shift) tile lists that line's planned and active shifts. The warehouse «Палеты» (Pallets) mode needs no line. If the «Линия» field is absent, update the office PC application to a version that supports handheld line assignment.",
             image: {
               id: "office-handheld-line",
               caption: "Office: assigning the handheld's line",
@@ -487,13 +506,13 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
           {
             kind: "step",
             title: "Sign in with a badge or personnel number",
-            text: "On the sign-in screen scan your badge, or type «Табельный №» (Personnel No.) on the on-screen keypad and then your PIN. If you do not remember the number, press «Найти по имени» (Find by name). The operator list is stored on the handheld, so sign-in also works without a link to the host; the line at the top shows how many operators are in the list and when it was updated, and «Обновить список» (Refresh list) loads it again.",
+            text: "On the sign-in screen scan your badge, or type «Табельный №» (Personnel No.) on the on-screen keypad and then your PIN. If you do not remember the number, press «Найти по имени» (Find by name). The handheld stores the operator list for offline sign-in. When connected, tap «Обновить список» (Refresh list) in the header to reload it.",
             image: { id: "sign-in", caption: "Handheld: operator sign-in" },
           },
           {
             kind: "step",
             title: "The main screen",
-            text: "After sign-in the handheld shows its main screen. The status line shows the link to the host («Хост на связи», Host online), the «Очередь» (Queue) of unsent records, the printer and the scanner. The tiles are «Смена» (Shift), «Паллеты» (Pallets) and «Настройки» (Settings). The exit button to the right of the name ends the operator's session.",
+            text: "After sign-in, «Работа» (Work) opens. The menu includes «Смена» (Shift), «Палеты» (Pallets), «Расформирование» (Disassembly) and «Перепечать» (Reprint). The status indicator opens host connection and queue details, and the gear opens settings. To end the session, tap the operator name and choose «Сменить оператора» (Switch operator).",
             image: { id: "hub", caption: "Handheld: the main screen without an assigned line" },
           },
         ],
@@ -505,17 +524,26 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
           {
             kind: "step",
             title: "Add the printer",
-            text: "Open «Настройки» (Settings) → «Принтер» (Printer) and press «Добавить по адресу» (Add by address). Set «Название принтера» (Printer name), choose «По сети (Wi-Fi)» (Network (Wi-Fi)) or «Bluetooth», and for a network printer «IP-адрес» (IP address) and «Порт» (Port), usually 9100. Choose «Язык принтера» (Printer language): ZPL for Zebra printers, TSPL for TSC printers, and «Плотность» (Density), 203 or 300 dpi, as on the printer. Press «Проверить связь» (Check connection): the printer is saved on the handheld.",
-            image: { id: "printer-add", caption: "Handheld: a new network printer" },
+            text: "On «Работа» (Work), tap the gear. In Settings open «Принтеры и этикетки» (Printers and labels) → «Добавить по адресу» (Add by address). For a network printer choose «По сети (Wi-Fi)» (Network) and enter its name, IP address and port (usually 9100). Set its configured language (ZPL or TSPL) and density (203 or 300 dpi). Tap «Проверить связь» (Check connection) to save it.",
+            image: { id: "printer-add", caption: "Handheld: adding a network printer" },
+          },
+          {
+            kind: "step",
+            title: "Connect a Bluetooth printer",
+            text: "Pair the printer with the handheld in Android settings first. Then select «Bluetooth» in the add-printer form. On Android 12 or later, tap «Разрешить» (Allow) and grant Nearby devices access. If the system prompt no longer appears, tap «Открыть настройки приложения» (Open app settings) and grant access there. Choose the printer from the list and check the connection.",
           },
           {
             kind: "step",
             title: "Assign the printer",
-            text: "On «Принтеры» (Printers) press «Назначения» (Assignments), and for each label kind, «Короб» (Box), «Дубль кода» (Code duplicate) and «Паллета» (Pallet), press «Выбрать принтер» (Choose printer). The warehouse needs the «Паллета» (Pallet) assignment. While a kind has no printer, the «Настройки» (Settings) tile on the main screen says what is not assigned.",
+            text: "On «Принтеры» (Printers), open «Назначения» (Assignments). For warehouse pallet building, tap «Выбрать принтер» (Choose printer) in the «Палет» (Pallet) row. To reprint other label types, assign printers in the «Короб» (Box) and «Коды маркировки» (Marking codes) rows. One printer can serve all three.",
             image: {
               id: "printer-assignments",
               caption: "Handheld: printer assignment by label kind",
             },
+          },
+          {
+            kind: "paragraph",
+            text: "In the printer list, tap «Тест» (Test) for the required printer. Inspect the printout and check that the barcode scans. To choose a different template, tap «Этикетки» (Labels) for the printer, choose the label type and check the preview size before assigning it. Queued jobs keep their existing templates. Set «Выдача этикетки» (Label output) to match the printer hardware. Peel-off and cutting require the corresponding modules.",
           },
         ],
       },
@@ -526,7 +554,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
           {
             kind: "step",
             title: "Open pallet building",
-            text: "On the main screen press «Паллеты» (Pallets). The handheld waits for the first box: «Отсканируйте короб» (Scan a box). The first box sets the pallet's product. The line «данные на …» (data as of …) shows when the handheld last loaded the box registry from the host; «Обновить реестр» (Refresh registry) at the top of the screen loads it again.",
+            text: "On the main screen press «Палеты» (Pallets). The handheld waits for the first box: «Отсканируйте короб» (Scan a box). The first box sets the pallet's product. The line «данные на …» (data as of …) shows when the handheld last loaded the box registry from the host; «Обновить реестр» (Refresh registry) at the top of the screen loads it again.",
             image: {
               id: "pallet-empty",
               caption: "Handheld: a new pallet waits for the first box",
@@ -554,15 +582,15 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
             columnRatios: [2, 3],
             rows: [
               [
-                "«Уже на этой паллете …» (Already on this pallet …)",
+                "«Уже на этом палете …» (Already on this pallet …)",
                 "Nothing: the box is already in the list.",
               ],
               [
-                "«Уже на паллете …» (Already on pallet …), «Уже на открытой паллете другого устройства» (Already on another device's open pallet)",
+                "«Уже на палете …» (Already on pallet …), «Уже на открытом палете другого устройства» (Already on another device's open pallet)",
                 "The box is recorded on another pallet. Set it aside and tell your supervisor.",
               ],
               [
-                "«Уже на другой паллете этого ТСД» (Already on another pallet of this handheld)",
+                "«Уже на другом палете этого ТСД» (Already on another pallet of this handheld)",
                 "The box is on another pallet of this handheld. Set it aside and tell your supervisor.",
               ],
               [
@@ -578,7 +606,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
                 "Scan the box label, not the code on a unit.",
               ],
               [
-                "«Это паллета, не короб» (This is a pallet, not a box)",
+                "«Это палет, не короб» (This is a pallet, not a box)",
                 "A pallet label was scanned. Scan the box label.",
               ],
             ],
@@ -586,13 +614,13 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
           {
             kind: "step",
             title: "Close the pallet",
-            text: "When the number of boxes reaches the pallet capacity, the handheld closes the pallet itself. To close earlier, press «Закрыть паллету досрочно» (Close pallet early) and confirm with «Закрыть паллету» (Close pallet).",
+            text: "When the number of boxes reaches the pallet capacity, the handheld closes the pallet itself. To close earlier, press «Закрыть палет досрочно» (Close pallet early) and confirm with «Закрыть палет» (Close pallet).",
             image: { id: "pallet-close-confirm", caption: "Handheld: closing a pallet early" },
           },
           {
             kind: "step",
             title: "Apply the pallet label",
-            text: "After closing, the handheld prints the pallet label on the printer assigned to «Паллета» (Pallet): the «Паллета закрыта» (Pallet closed) screen shows the pallet SSCC, the number of boxes and «Напечатано» (Printed). Apply the label to the pallet. The handheld then waits for the first box of the next pallet.",
+            text: "After closing, the handheld prints the pallet label on the printer assigned to «Палет» (Pallet): the «Палет закрыт» (Pallet closed) screen shows the pallet SSCC, the number of boxes and «Напечатано» (Printed). Check that a physical label came out, compare its SSCC with the screen and apply it to the pallet. The handheld then waits for the next pallet’s first box.",
             image: {
               id: "pallet-printed",
               caption: "Handheld: the pallet is closed and its label printed",
@@ -606,71 +634,77 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
           },
           {
             kind: "paragraph",
-            text: "Above the closure result, the screen names the printer recorded for this pallet. Earlier versions could show «Не назначен» (Unassigned) even when printing was configured; older pallet data may also lack the name. Check the «Паллета» (Pallet) assignment in settings and the actual label at the printer.",
+            text: "Above the closure result, the screen names the printer recorded for this pallet. Earlier versions could show «Не назначен» (Unassigned) even when printing was configured; older pallet data may also lack the name. Check the «Палет» (Pallet) assignment in settings and the actual label at the printer.",
           },
           {
             kind: "callout",
             tone: "warning",
-            text: "If the host did not accept a box, the «Паллеты» (Pallets) screen shows «Снимите с паллеты N короба» (Remove N boxes from the pallet) with the boxes and the reason. Remove those boxes from the pallet and press «Принято» (Understood); if the pallet is already closed and labelled, press «Перепечатать этикетку» (Reprint label) and replace the label.",
+            text: "If the host did not accept a box, the «Палеты» (Pallets) screen shows «Снимите с паллеты N короба» (Remove N boxes from the pallet) with the boxes and the reason. Remove those boxes from the pallet and press «Принято» (Understood); if the pallet is already closed and labelled, press «Перепечатать этикетку» (Reprint label) and replace the label.",
           },
         ],
       },
       {
         id: "warehouse-disassembly",
-        heading: "7. Disassembling a warehouse pallet",
+        heading: "7. Disassembling a pack",
         blocks: [
+          {
+            kind: "paragraph",
+            text: "Open «Расформирование» (Disassembly) on the main screen. This mode requires a host connection. It accepts a closed box or pallet from the site, including one built on another device. If the pack is from a production shift, close that shift first.",
+          },
+          {
+            kind: "step",
+            title: "Scan the SSCC",
+            text: "On «Сканируйте SSCC упаковки» (Scan pack SSCC), scan the label. Check the product, SSCC and box or code count. Choose a reason from the host's list. Contact the office if the list is empty.",
+            image: { id: "pack-disassembly-scan", caption: "Handheld: scanning a pack SSCC" },
+          },
+          {
+            kind: "step",
+            title: "Confirm and wait for the document",
+            text: "Tap «Расформировать» (Disassemble). When «Упаковка расформирована» (Pack disassembled) appears, remove the old label. Disassembling a box releases its codes. Disassembling a pallet releases its boxes with their own SSCCs. The document number appears on the handheld. The report and XML are available in the office. Refresh the registry on other handhelds before building pallets from the released boxes.",
+          },
           {
             kind: "callout",
             tone: "warning",
-            text: "Follow this procedure only after a coordinated handheld and host update: transmitting disassembly requires host protocol 8 or later. Confirm compatibility with the administrator. Before the update, local disassembly may not reach the host or release the boxes in its records.",
+            text: "If the handheld shows «Результат пока неизвестен» (Result still unknown), restore the connection and tap «Проверить результат» (Check result). The handheld checks the saved request. Confirm the result or check the pack's status in the office before starting another operation.",
           },
-          {
-            kind: "paragraph",
-            text: "This procedure applies only to your own closed warehouse pallet, built on this handheld. Before the operation, confirm with the administrator that its closure has been acknowledged by the host. Production-shift pallets, box exceptions and pallet reprint exceptions are outside this procedure: the handheld does not yet transmit them to the host.",
-          },
-          {
-            kind: "step",
-            title: "Scan the pallet",
-            text: "Open «Паллеты» (Pallets) and press the layers icon, «Расформировать паллету» (Disassemble pallet), in the top bar. Scan your own closed warehouse pallet's label. Even if the screen offers a production-shift pallet, do not use this procedure for it.",
-            image: {
-              id: "pallet-disassemble-scan",
-              caption: "Handheld: scanning the pallet for disassembly",
-            },
-          },
+        ],
+      },
+      {
+        id: "site-reprint",
+        heading: "8. Reprinting a label",
+        blocks: [
           {
             kind: "step",
             title: "Choose a reason",
-            text: "On «Почему расформировываем?» (Why disassemble?), choose the appropriate reason from the list. The pallet's final SSCC digits and box count appear above it.",
-            image: {
-              id: "pallet-disassemble-reason",
-              caption: "Handheld: warehouse pallet disassembly reason",
-            },
+            text: "Open «Перепечать» (Reprint) on the main screen. Choose a reason for this session and tap «Далее к сканированию» (Continue to scanning). The gear on the reason screen opens printer and template settings.",
+            image: { id: "site-reprint-reason", caption: "Handheld: choosing a reprint reason" },
           },
           {
             kind: "step",
-            title: "Confirm and check receipt by the host",
-            text: "Check the SSCC's final digits and box count, then confirm disassembly. After «Паллета расформирована» (Pallet disassembled), remove the old label. This message confirms the local operation: the host releases the boxes after accepting the record. Wait for a host connection and check receipt with the administrator; an empty queue immediately after the operation does not yet prove receipt. If the record is rejected in «Очередь хоста» (Host queue), pass it to the administrator. On other handhelds, then press «Обновить реестр» (Refresh registry) before building a new pallet from these boxes.",
-            image: {
-              id: "pallet-disassemble-confirm",
-              caption: "Handheld: confirming the SSCC and box count",
-            },
+            title: "Find the label by its code",
+            text: "While connected to the host, scan a complete marking code or a box or pallet SSCC. To type the code, tap «Ввести код вручную» (Enter code manually), enter the complete code and tap «Найти и напечатать» (Find and print). Printing starts as soon as the code matches. Disassembled packs and released codes cannot be reprinted.",
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "If the print result is unknown and a label came out, tap «Проверить этикетку» (Verify label) and scan the printout. Verification does not print another label. If there is no printout, choose «Напечатать ещё раз» (Print again) and read the warning about a possible duplicate.",
           },
         ],
       },
       {
         id: "offline",
-        heading: "8. Working without a link to the host",
+        heading: "9. Working without a link to the host",
         blocks: [
           {
             kind: "step",
             title: "Keep working",
-            text: "Without a link the handheld shows «Нет связи с хостом — работа продолжается» (No link to the host — work continues). Only boxes from the previously downloaded registry are available; closing pallets requires remaining SSCC numbers. If the numbers run out, reconnect to the host: the pallet remains open. Within these limits, pallet building and label printing go on: records collect on the handheld, and the «Очередь хоста» (Host queue) line shows how many are waiting. The «Паллеты» (Pallets) tile shows how many boxes are unsent.",
+            text: "Without a link the handheld shows «Нет связи с хостом — работа продолжается» (No link to the host — work continues). Only boxes from the previously downloaded registry are available; closing pallets requires remaining SSCC numbers. If the numbers run out, reconnect to the host: the pallet remains open. Within these limits, pallet building and label printing go on: records collect on the handheld, and the «Очередь хоста» (Host queue) line shows how many are waiting. The «Палеты» (Pallets) row shows how many boxes are unsent.",
             image: { id: "hub-offline", caption: "The handheld without a link to the host" },
           },
           {
             kind: "step",
             title: "Check the queue",
-            text: "Press the «Очередь хоста» (Host queue) line: the «Очередь хоста» (Host queue) screen lists the records that «Ждут отправки» (Wait to be sent) and those «Отклонено хостом» (Rejected by the host). When the link returns, the handheld sends the queue itself; «Отправить сейчас» (Send now) sends it without waiting. If the host rejected a record, press «Передать в поддержку» (Pass to support) and tell the administrator.",
+            text: "Tap the status indicator and choose «Открыть очередь хоста» (Open host queue). This screen lists the records that «Ждут отправки» (Wait to be sent) and those «Отклонено хостом» (Rejected by the host). When the link returns, the handheld sends the queue itself; «Отправить сейчас» (Send now) sends it without waiting. If the host rejected a record, press «Передать в поддержку» (Pass to support) and tell the administrator.",
             image: { id: "host-queue", caption: "Handheld: the queue of records for the host" },
           },
           {
@@ -682,7 +716,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
       },
       {
         id: "faq",
-        heading: "9. Common questions",
+        heading: "10. Common questions",
         blocks: [
           {
             kind: "table",
@@ -691,12 +725,12 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
             columnRatios: [2, 3],
             rows: [
               [
-                "The «Смена» (Shift) tile says «смен нет» (no shifts)",
-                "Check that the handheld has a line assigned and that the line has planned or active shifts. The administrator chooses «Линия» (Line) in the handheld's window under «Устройства» (Devices) and saves; the handheld receives it when connected to the host (step 3.7). If the field is absent, first update the office PC application. The warehouse «Паллеты» (Pallets) mode also works without an assigned line.",
+                "The «Смена» (Shift) row says «смен нет» (no shifts)",
+                "Check that the handheld has a line assigned and that the line has planned or active shifts. The administrator chooses «Линия» (Line) in the handheld's window under «Устройства» (Devices) and saves; the handheld receives it when connected to the host (step 3.7). If the field is absent, first update the office PC application. The warehouse «Палеты» (Pallets) mode also works without an assigned line.",
               ],
               [
-                "«Справочник ещё не загружен» (Reference data not loaded yet) in «Паллеты» (Pallets)",
-                "The handheld has not yet received products and templates from the host. Go back to the main screen and open «Паллеты» (Pallets) again while the handheld is online with the host.",
+                "«Справочник ещё не загружен» (Reference data not loaded yet) in «Палеты» (Pallets)",
+                "The handheld has not yet received products and templates from the host. Go back to the main screen and open «Палеты» (Pallets) again while the handheld is online with the host.",
               ],
               [
                 "«Сертификат хоста изменился — нажмите, чтобы привязать ТСД заново» (The host certificate changed — tap to pair the handheld again)",
@@ -709,6 +743,10 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
               [
                 "«Хост восстанавливается из копии — работа продолжается» (The host is being restored from a backup — work continues)",
                 "The administrator is restoring the host from a backup. Keep working: the queue goes to the host after the restore.",
+              ],
+              [
+                "Check the handheld version or updates",
+                "In Settings, open «Об устройстве» (About device). Checking for and downloading updates requires internet access. Let the queue finish sending before installing, then confirm installation in Android.",
               ],
             ],
           },

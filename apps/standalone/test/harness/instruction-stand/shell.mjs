@@ -12,7 +12,7 @@ const MIGRATIONS = new URL("../../../src-tauri/migrations/", import.meta.url);
 const APP_VERSION = JSON.parse(
   readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
 ).version;
-const PROTOCOL_VERSION = 7;
+const PROTOCOL_VERSION = 9;
 export const STATUS_EVENT = "standalone://host-status";
 export const REVISION_EVENT = "standalone://host-revision";
 

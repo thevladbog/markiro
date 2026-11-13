@@ -145,6 +145,8 @@ describe("rendered legal pages", () => {
         "MKR-INS-12",
         "MKR-INS-13",
         "MKR-INS-14",
+        "MKR-INS-15",
+        "MKR-INS-16",
       ];
       const expectedCodes =
         route === "/legal/"
@@ -233,8 +235,8 @@ describe("rendered legal pages", () => {
       const document = documents.get(route);
       // Instructions are bilingual; the new offer and optional consent templates
       // are published only in the Russian registry.
-      const pdfCount = route === "/legal/" ? 18 : 14;
-      const shaCount = route === "/legal/" ? 21 : 16;
+      const pdfCount = route === "/legal/" ? 20 : 16;
+      const shaCount = route === "/legal/" ? 23 : 18;
       expect(document?.querySelectorAll('a[download$=".pdf"]')).toHaveLength(pdfCount);
       expect(document?.querySelectorAll('a[download$=".docx"]')).toHaveLength(
         route === "/legal/" ? 3 : 2,

@@ -70,8 +70,8 @@ const DESCRIPTION_BY_CODE = {
     en: "Printable Markiro Autonom technician instruction: pairing the station with the host on the local network with a code from the office, choosing the line, printers, scanners, sound, updating and unpairing the station.",
   },
   "MKR-INS-08": {
-    ru: "Печатная инструкция офиса Маркиро Автоном: линии и число устройств в смене, станции на линии, планирование смены, агрегация, паллеты и печать дубликата.",
-    en: "Printable Markiro Autonom office instruction: lines and devices per shift, stations on a line, shift planning, aggregation, pallets, and duplicate printing.",
+    ru: "Печатная инструкция офиса Маркиро Автоном: линии и число устройств в смене, станции на линии, планирование смены, номера партий, агрегация, паллеты и печать дубликата.",
+    en: "Printable Markiro Autonom office instruction: lines and devices per shift, stations on a line, shift planning, lot numbers, aggregation, pallets, and duplicate printing.",
   },
   "MKR-INS-09": {
     ru: "Печатная инструкция офиса Маркиро Автоном: обзор производства, карточка смены, закрытие смены в офисе, данные после закрытия, выгрузки для ГИС МТ и 1С.",
@@ -90,8 +90,16 @@ const DESCRIPTION_BY_CODE = {
     en: "Printable Markiro Autonom administrator instruction: the host's automatic copies, a copy on request, the second folder and Yandex Disk, restoring on the same or a new PC, and resuming station data.",
   },
   "MKR-INS-14": {
-    ru: "Печатная инструкция склада Маркиро Автоном: привязка ТСД к хосту, вход оператора, принтер, сборка паллеты из коробов, этикетка паллеты и работа без связи.",
-    en: "Printable Markiro Autonom warehouse instruction: pairing the handheld with the host, operator sign-in, the printer, building a pallet from boxes, the pallet label, and offline work.",
+    ru: "Печатная инструкция склада Маркиро Автоном: привязка ТСД к хосту, вход оператора, принтер, сборка паллеты из коробов, расформирование, перепечать и работа без связи.",
+    en: "Printable Markiro Autonom warehouse instruction: pairing the handheld with the host, operator sign-in, the printer, building a pallet from boxes, disassembly, label reprint, and offline work.",
+  },
+  "MKR-INS-15": {
+    ru: "Печатная инструкция по складским палетам в Маркиро Автоном: сборка из закрытых коробов на станции, проверка состава, печать этикетки и сверка записи в офисе.",
+    en: "Printable guide to warehouse pallets in Markiro Autonom: build from closed boxes at a station, check the contents, print the label and check the office record.",
+  },
+  "MKR-INS-16": {
+    ru: "Печатная инструкция по маркированным наборам в Маркиро Автоном: состав набора, производственная смена, сканирование, выгрузки и расформирование.",
+    en: "Printable guide to marked sets in Markiro Autonom: set recipes, production shifts, scanning, exports, and disassembly.",
   },
 } as const satisfies Record<LegalDocumentCode, Record<LegalLocale, string>>;
 
