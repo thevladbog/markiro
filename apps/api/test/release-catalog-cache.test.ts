@@ -166,6 +166,19 @@ describe("verified bounded release cache", () => {
     await next.close();
     expect((await readdir(f.root)).filter((n) => n.endsWith(".blob"))).toHaveLength(1);
   });
+  it("evicts a disposable entry to restore the disk reserve even below the cache limit", async () => {
+    const f = await fixture();
+    const original = join(f.root, cacheBindingName(f.object));
+    const cache = new VerifiedCache(f.config, f.store, {
+      freeBytes: async () =>
+        (await readdir(f.root)).includes(cacheBindingName(f.object)) ? 1 : 64,
+    });
+    await (await cache.acquire(f.object)).close();
+    const next = await cache.acquire({ ...f.object, versionId: "v2" });
+    expect(await next.read(64)).toEqual(Buffer.from("MZ original"));
+    await next.close();
+    await expect(readFile(original)).rejects.toMatchObject({ code: "ENOENT" });
+  });
   it("aborts a stalled response and retains no partial success", async () => {
     const f = await fixture();
     f.store.readVersion = async () => new Readable({ read() {} });

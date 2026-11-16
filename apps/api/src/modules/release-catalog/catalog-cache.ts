@@ -227,6 +227,7 @@ export class VerifiedCache {
     await this.budget.run(async () => {
       await this.directory();
       let total = this.reserved;
+      let reclaimable = 0;
       const evict: { path: string; size: number; ino: number; time: number }[] = [];
       for (const name of await readdir(this.config.cacheDir)) {
         if (this.activeTemps.has(name)) continue;
@@ -236,22 +237,23 @@ export class VerifiedCache {
         total += s.size;
         if (/^[a-f0-9]{64}\.blob$/.test(name)) {
           privateFile(s);
+          reclaimable += s.blocks * 512;
           evict.push({ path, size: s.size, ino: s.ino, time: s.mtimeMs });
         }
       }
+      const requiredFree = this.config.diskReserveBytes + bytes + this.reserved;
+      let free = await this.io.freeBytes(this.config.cacheDir);
+      if (free + reclaimable < requiredFree) throw new CatalogFault("unavailable");
       for (const entry of evict.sort((a, b) => a.time - b.time)) {
-        if (total + bytes <= this.config.cacheBytes) break;
+        if (total + bytes <= this.config.cacheBytes && free >= requiredFree) break;
         const current = await lstat(entry.path);
         privateFile(current);
         if (current.ino !== entry.ino) throw new CatalogFault("unavailable");
         await unlink(entry.path);
         total -= entry.size;
+        free = await this.io.freeBytes(this.config.cacheDir);
       }
-      if (
-        total + bytes > this.config.cacheBytes ||
-        (await this.io.freeBytes(this.config.cacheDir)) <
-          this.config.diskReserveBytes + bytes + this.reserved
-      )
+      if (total + bytes > this.config.cacheBytes || free < requiredFree)
         throw new CatalogFault("unavailable");
       this.reserved += bytes;
       this.activeTemps.add(temp);

@@ -1,6 +1,6 @@
 import { HttpException, Inject, Injectable } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
-import { and, eq, gt, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   STANDALONE_RELEASE_CHANNELS,
   compareStandaloneReleaseVersions,
@@ -164,7 +164,6 @@ export class StandaloneReleasesService {
           eq(schema.releaseCatalogIntents.channel, channel),
           eq(schema.releaseCatalogIntents.ownerFingerprint, caller.principal.fingerprint),
           inArray(schema.releaseCatalogIntents.state, ["pending", "verified"]),
-          gt(schema.releaseCatalogIntents.expiresAt, this.now()),
         ),
       )
       .limit(1001);
