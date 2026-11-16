@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Markiro Docker image retention every six hours
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:17:00 UTC
+RandomizedDelaySec=10min
+Persistent=true
+Unit=markiro-image-retention.service
+
+[Install]
+WantedBy=timers.target
