@@ -264,6 +264,36 @@ async fn a_set_registry_workbook_is_stored_in_one_part_and_downloaded_unchanged(
     );
 }
 
+#[tokio::test]
+async fn the_store_downloads_plain_and_base64_unf_csv_at_their_original_versions() {
+    let admin = admin().await;
+    let shift = planned_shift(&admin).await;
+    for (id, version, row) in [
+        (FILE, 1, "00046006820000015000;00146006820000000409\r\n"),
+        (
+            FILE_2,
+            2,
+            "MDAwNDYwMDY4MjAwMDAwMTUwMDA=;MDAxNDYwMDY4MjAwMDAwMDA0MDk=\r\n",
+        ),
+    ] {
+        let document = format!("\u{feff}Штрихкод или код маркировки;Код упаковки\r\n{row}");
+        let bytes = document.as_bytes();
+        let mut begin = with_content(begin_of(id, 1, &shift, "1C.csv", bytes), bytes);
+        begin["batchId"] = json!(id);
+        begin["formatId"] = json!("shift_csv_unf_pallet_boxes");
+        begin["formatVersion"] = json!(version);
+        let (status, body) = admin
+            .call("POST", "/v1/office/export-files", Some(begin))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["ready"], true);
+        let (status, got, opened) = download(&admin, &admin.token, id).await;
+        assert_eq!(status, StatusCode::OK, "{opened}");
+        assert_eq!(got, bytes);
+        assert_eq!(opened["file"]["formatVersion"], version);
+    }
+}
+
 /// A part of one chunk is stored by one call, listed, and downloaded back
 /// byte for byte; the store and the download each write one audit row naming
 /// the file, never its bytes.

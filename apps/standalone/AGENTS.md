@@ -6263,6 +6263,11 @@ office changed since, and a record of a shift opened by an older host prints non
 Plan ЧЗ ports the cloud's shift exports into the office; the bytes of every
 file are the cloud's for the same facts, and that is the acceptance rule.
 
+The four standalone CSV formats for 1С:УНФ use version 2 for new exports.
+Both data columns use standard padded Base64 of the original UTF-8 strings.
+Headers, UTF-8 BOM, semicolon delimiter and CRLF remain CSV text. Version 1
+keeps the plain-text representation for older clients and saved exports.
+
 - The host only reads and records. `GET /v1/office/shifts/{id}/export-source`
   (`routes/office_exports.rs`, every office role) answers `ShiftExportRows`
   in one read transaction: the shift with its number, status, production

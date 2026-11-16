@@ -13,20 +13,43 @@ import {
 export const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const CSV_MIME_TYPE = "text/csv; charset=utf-8";
 const UNF_HEADER = ["Штрихкод или код маркировки", "Код упаковки"];
+const UNF_BASE64_VERSION = 2;
+const utf8 = new TextEncoder();
 
 export const STANDALONE_SHIFT_EXPORT_FORMATS = [
-  { id: "shift_csv_unf_all", label: "[1C][csv] Общая выгрузка", version: 1 },
-  { id: "shift_csv_unf_box_codes", label: "[1C][csv] Выгрузка Короба - Коды", version: 1 },
-  { id: "shift_csv_unf_pallet_boxes", label: "[1C][csv] Выгрузка Палеты - Короба", version: 1 },
+  { id: "shift_csv_unf_all", label: "[1C][csv] Общая выгрузка", version: UNF_BASE64_VERSION },
+  {
+    id: "shift_csv_unf_box_codes",
+    label: "[1C][csv] Выгрузка Короба - Коды",
+    version: UNF_BASE64_VERSION,
+  },
+  {
+    id: "shift_csv_unf_pallet_boxes",
+    label: "[1C][csv] Выгрузка Палеты - Короба",
+    version: UNF_BASE64_VERSION,
+  },
 ] as const;
 
 export const STANDALONE_SET_EXPORT_FORMATS = [
-  { id: "shift_csv_unf_set_items", label: "[1C][csv] Выгрузка Наборы - Коды", version: 1 },
+  {
+    id: "shift_csv_unf_set_items",
+    label: "[1C][csv] Выгрузка Наборы - Коды",
+    version: UNF_BASE64_VERSION,
+  },
   { id: "shift_xlsx_chz_set_registry", label: "[ЧЗ][xlsx] Реестр наборов", version: 1 },
 ] as const;
 
-export type StandaloneShiftExportFormat = (typeof STANDALONE_SHIFT_EXPORT_FORMATS)[number];
-export type StandaloneSetExportFormat = (typeof STANDALONE_SET_EXPORT_FORMATS)[number];
+const LEGACY_UNF_SHIFT_FORMATS = STANDALONE_SHIFT_EXPORT_FORMATS.map((format) => ({
+  ...format,
+  version: 1 as const,
+}));
+const LEGACY_UNF_SET_FORMAT = { ...STANDALONE_SET_EXPORT_FORMATS[0], version: 1 } as const;
+export const STANDALONE_LEGACY_UNF_FORMATS = [...LEGACY_UNF_SHIFT_FORMATS, LEGACY_UNF_SET_FORMAT];
+
+export type StandaloneShiftExportFormat =
+  (typeof STANDALONE_SHIFT_EXPORT_FORMATS)[number] | (typeof LEGACY_UNF_SHIFT_FORMATS)[number];
+export type StandaloneSetExportFormat =
+  (typeof STANDALONE_SET_EXPORT_FORMATS)[number] | typeof LEGACY_UNF_SET_FORMAT;
 type StandaloneExportFormat = StandaloneShiftExportFormat | StandaloneSetExportFormat;
 export type StandaloneExportPart = Omit<ShiftExportPart, "mimeType"> & {
   mimeType: ShiftExportPart["mimeType"] | typeof XLSX_MIME_TYPE;
@@ -36,9 +59,11 @@ export function getStandaloneExportFormat(
   id: string,
   version: number,
 ): StandaloneExportFormat | undefined {
-  return [...STANDALONE_SHIFT_EXPORT_FORMATS, ...STANDALONE_SET_EXPORT_FORMATS].find(
-    (format) => format.id === id && format.version === version,
-  );
+  return [
+    ...STANDALONE_LEGACY_UNF_FORMATS,
+    ...STANDALONE_SHIFT_EXPORT_FORMATS,
+    ...STANDALONE_SET_EXPORT_FORMATS,
+  ].find((format) => format.id === id && format.version === version);
 }
 
 export interface StandaloneUnfSource {
@@ -75,6 +100,7 @@ export function renderStandaloneSetExport(
   formatId: StandaloneSetExportFormat["id"],
   shiftNumber: string,
   sets: readonly StandaloneExportSet[],
+  formatVersion: StandaloneSetExportFormat["version"] = UNF_BASE64_VERSION,
 ): StandaloneExportPart {
   const counts = {
     codeCount: sets.reduce((count, set) => count + set.items.length, 0),
@@ -83,7 +109,7 @@ export function renderStandaloneSetExport(
   };
   if (formatId === "shift_csv_unf_set_items") {
     return csvPart(
-      STANDALONE_SET_EXPORT_FORMATS[0],
+      formatVersion === 1 ? LEGACY_UNF_SET_FORMAT : STANDALONE_SET_EXPORT_FORMATS[0],
       shiftNumber,
       sets.flatMap(({ code, items }) => items.map((item) => [item, code])),
       counts,
@@ -118,8 +144,17 @@ function csvPart(
     physicalLineCount: rows.length + 1,
     filename: exportFilename(format, shiftNumber, "csv"),
     mimeType: CSV_MIME_TYPE,
-    bytes: encodeSemicolonCsv(UNF_HEADER, rows),
+    bytes: encodeSemicolonCsv(
+      UNF_HEADER,
+      format.version === UNF_BASE64_VERSION ? rows.map((row) => row.map(unfBase64Cell)) : rows,
+    ),
   };
+}
+
+function unfBase64Cell(value: string): string {
+  let binary = "";
+  for (const byte of utf8.encode(value)) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 function exportFilename(

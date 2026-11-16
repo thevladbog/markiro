@@ -5,6 +5,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   PALLET_EXPORT_FORMATS,
   SHIFT_EXPORT_FORMATS,
+  STANDALONE_LEGACY_UNF_FORMATS,
   STANDALONE_SET_EXPORT_FORMATS,
   STANDALONE_SHIFT_EXPORT_FORMATS,
   type ProductLabelEvent,
@@ -1309,6 +1310,7 @@ describe("the formats of exports (plan ЧЗ)", () => {
     expect(fixture("export-formats.json")).toEqual({
       shift: [
         ...SHIFT_EXPORT_FORMATS,
+        ...STANDALONE_LEGACY_UNF_FORMATS,
         ...STANDALONE_SHIFT_EXPORT_FORMATS,
         ...STANDALONE_SET_EXPORT_FORMATS,
       ].map(({ id, version }) => ({ id, version })),

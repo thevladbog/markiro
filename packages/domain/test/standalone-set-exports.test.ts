@@ -13,11 +13,13 @@ const sets = [
 ];
 
 describe("standalone set exports", () => {
-  it("preserves the complete item and parent marking strings for 1C", () => {
+  it("preserves the complete item and parent marking strings as Base64 for 1C", () => {
     const part = renderStandaloneSetExport("shift_csv_unf_set_items", "NOV26-018", sets);
     expect(part).toMatchObject({ partNumber: 1, codeCount: 2, boxCount: 0, palletCount: 0 });
+    const encode = (value: string) => Buffer.from(value, "utf8").toString("base64");
+    expect(part.bytes.slice(0, 3)).toEqual(Uint8Array.of(0xef, 0xbb, 0xbf));
     expect(new TextDecoder().decode(part.bytes)).toBe(
-      `Штрихкод или код маркировки;Код упаковки\r\n${item};${set}\r\n"010460712345680421B;""C\u001d93Gh78";${secondSet}\r\n`,
+      `Штрихкод или код маркировки;Код упаковки\r\n${encode(item)};${encode(set)}\r\n${encode(secondItem)};${encode(secondSet)}\r\n`,
     );
   });
 

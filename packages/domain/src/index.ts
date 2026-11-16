@@ -586,6 +586,7 @@ export {
   type PrinterOutputMode,
 } from "./labels/printer-output-mode.js";
 export {
+  STANDALONE_LEGACY_UNF_FORMATS,
   STANDALONE_SHIFT_EXPORT_FORMATS,
   STANDALONE_SET_EXPORT_FORMATS,
   getStandaloneExportFormat,

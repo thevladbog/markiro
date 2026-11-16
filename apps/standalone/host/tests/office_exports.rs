@@ -807,9 +807,8 @@ async fn a_refused_record_writes_no_row_and_the_bounds_of_max_lines_are_taken() 
     );
 }
 
-/// Every format of the host's lists is recorded at its own version and at no
-/// other (the retired `shift_txt_boxes@1` among them): the version is part of
-/// the format, not decoration.
+/// The host records every supported format and rejects unlisted versions,
+/// including the retired `shift_txt_boxes@1`.
 #[tokio::test]
 async fn every_format_is_recorded_at_its_own_version_and_at_no_other() {
     let admin = admin().await;
@@ -817,8 +816,12 @@ async fn every_format_is_recorded_at_its_own_version_and_at_no_other() {
     close_by_station(&admin, &floor).await;
     let shift = floor.shift.clone();
     let mut taken = 0;
-    for (id, version) in markiro_host::routes::office_exports::SHIFT_FORMATS {
-        for other in [0, version + 1, version + 2] {
+    let shift_formats = markiro_host::routes::office_exports::SHIFT_FORMATS;
+    for (id, version) in shift_formats {
+        for other in [0, version + 1, version + 2]
+            .into_iter()
+            .filter(|other| !shift_formats.contains(&(id, *other)))
+        {
             let (status, body) =
                 record_export(&admin, &admin.token, &shift, record_of(id, other)).await;
             assert_eq!(status, StatusCode::BAD_REQUEST, "{id}@{other} {body}");
@@ -851,7 +854,7 @@ async fn every_format_is_recorded_at_its_own_version_and_at_no_other() {
     }
     let rows = support::app::audit_trail(&admin.app, "shift.export").await;
     assert_eq!(rows.len(), taken);
-    assert_eq!(taken, 17);
+    assert_eq!(taken, 21);
 }
 
 /// The reversed TXT boxes format (`shift_txt_boxes_reversed`, the cloud's
