@@ -14,6 +14,8 @@
     { "version": "1.4.0", "protocol": 8, "minProtocol": 1 },
     { "version": "1.5.0", "protocol": 8, "minProtocol": 1 },
     { "version": "1.6.0", "protocol": 8, "minProtocol": 1 },
-    { "version": "1.6.1", "protocol": 8, "minProtocol": 1 }
+    { "version": "1.6.1", "protocol": 8, "minProtocol": 1 },
+    { "version": "1.7.0", "protocol": 9, "minProtocol": 1 },
+    { "version": "1.7.1", "protocol": 9, "minProtocol": 1 }
   ]
 }
