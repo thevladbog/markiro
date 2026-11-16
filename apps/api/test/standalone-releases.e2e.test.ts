@@ -47,6 +47,7 @@ describe.skipIf(!url)(
       repo: CatalogRepository;
     const users = {
       admin: `admin-${randomUUID()}`,
+      otherAdmin: `other-admin-${randomUUID()}`,
       support: `support-${randomUUID()}`,
       accountant: `accountant-${randomUUID()}`,
     };
@@ -54,6 +55,8 @@ describe.skipIf(!url)(
       heads = new Map<string, { versionId: string; size: number }>();
     let delayed = false,
       failAudit = false;
+    let elapsedMs = 0;
+    const now = () => Date.now() + elapsedMs;
     class StagedStore extends MemoryStore {
       override async headVersion(key: string) {
         const value = heads.get(key) ?? null;
@@ -97,7 +100,7 @@ describe.skipIf(!url)(
           id,
           name: "Fixture",
           email: `${id}@example.invalid`,
-          role: role === "admin" ? "platform_admin" : (role as "support" | "accountant"),
+          role: role === "support" || role === "accountant" ? role : "platform_admin",
           status: "active",
           twoFactorEnabled: true,
         });
@@ -113,7 +116,7 @@ describe.skipIf(!url)(
         "INSERT INTO release_catalog_epochs(id,product,channel,enabled) VALUES($1,'standalone','stable',true)",
         [randomUUID()],
       );
-      repo = new CatalogRepository(db, audit);
+      repo = new CatalogRepository(db, audit, now);
       const cache = new VerifiedCache(
         {
           cacheDir,
@@ -143,6 +146,7 @@ describe.skipIf(!url)(
         cache,
         bucket: "markiro-releases",
         standaloneKeys: KEYSET,
+        now,
         authorize: (caller) => recheckCatalogCaller(db, caller),
       });
       const service = new StandaloneReleasesService(
@@ -161,7 +165,7 @@ describe.skipIf(!url)(
         },
         catalog,
         repo,
-        () => new Date(),
+        () => new Date(now()),
       );
       const module = await Test.createTestingModule({
         controllers: [PlatformStandaloneReleasesController],
@@ -365,6 +369,37 @@ describe.skipIf(!url)(
       }
       await register(f.intentId).expect(200);
       expect(store.removed).toEqual([]);
+    });
+    it("lets the owner register a previously staged package after its upload window expires", async () => {
+      const f = await upload("2.3.0");
+      const other = `fixture=${users.otherAdmin}`;
+      elapsedMs = 16 * 60 * 1000;
+      try {
+        const list = await request(app.getHttpServer()).get(base).set("Cookie", cookie).expect(200);
+        expect(list.body.channels[0].pending).toContainEqual({
+          intentId: f.intentId,
+          version: "2.3.0",
+        });
+        const otherList = await request(app.getHttpServer())
+          .get(base)
+          .set("Cookie", other)
+          .expect(200);
+        expect(otherList.body.channels[0].pending).toEqual([]);
+        await request(app.getHttpServer())
+          .post(`${base}/registrations`)
+          .set("Cookie", other)
+          .send({ intentId: f.intentId })
+          .expect(403);
+        await request(app.getHttpServer())
+          .post(`${base}/uploads`)
+          .set("Cookie", cookie)
+          .send(f.body)
+          .expect(503);
+        const result = await register(f.intentId).expect(200);
+        expect(result.body).toMatchObject({ outcome: "registered", release: { version: "2.3.0" } });
+      } finally {
+        elapsedMs = 0;
+      }
     });
   },
 );

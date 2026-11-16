@@ -256,8 +256,11 @@ export class CatalogService {
       });
       return this.result(existing.publication.id);
     }
+    // The upload deadline limits new PUT grants. A current SaaS administrator
+    // can finish their own staged Standalone intent after its URLs expire.
+    const finishStagedStandalone = !caller.machine && intent.product === "standalone";
     if (
-      intent.expiresAt.getTime() <= this.now() ||
+      (!finishStagedStandalone && intent.expiresAt.getTime() <= this.now()) ||
       intent.state === "failed" ||
       intent.state === "committed"
     )
@@ -325,6 +328,7 @@ export class CatalogService {
             throw new CatalogFault("conflict");
         }
       },
+      { finishStagedStandalone },
     );
     await ledger.confirmCommitted(receipt.operationId, {
       kind: "publication",

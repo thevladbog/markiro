@@ -297,6 +297,7 @@ export class CatalogRepository {
     receipt: VerifiedReceipt,
     actor: Actor,
     beforeCommit?: (registered: PublicationRow[]) => void,
+    options: { finishStagedStandalone?: boolean } = {},
   ): Promise<{ outcome: "registered" | "unchanged"; publication: PublicationRow }> {
     const intentId = parse(releaseOperationIdSchema, id),
       expected = parse(releaseOperationIdSchema, epoch);
@@ -320,10 +321,15 @@ export class CatalogRepository {
         .from(publications)
         .where(eq(publications.intentId, intentId));
       if (existing) return { outcome: "unchanged", publication: existing };
+      const finishStagedStandalone =
+        options.finishStagedStandalone &&
+        intent.product === "standalone" &&
+        principal.tokenHash === undefined &&
+        actor.actorPlatformUserId !== null;
       if (
         intent.state === "failed" ||
         intent.state === "committed" ||
-        intent.expiresAt.getTime() <= this.now()
+        (!finishStagedStandalone && intent.expiresAt.getTime() <= this.now())
       )
         throw new CatalogFault("not_ready");
       await this.unreserved(tx, request);
