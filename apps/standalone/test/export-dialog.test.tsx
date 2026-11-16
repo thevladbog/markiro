@@ -196,7 +196,8 @@ describe("office shifts: an export (plan ЧЗ)", () => {
       within(dialog())
         .getAllByRole("radio")
         .map((radio) => radio.getAttribute("value")),
-    ).toEqual(["shift_csv_unf_set_items@1", "shift_xlsx_chz_set_registry@1"]);
+    ).toEqual(["shift_csv_unf_set_items@2", "shift_xlsx_chz_set_registry@1"]);
+    expect(within(dialog()).getByText(/Коды в обеих колонках записаны в Base64/)).toBeTruthy();
     expect(within(dialog()).queryByRole("checkbox", { name: "Разделить на части" })).toBeNull();
     form();
     await within(dialog()).findByText("Выгрузка недоступна из-за конфликтов кодов в наборах.");
@@ -706,48 +707,56 @@ describe("office shifts: an export (plan ЧЗ)", () => {
     expect(session.api.recordShiftExport).not.toHaveBeenCalled();
   });
 
-  it("hands the host the exact bytes of every part before the folder gets them, then records the export", async () => {
-    const files = fakeFiles();
-    const session = await openExport(CLOSED_PALLETS, rows(), files);
-    fireEvent.click(
-      within(dialog()).getByRole("radio", { name: "[XML][ГИСМТ] Палетная агрегация" }),
-    );
-    form();
-    await within(dialog()).findByText(/^Сохранено файлов: 1\./);
-    const parts = expectedParts(rows(), {
-      formatId: "shift_xml_gismt_aggregation_pallets",
-      formatVersion: 1,
-      maxLines: null,
-      palletId: null,
-    });
-    expect(session.api.beginExportFile).toHaveBeenCalledTimes(parts.length);
-    const [token, begin] = session.api.beginExportFile.mock.calls[0] ?? [];
-    expect(token).toBe(TOKEN);
-    expect(begin).toMatchObject({
-      batchId: DOCUMENT,
-      partNo: 1,
-      kind: "shift_export",
-      targetType: "shift",
-      targetId: ACTIVE.id,
-      formatId: "shift_xml_gismt_aggregation_pallets",
-      formatVersion: 1,
-      fileName: parts[0]?.name,
-      sizeBytes: parts[0]?.bytes.length,
-    });
-    // The bytes the host holds are the ones the folder holds, and its digest is theirs.
-    const sent = Uint8Array.from(atob(begin?.contentBase64 ?? ""), (char) => char.charCodeAt(0));
-    expect([...sent]).toEqual([...(parts[0]?.bytes ?? [])]);
-    const digest = await crypto.subtle.digest("SHA-256", new Uint8Array(parts[0]?.bytes ?? []));
-    expect(begin?.sha256).toBe(
-      Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(""),
-    );
-    const [stored] = session.api.beginExportFile.mock.invocationCallOrder;
-    const [saved] = files.save.mock.invocationCallOrder;
-    const [recorded] = session.api.recordShiftExport.mock.invocationCallOrder;
-    expect(stored !== undefined && saved !== undefined && stored < saved).toBe(true);
-    expect(saved !== undefined && recorded !== undefined && saved < recorded).toBe(true);
-    expect(within(dialog()).queryByText(/Копия на хосте не сохранена/)).toBeNull();
-  });
+  it.each([
+    ["[XML][ГИСМТ] Палетная агрегация", "shift_xml_gismt_aggregation_pallets", 1],
+    ["[1C][csv] Общая выгрузка", "shift_csv_unf_all", 2],
+  ])(
+    "stores and records %s at the selected format version",
+    async (label, formatId, formatVersion) => {
+      const files = fakeFiles();
+      const session = await openExport(CLOSED_PALLETS, rows(), files);
+      fireEvent.click(within(dialog()).getByRole("radio", { name: label }));
+      form();
+      await within(dialog()).findByText(/^Сохранено файлов: 1\./);
+      const parts = expectedParts(rows(), {
+        formatId,
+        formatVersion,
+        maxLines: null,
+        palletId: null,
+      });
+      expect(session.api.beginExportFile).toHaveBeenCalledTimes(parts.length);
+      const [token, begin] = session.api.beginExportFile.mock.calls[0] ?? [];
+      expect(token).toBe(TOKEN);
+      expect(begin).toMatchObject({
+        batchId: DOCUMENT,
+        partNo: 1,
+        kind: "shift_export",
+        targetType: "shift",
+        targetId: ACTIVE.id,
+        formatId,
+        formatVersion,
+        fileName: parts[0]?.name,
+        sizeBytes: parts[0]?.bytes.length,
+      });
+      // The bytes the host holds are the ones the folder holds, and its digest is theirs.
+      const sent = Uint8Array.from(atob(begin?.contentBase64 ?? ""), (char) => char.charCodeAt(0));
+      expect([...sent]).toEqual([...(parts[0]?.bytes ?? [])]);
+      const digest = await crypto.subtle.digest("SHA-256", new Uint8Array(parts[0]?.bytes ?? []));
+      expect(begin?.sha256).toBe(
+        Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(""),
+      );
+      const [stored] = session.api.beginExportFile.mock.invocationCallOrder;
+      const [saved] = files.save.mock.invocationCallOrder;
+      const [recorded] = session.api.recordShiftExport.mock.invocationCallOrder;
+      expect(stored !== undefined && saved !== undefined && stored < saved).toBe(true);
+      expect(saved !== undefined && recorded !== undefined && saved < recorded).toBe(true);
+      expect(session.api.recordShiftExport.mock.calls[0]?.[2]).toMatchObject({
+        formatId,
+        formatVersion,
+      });
+      expect(within(dialog()).queryByText(/Копия на хосте не сохранена/)).toBeNull();
+    },
+  );
 
   it("keeps a pallet's document on the host as the pallet's own file", async () => {
     const files = fakeFiles();

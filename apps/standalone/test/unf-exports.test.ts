@@ -15,11 +15,27 @@ const run = (
   rows: ReturnType<typeof exportRows>,
   formatId: string,
   maxLines: number | null = null,
-) =>
-  runExport(rows, { formatId, formatVersion: 1, maxLines, palletId: null, documentId, formedAt });
+  formatVersion = 2,
+) => runExport(rows, { formatId, formatVersion, maxLines, palletId: null, documentId, formedAt });
 
-function productLines(rows: ReturnType<typeof exportRows>) {
-  return rows.codes.map(({ canonical }, index) => `${canonical};${index < 2 ? box1 : box2}\r\n`);
+function productCells(rows: ReturnType<typeof exportRows>) {
+  return rows.codes.map(({ canonical }, index) => [canonical, index < 2 ? box1 : box2]);
+}
+
+function expectBase64Csv(bytes: Uint8Array | undefined, expected: string[][]) {
+  const text = new TextDecoder().decode(bytes);
+  expect(text.startsWith(header)).toBe(true);
+  const lines = text.slice(header.length).split("\r\n");
+  expect(lines.pop()).toBe("");
+  expect(
+    lines.map((line) =>
+      line.split(";").map((cell) => {
+        const decoded = Buffer.from(cell, "base64");
+        expect(decoded.toString("base64")).toBe(cell);
+        return decoded.toString("utf8");
+      }),
+    ),
+  ).toEqual(expected);
 }
 
 describe("CSV для 1С:УНФ", () => {
@@ -39,8 +55,16 @@ describe("CSV для 1С:УНФ", () => {
       ],
     });
     if (!result.ok) throw new Error(result.failure);
+    expectBase64Csv(result.parts[0]?.bytes, [...productCells(rows), [box1, pallet]]);
+  });
+
+  it("still renders plain CSV when the legacy version is requested explicitly", () => {
+    const rows = exportRows();
+    const result = run(rows, "shift_csv_unf_all", null, 1);
+    if (!result.ok) throw new Error(result.failure);
+    const cells = [...productCells(rows), [box1, pallet]];
     expect(new TextDecoder().decode(result.parts[0]?.bytes)).toBe(
-      header + productLines(rows).join("") + `${box1};${pallet}\r\n`,
+      header + cells.map((row) => `${row.join(";")}\r\n`).join(""),
     );
   });
 
@@ -58,9 +82,7 @@ describe("CSV для 1С:УНФ", () => {
     );
     const result = run(rows, "shift_csv_unf_all");
     if (!result.ok) throw new Error(result.failure);
-    expect(new TextDecoder().decode(result.parts[0]?.bytes)).toBe(
-      header + productLines(rows).join(""),
-    );
+    expectBase64Csv(result.parts[0]?.bytes, productCells(rows));
   });
 
   it("suppresses links to disassembled pallets and rejects a split request", () => {
@@ -68,9 +90,7 @@ describe("CSV для 1С:УНФ", () => {
     rows.pallets = rows.pallets.map((entry) => ({ ...entry, disassembledAt: formedAt }));
     const result = run(rows, "shift_csv_unf_all");
     if (!result.ok) throw new Error(result.failure);
-    expect(new TextDecoder().decode(result.parts[0]?.bytes)).toBe(
-      header + productLines(rows).join(""),
-    );
+    expectBase64Csv(result.parts[0]?.bytes, productCells(rows));
     expect(run(rows, "shift_csv_unf_all", 2)).toMatchObject({
       ok: false,
       failure: "INVALID_LINE_LIMIT",
@@ -87,22 +107,19 @@ describe("CSV для 1С:УНФ", () => {
       parts: [{ codeCount: 0, boxCount: 1, palletCount: 1, physicalLineCount: 2 }],
     });
     if (!result.ok) throw new Error(result.failure);
-    expect(new TextDecoder().decode(result.parts[0]?.bytes)).toBe(header + `${box1};${pallet}\r\n`);
+    expectBase64Csv(result.parts[0]?.bytes, [[box1, pallet]]);
   });
 
   it("writes closed boxes without their pallet rows in the box-only format", () => {
     const rows = exportRows();
     const result = run(rows, "shift_csv_unf_box_codes");
     if (!result.ok) throw new Error(result.failure);
-    expect(new TextDecoder().decode(result.parts[0]?.bytes)).toBe(
-      header + productLines(rows).join(""),
-    );
+    expectBase64Csv(result.parts[0]?.bytes, productCells(rows));
   });
 
   it("refuses both set formats if any assembly conflicts", () => {
     const rows = exportRows();
     const run = {
-      formatVersion: 1,
       maxLines: null,
       palletId: null,
       documentId,
@@ -114,12 +131,15 @@ describe("CSV для 1С:УНФ", () => {
       items: [{ canonical: "010460712345680421A&Z\u001d93Cd34" }],
     } as const;
     const conflict = { ...accepted, outcome: "conflict" } as const;
-    for (const formatId of ["shift_csv_unf_set_items", "shift_xlsx_chz_set_registry"]) {
-      expect(runExport(rows, { ...run, formatId }, [accepted, conflict])).toEqual({
+    for (const [formatId, formatVersion] of [
+      ["shift_csv_unf_set_items", 2],
+      ["shift_xlsx_chz_set_registry", 1],
+    ] as const) {
+      expect(runExport(rows, { ...run, formatId, formatVersion }, [accepted, conflict])).toEqual({
         ok: false,
         failure: "SET_EXPORT_CONFLICT",
       });
-      expect(runExport(rows, { ...run, formatId }, [accepted])).toMatchObject({
+      expect(runExport(rows, { ...run, formatId, formatVersion }, [accepted])).toMatchObject({
         ok: true,
         parts: [{ codeCount: 1, boxCount: 0, palletCount: 0 }],
       });

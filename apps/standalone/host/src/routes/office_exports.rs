@@ -32,7 +32,7 @@ use crate::validate;
 /// The shift formats `@markiro/domain` advertises for the standalone office,
 /// with their versions; `proto/fixtures/export-formats.json` holds the same
 /// list, and both suites check it against the fixture.
-pub const SHIFT_FORMATS: [(&str, u32); 16] = [
+pub const SHIFT_FORMATS: [(&str, u32); 20] = [
     ("shift_txt_flat", 1),
     ("shift_txt_boxes", 2),
     ("shift_txt_boxes_reversed", 1),
@@ -48,6 +48,10 @@ pub const SHIFT_FORMATS: [(&str, u32); 16] = [
     ("shift_csv_unf_box_codes", 1),
     ("shift_csv_unf_pallet_boxes", 1),
     ("shift_csv_unf_set_items", 1),
+    ("shift_csv_unf_all", 2),
+    ("shift_csv_unf_box_codes", 2),
+    ("shift_csv_unf_pallet_boxes", 2),
+    ("shift_csv_unf_set_items", 2),
     ("shift_xlsx_chz_set_registry", 1),
 ];
 

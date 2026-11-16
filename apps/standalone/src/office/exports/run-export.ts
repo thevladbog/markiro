@@ -114,7 +114,12 @@ export function runExport(
       ) {
         const snapshot = setExportSnapshot(rows, sets ?? []);
         if (!snapshot.ok) return { ok: false, failure: snapshot.refusal };
-        const part = renderStandaloneSetExport(standalone.id, rows.shift.number, snapshot.value);
+        const part = renderStandaloneSetExport(
+          standalone.id,
+          rows.shift.number,
+          snapshot.value,
+          standalone.version,
+        );
         return {
           ok: true,
           parts: [part],
