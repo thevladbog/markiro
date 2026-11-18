@@ -69,7 +69,7 @@ export const OLD_BOX: LabelTemplateSummary = {
 export const PALLET: LabelTemplateSummary = {
   ...BOX_58,
   id: "0b1c2d3e-4f5a-4b6c-8d7e-8f9a0b1c2d3e",
-  name: "Паллета 100×150",
+  name: "Палета 100×150",
   purpose: "pallet",
   rev: 65,
 };

@@ -58,7 +58,7 @@ const DRINKS = summary("9e3a6d4c-1f5b-4a7c-8d8e-3f4a5b6c7d8e", "Вода и мо
   widthMm: 58.5,
   dpi: null,
 });
-const PALLET = summary("0f4b7e5d-2a6c-4b8d-9e9f-4a5b6c7d8e9f", "Паллета 100×150", {
+const PALLET = summary("0f4b7e5d-2a6c-4b8d-9e9f-4a5b6c7d8e9f", "Палета 100×150", {
   purpose: "pallet",
   stock: true,
   widthMm: 100,
@@ -149,7 +149,7 @@ describe("office label templates", () => {
       "Коробка 58×40",
       "Коробка 100×100",
       "Молоко 58×40",
-      "Паллета 100×150",
+      "Палета 100×150",
     ]);
   });
 
@@ -184,8 +184,8 @@ describe("office label templates", () => {
       "Все категории",
       "▸Включён",
     ]);
-    expect(cells("Паллета 100×150").slice(0, 3)).toEqual([
-      "Паллета 100×150Типовой",
+    expect(cells("Палета 100×150").slice(0, 3)).toEqual([
+      "Палета 100×150Типовой",
       "Палет",
       "100 × 150 мм",
     ]);
@@ -288,7 +288,7 @@ describe("office label templates", () => {
   it("keeps one purpose or one state with the filters, and both together", async () => {
     await openTemplates(session());
     chooseText("Назначение", "Палет");
-    expect(names()).toEqual(["Паллета 100×150"]);
+    expect(names()).toEqual(["Палета 100×150"]);
     chooseText("Назначение", "Дубликат товара");
     expect(names()).toEqual(["Дубликат Data Matrix 58×40 [Полное наименование]"]);
     chooseText("Назначение", "Короб");
@@ -388,7 +388,7 @@ describe("office label templates", () => {
     await openTemplates(session());
     const tag = (name: string, label: string) => within(rowOf(name)).getByText(label);
     expect(tag("Коробка 58×40", "Короб").classList.contains("mk-badge--violet")).toBe(true);
-    expect(tag("Паллета 100×150", "Палет").classList.contains("mk-badge--magenta")).toBe(true);
+    expect(tag("Палета 100×150", "Палет").classList.contains("mk-badge--magenta")).toBe(true);
     expect(
       tag("Дубликат Data Matrix 58×40 [Полное наименование]", "Дубликат товара").classList.contains(
         "mk-badge--teal",

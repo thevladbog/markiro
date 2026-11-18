@@ -1,3 +1,4 @@
+import { openBoxLine } from "./support/work-screen.js";
 import { readFileSync } from "node:fs";
 
 import { buildSscc } from "@markiro/domain";
@@ -252,10 +253,10 @@ describe("the work screen of a shift", () => {
     const screenWork = work(at);
     await screenWork.scanner.listening();
     await screenWork.settled();
-    expect(shown("Открытый короб")).toBe("Короб откроется с первым кодом");
+    expect(openBoxLine()).toBe("0 из 12");
     await screenWork.scan(km("A1"));
     await screenWork.scan(km("A2"));
-    expect(shown("Открытый короб")).toBe("2 из 12");
+    expect(openBoxLine()).toBe("2 из 12");
     expect(shown("Принято в смене")).toBe("2");
     // The plan is in the shift band at the top alone: the lower «Итоги смены» had a second
     // row of it (owner's decision of beta 3.2), and the scan history stands there.
@@ -316,7 +317,7 @@ describe("the work screen of a shift", () => {
     for (let index = 0; index < 12; index += 1) await screenWork.scan(km(`C${index}`));
     expect(shown("Последний короб")).toBe(`(00)${buildSscc(0, PREFIX, 1500)}`);
     expect(shown("Коробов закрыто")).toBe("1");
-    expect(shown("Открытый короб")).toBe("Короб откроется с первым кодом");
+    expect(openBoxLine()).toBe("0 из 12");
     expect(rows(at.db, "SELECT count(*) AS n FROM outbox WHERE kind = 'box_closed'")).toEqual([
       { n: 1 },
     ]);
@@ -331,7 +332,7 @@ describe("the work screen of a shift", () => {
     });
     expect(onClosed.mock.calls[0]?.[0].codeHashes).toHaveLength(12);
     await screenWork.scan(km("C12"));
-    expect(shown("Открытый короб")).toBe("1 из 12");
+    expect(openBoxLine()).toBe("1 из 12");
   });
 
   it("hands the steps of a later plan to every close of a box", async () => {
@@ -388,7 +389,7 @@ describe("the work screen of a shift", () => {
     const lit = () =>
       document.querySelector(".work-screen__last")?.classList.contains("work-screen__last--cue");
     expect(lit()).toBe(true);
-    expect(shown("Открытый короб")).toBe("1 из 12");
+    expect(openBoxLine()).toBe("1 из 12");
     act(() => {
       vi.advanceTimersByTime(CUE_MS - 1);
     });
@@ -526,6 +527,8 @@ describe("the work screen of a shift", () => {
     fireEvent.click(screen.getByRole("button", { name: "Закрыть короб" }));
     await screenWork.press("Закрыть короб");
     expect(shown("Коробов закрыто")).toBe("1");
+    expect(screen.getByText("Предыдущий короб закрыт")).toBeTruthy();
+    expect(openBoxLine()).toBe("0 из 12");
     expect(rows(at.db, "SELECT sscc FROM floor_boxes")).toEqual([
       { sscc: buildSscc(0, PREFIX, 1500) },
     ]);
@@ -559,7 +562,7 @@ describe("the work screen of a shift", () => {
     // scan's `act`: its numbers render in a later turn.
     await waitFor(() => expect(shown("Коробов закрыто")).toBe("1"));
     await screenWork.scan(km("H12"));
-    expect(shown("Открытый короб")).toBe("1 из 12");
+    expect(openBoxLine()).toBe("1 из 12");
   });
 
   it("says when the host has no serials left, and tries again on «Повторить»", async () => {
@@ -639,14 +642,14 @@ describe("the work screen of a shift", () => {
     expect(screenWork.props.signal).toHaveBeenLastCalledWith("error");
     expect(rows(at.db, "SELECT count(*) AS n FROM floor_scans")).toEqual([{ n: 0 }]);
     // The button stays on the keyboard (`aria-disabled`, not `disabled`), and does nothing.
-    const leave = screen.getByRole("button", { name: "Выйти из смены" });
+    const leave = screen.getByRole("button", { name: "Пауза" });
     expect(leave.getAttribute("aria-disabled")).toBe("true");
     expect(leave.hasAttribute("disabled")).toBe(false);
     leave.focus();
     fireEvent.click(leave);
     expect(screenWork.props.onLeave).not.toHaveBeenCalled();
     screenWork.rerender({ leaving: false });
-    const again = screen.getByRole("button", { name: "Выйти из смены" });
+    const again = screen.getByRole("button", { name: "Пауза" });
     expect(again).toBe(leave);
     expect(again.getAttribute("aria-disabled")).toBeNull();
     fireEvent.click(again);
@@ -782,7 +785,7 @@ describe("the work screen never lets a full box take another code", () => {
       { item_count: 1, closed: 1 },
       { item_count: 1, closed: 0 },
     ]);
-    expect(shown("Открытый короб")).toBe("1 из 12");
+    expect(openBoxLine()).toBe("1 из 12");
     expect(shown("Коробов закрыто")).toBe("1");
   });
 
@@ -860,7 +863,7 @@ describe("the work screen never lets a full box take another code", () => {
     expect(shown("Коробов закрыто")).toBe("1");
     expect(screen.queryByText(CLOSE_FAILED)).toBeNull();
     await screenWork.scan(km("Y12"));
-    expect(shown("Открытый короб")).toBe("1 из 12");
+    expect(openBoxLine()).toBe("1 из 12");
   });
 
   it("lets nothing close a box by hand while the operator leaves", async () => {

@@ -160,6 +160,14 @@ it("links same-size stock variants without changing the legacy sources", () => {
   }
 });
 
+it("names the compact Autonom pallet and its lot-number copy consistently", () => {
+  const compact = domain
+    .buildStockLotNumberLabelVariants()
+    .find(({ purpose, spec }) => purpose === "pallet" && spec.widthMm === 58);
+  expect(compact?.sourceName).toBe("Палета 58×40");
+  expect(compact?.name).toBe("Палета 58×40 · номер партии");
+});
+
 it("keeps both name fields in the dated and date-free 75×120 box layouts", () => {
   const boxes = domain
     .buildStockLotNumberLabelVariants()

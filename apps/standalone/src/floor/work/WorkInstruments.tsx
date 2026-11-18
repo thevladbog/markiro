@@ -1,14 +1,12 @@
-import { useLayoutEffect, useRef, useState, type ReactNode, type Ref, type RefObject } from "react";
+import type { ReactNode, Ref } from "react";
 import { useTranslation } from "react-i18next";
-
-import { Button, type ButtonProps } from "@markiro/ui";
 
 import type { LocalExecutor } from "../../local/executor.js";
 import { productMonogram } from "../shifts/product-accent.js";
 import { usePhotoBacking } from "../shifts/photo-backing.js";
 import { ProductPhotoImage, useStoredProductPhoto } from "../shifts/ProductPhoto.js";
 import { formatClock, formatQuantity } from "../shifts/shift-text.js";
-import { cellSerialPlan, serialForCell, type CellSerialPlan } from "./box-cells.js";
+import { CartonFill } from "./CartonFill.js";
 import { ScanCode } from "./ScanCode.js";
 
 /*
@@ -211,183 +209,61 @@ export function OfCount({
   );
 }
 
-export interface BoxCell {
-  from: number;
-  to: number;
-  state: "filled" | "partial" | "next" | "empty";
-}
-
-/** The places of a box as cells: one a place up to 100, a group of places past that (the cloud's). */
-export function buildBoxCells(filled: number, capacity: number): BoxCell[] {
-  const size = capacity <= 100 ? 1 : Math.ceil(capacity / 100);
-  const cells: BoxCell[] = [];
-  for (let from = 1; from <= capacity; from += size) {
-    const to = Math.min(capacity, from + size - 1);
-    const state =
-      filled >= to
-        ? "filled"
-        : filled >= from
-          ? "partial"
-          : filled + 1 >= from && filled + 1 <= to
-            ? "next"
-            : "empty";
-    cells.push({ from, to, state });
-  }
-  return cells;
-}
-
-export interface BoxFillProps {
+interface BoxFillProps {
   items: number;
   capacity: number;
-  /** Changes with every accepted code: the cell it filled pulses once. */
-  acceptedToken: number;
-  /** The action row under the cells (the box's close). */
   actions: ReactNode;
-  /** The serials (AI 21) of the codes in the box, in the order of their places (1, 2, 3...). */
-  serials?: readonly string[];
+  previousBoxClosed?: boolean;
 }
 
-/**
- * Whether the cells have room for their serial: the grid's content box is measured (and again
- * on every resize) and `cellSerialPlan` decides from it; before a layout exists the answer is no.
- */
-function useCellSerialPlan(
-  gridRef: RefObject<HTMLDivElement | null>,
-  columns: number,
-  rows: number,
-  numbered: boolean,
-  serialLength: number,
-): CellSerialPlan {
-  const [plan, setPlan] = useState<CellSerialPlan>({ show: false });
-  useLayoutEffect(() => {
-    const grid = gridRef.current;
-    if (grid === null) return undefined;
-    const measure = () => {
-      const style = getComputedStyle(grid);
-      const next = cellSerialPlan({
-        width: grid.clientWidth,
-        height: grid.clientHeight,
-        columns,
-        rows,
-        gap: parseFloat(style.columnGap) || 0,
-        serialLength,
-        numbered,
-      });
-      setPlan((current) =>
-        current.show === next.show &&
-        (!current.show ||
-          !next.show ||
-          (current.fontPx === next.fontPx && current.chars === next.chars))
-          ? current
-          : next,
-      );
-    };
-    measure();
-    if (typeof ResizeObserver === "undefined") return undefined;
-    const observer = new ResizeObserver(measure);
-    observer.observe(grid);
-    return () => observer.disconnect();
-  }, [gridRef, columns, rows, numbered, serialLength]);
-  return plan;
-}
-
-/**
- * The open box as cells (the cloud's `BoxFillInstrument`): its title and
- * count in one row, a cell a place, the next place outlined, and its action
- * under them. The term and its value stay one after the other («Открытый
- * короб» · «2 из 12»), as the floor's figures are read.
- */
-export function BoxFill({ items, capacity, acceptedToken, actions, serials = [] }: BoxFillProps) {
+export function BoxFill({ items, capacity, actions, previousBoxClosed = false }: BoxFillProps) {
   const { t } = useTranslation();
-  const gridRef = useRef<HTMLDivElement>(null);
-  const usable = capacity > 0 ? capacity : null;
-  const fill = usable === null ? 0 : Math.min(items, usable);
-  const cells = usable === null ? [] : buildBoxCells(fill, usable);
-  const grouped = usable !== null && usable > 100;
-  const large = usable !== null && usable <= 10;
-  const rows = Math.max(1, Math.ceil(cells.length / 10));
-  const serialLength = serials.reduce((longest, serial) => Math.max(longest, serial.length), 0);
-  const serialPlan = useCellSerialPlan(
-    gridRef,
-    large ? cells.length : 10,
-    large ? 1 : rows,
-    large,
-    serialLength,
-  );
-  const text =
-    items === 0
-      ? t("floor.work.boxEmpty")
-      : t("floor.work.boxItems", {
-          quantity: formatQuantity(items),
-          capacity: formatQuantity(capacity),
-        });
+  const title = t(items === 0 ? "floor.work.newBox" : "floor.work.box");
+  const remaining = Math.max(0, capacity - items);
   return (
-    <section
-      className="work-instrument work-box-fill"
-      aria-labelledby="work-box-fill-title"
-      data-grouped={grouped}
-    >
-      <div className="work-box-fill__head">
-        <h2 id="work-box-fill-title">{t("floor.work.box")}</h2>
-        {items === 0 ? (
-          <strong className="work-box-fill__count" data-empty="true">
-            {text}
-          </strong>
-        ) : (
-          <OfCount
-            className="work-box-fill__count"
-            quantity={items}
-            capacity={capacity}
-            unit={null}
-          />
+    <section className="work-instrument work-box-fill" aria-labelledby="work-box-fill-title">
+      <h2 id="work-box-fill-title">{title}</h2>
+      <div className="work-box-fill__body">
+        {capacity > 0 && (
+          <div
+            className="work-box-fill__illustration"
+            role="progressbar"
+            aria-label={title}
+            aria-valuemin={0}
+            aria-valuemax={capacity}
+            aria-valuenow={Math.min(items, capacity)}
+            aria-valuetext={t("floor.work.boxItems", {
+              quantity: formatQuantity(items),
+              capacity: formatQuantity(capacity),
+            })}
+          >
+            <CartonFill fraction={Math.min(items / capacity, 1)} />
+          </div>
         )}
-      </div>
-      {usable !== null && (
-        <div
-          ref={gridRef}
-          className="work-box-fill__grid"
-          data-dense={cells.length > 20}
-          data-grouped={grouped}
-          data-large={large ? "true" : undefined}
-          style={{
-            gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
-            ...(large ? { gridTemplateColumns: `repeat(${cells.length}, minmax(0, 1fr))` } : {}),
-          }}
-          role="progressbar"
-          aria-label={t("floor.work.box")}
-          aria-valuemin={0}
-          aria-valuemax={usable}
-          aria-valuenow={fill}
-          aria-valuetext={text}
-        >
-          {cells.map((cell) => {
-            const latest = acceptedToken > 0 && fill > 0 && fill >= cell.from && fill <= cell.to;
-            const serial =
-              serialPlan.show && cell.state === "filled" ? serials[cell.from - 1] : undefined;
-            return (
-              <span
-                key={`${cell.from}:${latest ? acceptedToken : "stable"}`}
-                className="work-box-fill__cell"
-                data-state={cell.state}
-                data-latest={latest ? "true" : undefined}
-                aria-hidden="true"
-              >
-                {large ? <span className="work-box-fill__number">{cell.from}</span> : null}
-                {serial !== undefined && serialPlan.show && (
-                  <span
-                    className="work-box-fill__serial"
-                    style={{ fontSize: `${serialPlan.fontPx}px` }}
-                    data-serial-cell=""
-                  >
-                    {serialForCell(serial, serialPlan.chars)}
-                  </span>
-                )}
-              </span>
-            );
-          })}
+        <div className="work-box-fill__summary" data-wide={capacity >= 1000}>
+          {capacity > 0 ? (
+            <OfCount
+              className="work-box-fill__count"
+              quantity={items}
+              capacity={capacity}
+              unit={null}
+            />
+          ) : (
+            <strong className="work-box-fill__count">{formatQuantity(items)}</strong>
+          )}
+          <span className="work-box-fill__caption">{t("floor.work.boxAccepted")}</span>
+          {capacity > 0 && (
+            <strong
+              className="work-box-fill__remaining"
+              data-last={remaining === 1 || previousBoxClosed}
+            >
+              {previousBoxClosed
+                ? t("floor.work.previousBoxClosed")
+                : t("floor.work.boxRemaining", { quantity: formatQuantity(remaining) })}
+            </strong>
+          )}
         </div>
-      )}
-      {grouped && <p className="work-box-fill__grouped">{t("floor.work.layout.grouped")}</p>}
+      </div>
       <div className="work-box-fill__actions">{actions}</div>
     </section>
   );
@@ -523,19 +399,5 @@ export function WorkFacts({ facts }: WorkFactsProps) {
         ))}
       </dl>
     </section>
-  );
-}
-
-/**
- * A floor button of the footer: the kit's 84 px action, filling its third of the row (the
- * footer's grid gives it the width).
- */
-export function FooterAction({ className, ...props }: ButtonProps) {
-  return (
-    <Button
-      size="floor"
-      className={`work-footer__action floor-primary${className === undefined ? "" : ` ${className}`}`}
-      {...props}
-    />
   );
 }

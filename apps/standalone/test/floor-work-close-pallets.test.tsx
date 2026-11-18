@@ -24,16 +24,16 @@ import { renderWork, type WorkHarness } from "./support/work-screen.js";
 const PALLET_SSCC = buildSscc(PALLET_EXTENSION, PREFIX, 0);
 const BOX_SSCC = buildSscc(0, PREFIX, 1500);
 const CLOSED = "Смена OCT26-004 закрыта на этой станции";
-const QUESTION = "На паллете 2 из 40 коробов — закрыть?";
+const QUESTION = "На палете 2 из 40 коробов — закрыть?";
 const TITLE = "Закрытие смены OCT26-004";
 const STALE = "Пока вы смотрели итоги, смена изменилась: итоги посчитаны заново.";
 const AFTER_LABEL = "После работы с этикеткой вы вернётесь к закрытию смены.";
-const CLOSE_PALLET = "Закрыть паллету";
+const CLOSE_PALLET = "Закрыть палету";
 const CONFIRM_CLOSE = "Подтвердить закрытие";
 const DEFECT = "Производственный брак";
 const REFUSED = "Скан не принят: смена закрыта на этой станции.";
 const MOVED = "Состояние этикетки изменилось — показано текущее.";
-const SHIFT_OPEN = "Смена не закрыта: когда паллета закроется, нажмите «Закрыть смену» ещё раз.";
+const SHIFT_OPEN = "Смена не закрыта: когда палета закроется, нажмите «Закрыть смену» ещё раз.";
 const noPalletPrinter = { assignments: { box: "zebra", pallet: null, duplicate: null } } as const;
 
 // Set by a test: the next check of a label is refused as one its job cannot be checked from.
@@ -179,7 +179,7 @@ async function skipTwice(work: WorkHarness): Promise<void> {
 }
 
 /**
- * Two boxes on the open pallet of 40, then «Закрыть паллету» whose
+ * Two boxes on the open pallet of 40, then «Закрыть палету» whose
  * pallet label waits for its check, with the intention to close after it.
  */
 async function palletLabelChecked(at: PalletStation): Promise<WorkHarness> {
@@ -198,7 +198,7 @@ async function palletLabelChecked(at: PalletStation): Promise<WorkHarness> {
   await work.press("Закрыть смену");
   expect(await screen.findByText(QUESTION)).toBeTruthy();
   await work.press(CLOSE_PALLET);
-  expect(screen.getByText("Отсканируйте SSCC на этикетке паллеты.")).toBeTruthy();
+  expect(screen.getByText("Отсканируйте SSCC на этикетке палеты.")).toBeTruthy();
   expect(screen.getByText(AFTER_LABEL)).toBeTruthy();
   return work;
 }
@@ -248,10 +248,10 @@ describe("the close of a shift with an open pallet (plan ПЛ-Ц)", () => {
     expect(screen.queryByText(/План выполнен/)).toBeNull();
 
     await work.scan(`(00)${BOX_SSCC}`);
-    expect(screen.getByText("На паллете 1 из 40 коробов — закрыть?")).toBeTruthy();
+    expect(screen.getByText("На палете 1 из 40 коробов — закрыть?")).toBeTruthy();
     expect(screen.queryByText(/План выполнен/)).toBeNull();
-    await work.press("Закрыть паллету");
-    expect(screen.getByText("Отсканируйте SSCC на этикетке паллеты.")).toBeTruthy();
+    await work.press("Закрыть палету");
+    expect(screen.getByText("Отсканируйте SSCC на этикетке палеты.")).toBeTruthy();
     expect(screen.queryByText(/План выполнен/)).toBeNull();
     expect(localState(at)).toBeNull();
 
@@ -269,7 +269,49 @@ describe("the close of a shift with an open pallet (plan ПЛ-Ц)", () => {
     ]);
   });
 
-  it("asks «На паллете N из M коробов — закрыть?» and confirms the shift separately after the pallet closes", async () => {
+  it("shows the station's accepted units, closed boxes and live pallets before and after confirmation", async () => {
+    const at = await palletStation({ capacity: 40, boxCapacity: 1 });
+    holdSscc(at, 37);
+    const work = await twoBoxesThenClose(at);
+    await work.press(CLOSE_PALLET);
+    function counters() {
+      const group = within(screen.getByRole("group", { name: "Итоги станции" }));
+      return group
+        .getAllByRole("term")
+        .map((term) => [term.textContent, term.nextElementSibling?.textContent]);
+    }
+    const expected = [
+      ["Принято, шт.", "2"],
+      ["Коробов закрыто", "2"],
+      ["Палет закрыто", "1"],
+    ];
+    expect(counters()).toEqual(expected);
+    await confirmShortShift(work);
+    await screen.findByText(CLOSED);
+    expect(counters()).toEqual(expected);
+  });
+
+  it("returns to the summary if a pallet was taken apart after the last read", async () => {
+    const at = await palletStation({ capacity: 40, boxCapacity: 1 });
+    const work = await twoBoxesThenClose(
+      at,
+      beforeClose(at, () => {
+        at.db.exec(
+          "UPDATE floor_pallets SET disassembled_at = closed_at WHERE closed_at IS NOT NULL",
+        );
+      }),
+    );
+    await work.press(CLOSE_PALLET);
+    await confirmShortShift(work);
+    await screen.findByText(STALE);
+    expect(
+      screen.getByText("Палет закрыто", { selector: "dt" }).nextElementSibling?.textContent,
+    ).toBe("0");
+    expect(localState(at)).toBeNull();
+    expect(kinds(at)).not.toContain("shift_closed");
+  });
+
+  it("asks «На палете N из M коробов — закрыть?» and confirms the shift separately after the pallet closes", async () => {
     const at = await palletStation({ capacity: 40, boxCapacity: 1 });
     const work = await twoBoxesThenClose(at);
     expect(screen.queryByRole("button", { name: "Подтвердить закрытие" })).toBeNull();
@@ -305,7 +347,7 @@ describe("the close of a shift with an open pallet (plan ПЛ-Ц)", () => {
     await work.press("Закрыть смену");
     expect(await screen.findByText(QUESTION)).toBeTruthy();
     await work.press(CLOSE_PALLET);
-    expect(screen.getByText("Отсканируйте SSCC на этикетке паллеты.")).toBeTruthy();
+    expect(screen.getByText("Отсканируйте SSCC на этикетке палеты.")).toBeTruthy();
     expect(localState(at)).toBeNull();
     await work.scan(`(00)${PALLET_SSCC}`);
     expect(localState(at)).toBeNull();
@@ -331,7 +373,7 @@ describe("the close of a shift with an open pallet (plan ПЛ-Ц)", () => {
     await work.press("Вернуться к работе");
     await work.press("Закрыть смену");
     expect(await screen.findByRole("button", { name: "Подтвердить закрытие" })).toBeTruthy();
-    expect(screen.queryByText(/На паллете/)).toBeNull();
+    expect(screen.queryByText(/На палете/)).toBeNull();
     await work.press("Производственный брак");
     await work.press("Подтвердить закрытие");
     expect(await screen.findByText(CLOSED)).toBeTruthy();
@@ -342,7 +384,7 @@ describe("the close of a shift with an open pallet (plan ПЛ-Ц)", () => {
     const at = await palletStation({ capacity: 40, boxCapacity: 1, palletBlock: false });
     const work = await twoBoxesThenClose(at);
     await work.press(CLOSE_PALLET);
-    expect(screen.getByText("Нет номеров SSCC паллет: паллета не закрыта")).toBeTruthy();
+    expect(screen.getByText("Нет номеров SSCC палет: палета не закрыта")).toBeTruthy();
     expect(kinds(at)).toEqual(["box_closed", "box_closed"]);
     expect(localState(at)).toBeNull();
   });
@@ -358,11 +400,11 @@ describe("the transaction's own check of the open pallet, on every path that clo
     expect(kinds(at)).toEqual(["box_closed", "pallet_closed"]);
     await work.press("Закрыть смену");
     await screen.findByRole("region", { name: TITLE });
-    expect(screen.queryByText(/На паллете/)).toBeNull();
+    expect(screen.queryByText(/На палете/)).toBeNull();
     await work.press("Производственный брак");
     await work.press("Подтвердить закрытие");
     expect(screen.getByText(STALE)).toBeTruthy();
-    expect(screen.getByText("На паллете 1 из 1 коробов — закрыть?")).toBeTruthy();
+    expect(screen.getByText("На палете 1 из 1 коробов — закрыть?")).toBeTruthy();
     expect(localState(at)).toBeNull();
     expect(kinds(at)).toEqual(["box_closed", "pallet_closed"]);
     expect(screen.queryByText(CLOSED)).toBeNull();
@@ -478,7 +520,7 @@ describe("what the summary and the press say of the open pallet", () => {
     );
     await work.press(CLOSE_PALLET);
     expect(screen.getByText(STALE)).toBeTruthy();
-    expect(screen.getByText("На паллете 1 из 40 коробов — закрыть?")).toBeTruthy();
+    expect(screen.getByText("На палете 1 из 40 коробов — закрыть?")).toBeTruthy();
     expect(kinds(at)).toEqual(["box_closed", "box_closed"]);
     expect(localState(at)).toBeNull();
   });
@@ -488,7 +530,7 @@ describe("what the summary and the press say of the open pallet", () => {
     await twoBoxesThenClose(at);
     expect(
       screen.getByText(
-        "Этикетка паллеты уйдёт на печать. После работы с этикеткой вы вернётесь к закрытию смены.",
+        "Этикетка палеты уйдёт на печать. После работы с этикеткой вы вернётесь к закрытию смены.",
       ),
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: CLOSE_PALLET }).className).toContain("mk-btn--floor");
@@ -507,7 +549,7 @@ describe("what the summary and the press say of the open pallet", () => {
     });
     await held.reached();
     expect(work.gate.pending()).toBe(1);
-    expect(screen.getByText("Закрываем паллету…")).toBeTruthy();
+    expect(screen.getByText("Закрываем палету…")).toBeTruthy();
     expect(screen.getByRole("button", { name: CLOSE_PALLET }).getAttribute("aria-disabled")).toBe(
       "true",
     );
@@ -562,7 +604,7 @@ describe("the pallet's label and the pallet's serial inside the close", () => {
     const at = await palletStation({ capacity: 40, boxCapacity: 1, settings: noPalletPrinter });
     const work = await twoBoxesThenClose(at);
     await work.press(CLOSE_PALLET);
-    expect(screen.getByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(screen.getByText("Этикетка палеты не напечатана")).toBeTruthy();
     expect(screen.getByText(AFTER_LABEL)).toBeTruthy();
     expect(
       rows(at.db, "SELECT purpose, state FROM floor_print_jobs WHERE purpose = 'pallet'"),
@@ -610,7 +652,7 @@ describe("the pallet's label and the pallet's serial inside the close", () => {
     for (const serial of [0, 1, 2]) holdSscc(at, serial);
     const work = await twoBoxesThenClose(at);
     await work.press(CLOSE_PALLET);
-    expect(screen.getByText("Паллета не закрыта")).toBeTruthy();
+    expect(screen.getByText("Палета не закрыта")).toBeTruthy();
     // The stop of the shift's close says the shift is NOT closed (the intention is dropped).
     expect(screen.getByText(SHIFT_OPEN)).toBeTruthy();
     expect(kinds(at)).toEqual(["box_closed", "box_closed"]);
@@ -618,7 +660,7 @@ describe("the pallet's label and the pallet's serial inside the close", () => {
     expect(document.activeElement).toBe(document.querySelector(".work-screen__last"));
     await work.press("Повторить");
     expect(kinds(at)).toEqual(["box_closed", "box_closed", "pallet_closed"]);
-    expect(screen.queryByText("Паллета не закрыта")).toBeNull();
+    expect(screen.queryByText("Палета не закрыта")).toBeNull();
     expect(screen.queryByText(SHIFT_OPEN)).toBeNull();
     // The intention to close is not kept: the shift is open, and the operator presses again.
     expect(localState(at)).toBeNull();
@@ -629,11 +671,11 @@ describe("the pallet's label and the pallet's serial inside the close", () => {
     for (const serial of [0, 1, 2]) holdSscc(at, serial);
     const work = await twoBoxesThenClose(at);
     await work.press(CLOSE_PALLET);
-    expect(screen.getByText("Нет номеров SSCC паллет: паллета не закрыта")).toBeTruthy();
+    expect(screen.getByText("Нет номеров SSCC палет: палета не закрыта")).toBeTruthy();
     expect(screen.getByText(SHIFT_OPEN)).toBeTruthy();
     // «Повторить» with the serials still missing: the stop is the close's still.
     await work.press("Повторить");
-    expect(screen.getByText("Нет номеров SSCC паллет: паллета не закрыта")).toBeTruthy();
+    expect(screen.getByText("Нет номеров SSCC палет: палета не закрыта")).toBeTruthy();
     expect(screen.getByText(SHIFT_OPEN)).toBeTruthy();
     // The link brings a block whose first serial is held: the close's stop, in the failed words.
     const requestBlock = vi.fn(async (request: SsccBlockRequest) => ({
@@ -645,7 +687,7 @@ describe("the pallet's label and the pallet's serial inside the close", () => {
     }));
     work.rerender({ online: true, requestBlock });
     await work.settled();
-    expect(await screen.findByText("Паллета не закрыта")).toBeTruthy();
+    expect(await screen.findByText("Палета не закрыта")).toBeTruthy();
     expect(screen.getByText(SHIFT_OPEN)).toBeTruthy();
     expect(kinds(at)).toEqual(["box_closed", "box_closed"]);
     expect(localState(at)).toBeNull();
@@ -683,14 +725,14 @@ describe("an intention to close that outlives its pallet's label never closes th
     await work.scan(km("A1"));
     await saveWorkstationSettings(at.local, verifying());
     await work.press("Закрыть смену");
-    expect(await screen.findByText("На паллете 1 из 2 коробов — закрыть?")).toBeTruthy();
+    expect(await screen.findByText("На палете 1 из 2 коробов — закрыть?")).toBeTruthy();
     await work.press(CLOSE_PALLET);
-    expect(screen.getByText("Отсканируйте SSCC на этикетке паллеты.")).toBeTruthy();
+    expect(screen.getByText("Отсканируйте SSCC на этикетке палеты.")).toBeTruthy();
     expect(screen.getByText(AFTER_LABEL)).toBeTruthy();
     // The pallet's job moves under the screen: its check meets a label that changed.
     at.db.exec("UPDATE floor_print_jobs SET state = 'verified' WHERE purpose = 'pallet'");
     await work.scan(`(00)${PALLET_SSCC}`);
-    expect(screen.queryByText("Отсканируйте SSCC на этикетке паллеты.")).toBeNull();
+    expect(screen.queryByText("Отсканируйте SSCC на этикетке палеты.")).toBeNull();
     // The work goes on; another pallet fills and its label fails at a printer that is gone.
     await saveWorkstationSettings(
       at.local,
@@ -698,7 +740,7 @@ describe("an intention to close that outlives its pallet's label never closes th
     );
     await work.scan(km("A2"));
     await work.scan(km("A3"));
-    expect(screen.getByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(screen.getByText("Этикетка палеты не напечатана")).toBeTruthy();
     const saidAfterLabel = screen.queryByText(AFTER_LABEL) !== null;
     await work.press("Продолжить без этикетки");
     await work.press("Продолжить без этикетки");
@@ -720,7 +762,7 @@ describe("an intention to close that outlives its pallet's label never closes th
     );
     await work.scan(`(00)${PALLET_SSCC}`);
     expect(screen.getByText(MOVED)).toBeTruthy();
-    expect(screen.getByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(screen.getByText("Этикетка палеты не напечатана")).toBeTruthy();
     expect(screen.queryByText(AFTER_LABEL)).toBeNull();
     await skipTwice(work);
     expect(kinds(at).slice(-2)).toEqual(["pallet_closed", "pallet_label"]);
@@ -734,7 +776,7 @@ describe("an intention to close that outlives its pallet's label never closes th
     unresolvable.next = true;
     await work.scan(`(00)${PALLET_SSCC}`);
     expect(screen.getByText(MOVED)).toBeTruthy();
-    expect(screen.getByText("Отсканируйте SSCC на этикетке паллеты.")).toBeTruthy();
+    expect(screen.getByText("Отсканируйте SSCC на этикетке палеты.")).toBeTruthy();
     expect(screen.queryByText(AFTER_LABEL)).toBeNull();
     await work.scan(`(00)${PALLET_SSCC}`);
     await work.settled();
@@ -771,7 +813,7 @@ describe("an intention to close that outlives its pallet's label never closes th
     expect(screen.getByText("Состояние этикетки не прочитано")).toBeTruthy();
     await work.press("Понятно");
     // Nothing was written: the same label stands again, and nothing says the shift closes after it.
-    expect(screen.getByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(screen.getByText("Этикетка палеты не напечатана")).toBeTruthy();
     expect(screen.queryByText(AFTER_LABEL)).toBeNull();
     await skipTwice(work);
     expect(kinds(at).slice(-2)).toEqual(["pallet_closed", "pallet_label"]);
@@ -789,7 +831,7 @@ describe("an intention to close that outlives its pallet's label never closes th
     expect(screen.getByText("Состояние этикетки не прочитано")).toBeTruthy();
     expect(kinds(at).slice(-2)).toEqual(["pallet_closed", "pallet_label"]);
     await work.press("Понятно");
-    expect(screen.queryByText("Этикетка паллеты не напечатана")).toBeNull();
+    expect(screen.queryByText("Этикетка палеты не напечатана")).toBeNull();
     // Another box closes and its label's check is decided.
     await saveWorkstationSettings(
       at.local,
@@ -855,7 +897,7 @@ describe("an intention to close that outlives its pallet's label never closes th
     // A code is gone before the final summary is shown.
     at.db.exec("DELETE FROM floor_codes WHERE rowid = (SELECT min(rowid) FROM floor_codes)");
     await skipTwice(work);
-    const actual = screen.getByText("Факт", { selector: "dt" });
+    const actual = screen.getByText("Принято, шт.", { selector: "dt" });
     expect(actual.nextElementSibling?.textContent).toBe("1");
     expect(screen.getByRole("button", { name: CONFIRM_CLOSE })).toBeTruthy();
     expect(kinds(at).slice(-2)).toEqual(["pallet_closed", "pallet_label"]);
@@ -895,12 +937,12 @@ describe("an intention to close that outlives its pallet's label never closes th
     await work.press("Закрыть смену");
     expect(await screen.findByText(QUESTION)).toBeTruthy();
     await work.press(CLOSE_PALLET);
-    expect(screen.getByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(screen.getByText("Этикетка палеты не напечатана")).toBeTruthy();
     expect(screen.getByText(AFTER_LABEL)).toBeTruthy();
     const sent = shell.sends.length;
     await work.press("Напечатать снова");
     expect(shell.sends.length).toBe(sent + 1);
-    expect(screen.getByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(screen.getByText("Этикетка палеты не напечатана")).toBeTruthy();
     expect(screen.getByText(AFTER_LABEL)).toBeTruthy();
     expect(screen.queryByRole("region", { name: TITLE })).toBeNull();
     expect(kinds(at)).not.toContain("shift_closed");
@@ -940,7 +982,7 @@ const BLOCKED_WORDS: Record<CloseBlocker["kind"], { blocker: CloseBlocker; words
   },
   open_pallet: {
     blocker: { kind: "open_pallet", boxes: 2 },
-    words: "Коробов на открытой паллете: 2. Сначала закройте её.",
+    words: "Коробов на открытой палете: 2. Сначала закройте её.",
   },
   closed: {
     blocker: { kind: "closed" },
@@ -1020,7 +1062,7 @@ describe("the summary's blocked view", () => {
   it("keeps «Подтвердить закрытие» for a summary with no open pallet, even where the screen can close one", () => {
     const onClosePallet = vi.fn();
     const { handlers } = renderPanel({ onClosePallet, palletCapacity: 40 });
-    expect(screen.queryByText(/На паллете/)).toBeNull();
+    expect(screen.queryByText(/На палете/)).toBeNull();
     tap("Подтвердить закрытие");
     expect(handlers.onClose).toHaveBeenCalledExactlyOnceWith(null);
     expect(onClosePallet).not.toHaveBeenCalled();

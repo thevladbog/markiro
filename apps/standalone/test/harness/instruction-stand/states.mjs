@@ -39,7 +39,7 @@ async function setUpPrinter(page) {
   await page.getByLabel("Название").fill("Zebra ZT230");
   await page.getByLabel("Адрес принтера").fill("192.168.10.21");
   await page.getByRole("button", { name: "Готово" }).click();
-  for (const purpose of ["Этикетка короба", "Этикетка паллеты"]) {
+  for (const purpose of ["Этикетка короба", "Этикетка палеты"]) {
     await page.getByRole("combobox", { name: purpose }).click();
     await page.getByRole("option", { name: /Zebra ZT230/ }).click();
   }
@@ -136,7 +136,7 @@ export const STATES = {
       const { page } = await computer("station-1", "station");
       await signInByBadge(page);
       await shiftCard(page, ACTIVE_SHIFT).getByRole("button").first().click();
-      await page.getByText("Открытый короб").waitFor();
+      await page.getByRole("region", { name: /^(Открытый|Новый) короб$/ }).waitFor();
       await shoot(page);
     },
   },

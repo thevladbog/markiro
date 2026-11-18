@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { LocalExecutor } from "../../local/executor.js";
+import { readPartState, type PartState } from "../close/shift-close.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import {
   readParticipation,
@@ -55,4 +56,38 @@ export function useShiftParticipation(input: ShiftParticipationInput): Participa
     return () => clearInterval(timer);
   }, [online, shared, onRefresh]);
   return participation;
+}
+
+/** Follow a closed part's receipts until the operator leaves the results screen. */
+export function useClosedPartState(
+  {
+    local,
+    pairing: { hostId, deviceId },
+    shiftReads,
+    outboxVersion,
+  }: {
+    local: LocalExecutor;
+    pairing: Pairing;
+    shiftReads?: number;
+    outboxVersion?: number;
+  },
+  shiftId: string,
+  closedPart: boolean,
+) {
+  const state = useState<PartState | null>(null);
+  const [, setPartState] = state;
+  useEffect(() => {
+    if (!closedPart) return;
+    let current = true;
+    void readPartState(local, { hostId, deviceId }, shiftId).then(
+      (part) => {
+        if (current && part !== null) setPartState(part);
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [local, hostId, deviceId, shiftId, closedPart, shiftReads, outboxVersion, setPartState]);
+  return state;
 }

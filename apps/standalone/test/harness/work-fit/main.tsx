@@ -12,12 +12,12 @@ import type { LocalExecutor } from "../../../src/local/executor.js";
 import { ShiftCard, type CardAction } from "../../../src/floor/shifts/ShiftCard.js";
 import type { ShiftCopy } from "../../../src/floor/shifts/shift-copies.js";
 import { PalletStrip } from "../../../src/floor/pallets/PalletStrip.js";
+import { ShiftActionButton } from "../../../src/floor/kit/ShiftActionButton.js";
 import { FloorFooter } from "../../../src/floor/shifts/FloorScreen.js";
 import { ScanHistory } from "../../../src/floor/work/ScanHistory.js";
 import type { ScanHistoryRow } from "../../../src/floor/work/scan-history.js";
 import {
   BoxFill,
-  FooterAction,
   LastScan,
   ShiftBand,
   WorkFacts,
@@ -219,8 +219,6 @@ function Harness() {
                       <BoxFill
                         items={items}
                         capacity={capacity}
-                        acceptedToken={1}
-                        serials={rows.map((row) => row.serial ?? "").slice(0, items)}
                         actions={
                           <>
                             <Button size="floor" variant="secondary" data-action="close-box">
@@ -281,9 +279,15 @@ function Harness() {
               </div>
             </div>
             <FloorFooter ariaLabel="Действия" className="work-footer">
-              <FooterAction variant="secondary">Исключения</FooterAction>
-              <FooterAction variant="warning-outline">Выйти</FooterAction>
-              <FooterAction variant="destructive-outline">Закрыть смену</FooterAction>
+              <ShiftActionButton footer action="exceptions">
+                Исключения
+              </ShiftActionButton>
+              <ShiftActionButton footer action="pause">
+                Пауза
+              </ShiftActionButton>
+              <ShiftActionButton footer action="close">
+                Закрыть смену
+              </ShiftActionButton>
             </FloorFooter>
           </section>
         </div>

@@ -77,7 +77,6 @@ describe("the work screen below 780 px of window height", () => {
     }
     // The open box's three buttons keep their 64 px row (the base rule, which the compact block never lowers).
     expect(work).toMatch(/\.work-box-fill__actions \.mk-btn \{[^}]*min-height: 64px !important/);
-    expect(compact).toContain("minmax(64px, auto)");
   });
 
   it("slims the band to a title line and a row of chips, and drops the plan's bar before the count", () => {
@@ -89,8 +88,11 @@ describe("the work screen below 780 px of window height", () => {
     expect(compact).not.toMatch(/\.work-shift-band__total[^{]*\{[^}]*display: none/);
   });
 
-  it("gives the open box's cells the remaining height, never under a readable 72 px", () => {
-    expect(compact).toContain("grid-template-rows: auto minmax(72px, 1fr) minmax(64px, auto)");
+  it("reserves 72 px for the carton and 64 px for its controls on short screens too", () => {
+    expect(work).toMatch(
+      /\.work-box-fill \{[^}]*grid-template-rows: auto minmax\(72px, 1fr\) minmax\(64px, auto\)/,
+    );
+    expect(compact).not.toMatch(/\.work-box-fill \{[^}]*grid-template-rows:/);
   });
 
   it("slims the pallet strip to the height of its own 64 px button", () => {
@@ -157,7 +159,7 @@ describe("the stages of the work on the short window", () => {
     expect(short).toMatch(/\.shift-close__body \{[^}]*overflow-y: auto/);
     // The actions are never in the body (they stay pinned under it).
     expect(read("src/floor/close/ShiftClosePanel.tsx")).toMatch(
-      /<\/div>\s*<div className="shift-close__actions">\s*\{back\}\s*<Button\s*size="floor"\s*disabled=\{summary\.reasonRequired/,
+      /<\/div>\s*<div className="shift-close__actions">\s*\{back\}\s*<ShiftActionButton\s*action="close"\s*disabled=\{summary\.reasonRequired/,
     );
     for (const { selector, px } of heights(short)) {
       if (/\.mk-btn|button|choice/.test(selector)) expect(px, selector).toBeGreaterThanOrEqual(64);

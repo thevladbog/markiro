@@ -23,7 +23,7 @@ const AVAILABLE: HostUpdateOffer = {
     version: "0.3.0",
     channel: "stable",
     releasedAt: "2026-11-02T10:00:00Z",
-    notes: ["Печать паллет быстрее", "Исправлена сверка"],
+    notes: ["Печать палет быстрее", "Исправлена сверка"],
     minUpgradeFrom: "0.2.0",
     protocol: 6,
     minProtocol: 6,
@@ -78,7 +78,7 @@ describe("«Станция»: the version block", () => {
     const value = entry({ offer: AVAILABLE });
     inTheme(value, <StationPanel facts={facts} />);
     expect(screen.getByText("Доступна версия 0.3.0")).toBeTruthy();
-    expect(screen.getByText("Печать паллет быстрее")).toBeTruthy();
+    expect(screen.getByText("Печать палет быстрее")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Обновить" }));
     expect(value.open).toHaveBeenCalledTimes(1);
   });

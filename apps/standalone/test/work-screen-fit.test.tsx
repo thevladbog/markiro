@@ -6,21 +6,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
 
-import {
-  cellBox,
-  cellSerialPlan,
-  serialForCell,
-  type CellSerialInput,
-} from "../src/floor/work/box-cells.js";
 import { alphaOfSample, photoBacking, type PhotoAlpha } from "../src/floor/shifts/photo-backing.js";
 import { ScanCode } from "../src/floor/work/ScanCode.js";
 import { ScanHistory, wholeRowsThatFit } from "../src/floor/work/ScanHistory.js";
 import { codeDisplay, type ScanHistoryRow } from "../src/floor/work/scan-history.js";
-import { ShiftBand, buildBoxCells } from "../src/floor/work/WorkInstruments.js";
+import { BoxFill, ShiftBand } from "../src/floor/work/WorkInstruments.js";
 
 /**
  * The work screen's fit on the real terminal (owner photo, 2026-10-16): the box buttons, the
- * history's whole rows, the serial in the code lines and in the box's cells, and the photo's
+ * history's whole rows, the angled carton, the serial in the code lines, and the photo's
  * backing. The pixel measurement itself is `test/harness/work-fit/measure.mjs` (a browser).
  */
 const APP = process.cwd();
@@ -141,6 +135,26 @@ describe("the history shows whole rows only", () => {
   });
 });
 
+describe("the angled box follows the accepted quantity", () => {
+  it.each([1, 2, 6, 12, 18, 20, 24, 30, 100_000])("fills and resets a box of %i", (capacity) => {
+    const view = (items: number) => <BoxFill items={items} capacity={capacity} actions={null} />;
+    const { rerender } = render(view(0));
+    for (const items of [0, 1, Math.floor(capacity / 2), capacity, 0]) {
+      rerender(view(items));
+      const progress = screen.getByRole("progressbar");
+      expect(progress.getAttribute("aria-valuenow")).toBe(String(items));
+      expect(progress.getAttribute("aria-valuemax")).toBe(String(capacity));
+      expect(progress.querySelector("svg")).toBeTruthy();
+      const volume = progress.querySelector(".work-carton__surface");
+      if (items > 0) {
+        expect(volume?.getAttribute("transform")).toBe(`translate(0 ${-69 * (items / capacity)})`);
+      } else {
+        expect(volume).toBeNull();
+      }
+    }
+  });
+});
+
 describe("the open box's buttons", () => {
   it("are one height of at least 64 px, centred, two lines at most, never cut", () => {
     const actions = rule(WORK, ".work-box-fill__actions");
@@ -152,110 +166,6 @@ describe("the open box's buttons", () => {
     expect(button).toMatch(/text-align:\s*center/);
     expect(button).toMatch(/white-space:\s*normal/);
     expect(button).toMatch(/overflow-wrap:\s*normal/);
-  });
-
-  it("puts the title on the left of the header and the counter on its right edge", () => {
-    const head = rule(WORK, ".work-box-fill__head");
-    expect(head).toMatch(/justify-content:\s*space-between/);
-    expect(head).toMatch(/flex-wrap:\s*nowrap/);
-    expect(head).toMatch(/align-items:\s*baseline/);
-    expect(rule(WORK, ".work-box-fill__count")).toMatch(/margin-inline-start:\s*auto/);
-  });
-});
-
-describe("the serial in a box's cells is decided by the cell's computed size", () => {
-  const SERIAL = 20; // the longest a GS1 serial is
-  const GAP = 8;
-  /** The box column's grid at 1280 px: 640 wide; its height is the window's less the rest. */
-  const GRID = {
-    "1280x1024": { width: 640, height: 489 },
-    "1280x800": { width: 640, height: 281 },
-  } as const;
-  const plan = (capacity: number, size: keyof typeof GRID, serialLength = SERIAL) => {
-    const large = capacity <= 10;
-    const input: CellSerialInput = {
-      ...GRID[size],
-      columns: large ? capacity : 10,
-      rows: large ? 1 : Math.ceil(capacity / 10),
-      gap: large ? GAP : 5,
-      serialLength,
-      numbered: large,
-    };
-    return cellSerialPlan(input);
-  };
-
-  it("shows it whole in a wide cell (3 places) and cut from the head in a narrower one (6)", () => {
-    for (const size of ["1280x1024", "1280x800"] as const) {
-      const three = plan(3, size);
-      expect(three.show).toBe(true);
-      if (three.show) {
-        expect(three.fontPx).toBeGreaterThanOrEqual(12);
-        expect(three.chars).toBe(SERIAL);
-      }
-      const six = plan(6, size);
-      expect(six.show).toBe(true);
-      if (six.show) {
-        expect(six.chars).toBeLessThan(SERIAL);
-        // A cut serial spends one character on the «…»; at least six of its last remain.
-        expect(six.chars - 1).toBeGreaterThanOrEqual(6);
-      }
-    }
-  });
-
-  it("hides it where the cell is too narrow for six readable characters (10), and where cells carry no number (12, 24, 48)", () => {
-    for (const size of ["1280x1024", "1280x800"] as const) {
-      expect(plan(10, size).show).toBe(false);
-      for (const capacity of [12, 24, 48]) expect(plan(capacity, size).show).toBe(false);
-    }
-  });
-
-  it("hides it in a cell too low for the number and a line of serial", () => {
-    expect(
-      cellSerialPlan({
-        width: 640,
-        height: 60,
-        columns: 3,
-        rows: 1,
-        gap: GAP,
-        serialLength: SERIAL,
-        numbered: true,
-      }).show,
-    ).toBe(false);
-  });
-
-  it("needs only the serial's own length: a short serial fits a narrow cell whole", () => {
-    expect(plan(10, "1280x1024", 4).show).toBe(true);
-  });
-
-  it("never shows a serial with nothing to show or no layout", () => {
-    expect(plan(3, "1280x1024", 0).show).toBe(false);
-    expect(
-      cellSerialPlan({
-        width: 0,
-        height: 0,
-        columns: 3,
-        rows: 1,
-        gap: 8,
-        serialLength: 9,
-        numbered: true,
-      }).show,
-    ).toBe(false);
-  });
-
-  it("computes a cell's box from the grid minus its gaps", () => {
-    expect(cellBox({ width: 640, height: 300, columns: 3, rows: 1, gap: 8 })).toEqual({
-      width: (640 - 16) / 3,
-      height: 300,
-    });
-  });
-
-  it("cuts a serial from its head to the cell's characters", () => {
-    expect(serialForCell("2L=o8Zk3VqXp1", 13)).toBe("2L=o8Zk3VqXp1");
-    expect(serialForCell("2L=o8Zk3VqXp1", 9)).toBe("…Zk3VqXp1");
-  });
-
-  it("builds the cells the plan is about: one a place up to ten", () => {
-    expect(buildBoxCells(1, 3).map((cell) => cell.state)).toEqual(["filled", "next", "empty"]);
   });
 });
 

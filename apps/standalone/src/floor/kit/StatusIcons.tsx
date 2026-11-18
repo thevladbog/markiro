@@ -36,6 +36,8 @@ export type GlyphName =
   | "warning"
   | "circle-notch"
   | "info"
+  | "octagon-stop"
+  | "pause"
   | "stop"
   | "x"
   | "arrow-left"
@@ -219,6 +221,8 @@ const PATHS: Record<GlyphName, ReactNode> = {
       <path d="M12 7.7v.1" />
     </>
   ),
+  "octagon-stop": <path d="M7 2h10l5 5v10l-5 5H7l-5-5V7z M8.5 8.5h7v7h-7z" />,
+  pause: <path d="M5 3h4v18H5zM15 3h4v18h-4z" fill="currentColor" stroke="none" />,
   stop: (
     <>
       <circle cx="12" cy="12" r="8.5" />

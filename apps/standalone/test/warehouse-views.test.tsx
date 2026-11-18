@@ -159,8 +159,8 @@ describe("the job's detail", () => {
   });
 
   it("counts a pallet's boxes first", () => {
-    jobView(pallet(), { templateName: "Паллета 100×150" });
-    expect(screen.getByLabelText("Паллета")).toBeTruthy();
+    jobView(pallet(), { templateName: "Палета 100×150" });
+    expect(screen.getByLabelText("Палета")).toBeTruthy();
     const facts = screen.getAllByText(/^(Коробов|Количество|Дата производства)$/);
     expect(facts[0]?.textContent).toBe("Коробов");
     expect(screen.getByText("Коробов").nextElementSibling?.textContent).toBe("18");
@@ -256,9 +256,9 @@ describe("the job's detail", () => {
 
   it("makes the workstation the main answer when it is the printer that is missing", () => {
     jobView(pallet({ state: "failed", errorCode: "printer_a4", printer: null }), {
-      resultText: "Принтер паллет печатает листы А4, а это задание — термоэтикетка.",
+      resultText: "Принтер палет печатает листы А4, а это задание — термоэтикетка.",
     });
-    expect(screen.getByText("Принтер паллет печатает листы А4")).toBeTruthy();
+    expect(screen.getByText("Принтер палет печатает листы А4")).toBeTruthy();
     expect(screen.getAllByText("Не назначен").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Рабочее место" }).className).toContain(
       "floor-primary",
@@ -384,12 +384,12 @@ describe("the session's view", () => {
       within(group)
         .getAllByRole("radio")
         .map((radio) => radio.textContent),
-    ).toEqual(["Все", "Короба", "Паллеты", "Единицы", "Листы А4"]);
+    ).toEqual(["Все", "Короба", "Палеты", "Единицы", "Листы А4"]);
     expect(
       within(group).getByRole("radio", { name: "Листы А4" }).getAttribute("aria-checked"),
     ).toBe("true");
     expect(screen.getAllByRole("button", { name: /^Открыть:/ })).toHaveLength(1);
-    fireEvent.click(within(group).getByRole("radio", { name: "Паллеты" }));
+    fireEvent.click(within(group).getByRole("radio", { name: "Палеты" }));
     expect(calls.onFilter).toHaveBeenCalledWith("pallet");
     cleanup();
     sessionView({ journal: [job({ id: "only" })], filter: "unit" });
@@ -673,7 +673,7 @@ describe("the typed code", () => {
     ).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
     expect(calls.onCancel).toHaveBeenCalledTimes(1);
-    fireEvent.keyDown(screen.getByLabelText(/Номер короба или паллеты/), { key: "Escape" });
+    fireEvent.keyDown(screen.getByLabelText(/Номер короба или палеты/), { key: "Escape" });
     expect(calls.onCancel).toHaveBeenCalledTimes(2);
   });
 });

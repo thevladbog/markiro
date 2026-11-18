@@ -245,7 +245,7 @@ describe("the label panel of a shift that prints the duplicate", () => {
       "mk-btn--floor",
     );
     expect(document.querySelector(".work-footer")?.getAttribute("aria-label")).toBe(
-      "История этикеток, выход из смены, закрытие смены",
+      "История этикеток, пауза, закрытие смены",
     );
   });
 
@@ -558,6 +558,9 @@ describe("the window of the printed label's check", () => {
     const work = open(at, { onLeave });
     await ready(work);
     await work.scan(km("L1", { tail: "Zf8K" }));
+    expect(
+      screen.getByRole("button", { name: "Пауза" }).querySelector('svg[aria-hidden="true"]'),
+    ).toBeTruthy();
     await work.press("Пауза");
     expect(onLeave).toHaveBeenCalledTimes(1);
     expect(jobs(at)).toEqual([expect.objectContaining({ verification: "pending" })]);

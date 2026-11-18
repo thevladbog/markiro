@@ -40,7 +40,7 @@ import { ExportError, buildExportFile } from "./transform.mjs";
 import { isCivilDate, runHistoryPsql, writeHistory } from "./history.mjs";
 
 const SQL = fileURLToPath(new URL("./export.sql", import.meta.url));
-const EXTENSIONS = { 0: "короба", 1: "паллеты" };
+const EXTENSIONS = { 0: "короба", 1: "палеты" };
 
 /** What `--help` prints: the options, where the connection comes from, and what the file is. */
 export const USAGE = [
@@ -328,7 +328,7 @@ export async function main(argv, deps = {}) {
       );
       stdout(`Файл: ${path}`);
       stdout(
-        `История с ${manifest.since}: смен ${manifest.counts.shifts}, кодов ${manifest.counts.codes}, коробов ${manifest.counts.boxes}, вложений ${manifest.counts.items}, паллет ${manifest.counts.pallets}, владельцев ${manifest.counts.owners}; частей ${manifest.parts.length}`,
+        `История с ${manifest.since}: смен ${manifest.counts.shifts}, кодов ${manifest.counts.codes}, коробов ${manifest.counts.boxes}, вложений ${manifest.counts.items}, палет ${manifest.counts.pallets}, владельцев ${manifest.counts.owners}; частей ${manifest.parts.length}`,
       );
       stdout(`Контрольная сумма: ${manifest.checksum}`);
       stderr(

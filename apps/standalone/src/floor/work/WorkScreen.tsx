@@ -27,13 +27,7 @@ import {
   type CloseNote,
   type ClosedNumbers,
 } from "../close/ShiftClosePanel.js";
-import {
-  closeShift,
-  readCloseSummary,
-  readPartState,
-  type CloseSummary,
-  type PartState,
-} from "../close/shift-close.js";
+import { closeShift, readCloseSummary, type CloseSummary } from "../close/shift-close.js";
 import {
   BoxUnavailableError,
   clearOpenBox,
@@ -102,11 +96,12 @@ import type { PrintRuntime } from "../print/print-runtime.js";
 import { sheetWithoutEgais, shiftLabelRender } from "../print/shift-render.js";
 import type { ScanSource } from "../scan-source.js";
 import { readWorkstationSettings } from "../setup/workstation-settings.js";
+import { ShiftActionButton } from "../kit/ShiftActionButton.js";
 import { FloorFooter } from "../shifts/FloorScreen.js";
 import type { WorkShift } from "../shifts/shift-copies.js";
 import { activeOthers, sharedCount, sharedParticipation } from "../shifts/shift-participation.js";
 import { formatQuantity } from "../shifts/shift-text.js";
-import { useShiftParticipation } from "./use-shift-participation.js";
+import { useClosedPartState, useShiftParticipation } from "./use-shift-participation.js";
 import type { RenderUnitLabel } from "../unit-labels/unit-label-render.js";
 import {
   printsUnitLabels,
@@ -137,20 +132,12 @@ import { createWorkQueue } from "./work-queue.js";
 import {
   readLostCodes,
   readOpenBox,
-  readOpenBoxSerials,
   readValidationCounts,
   readWorkTotals,
   type ValidationCounts,
   type WorkTotals,
 } from "./work-reads.js";
-import {
-  BoxFill,
-  FooterAction,
-  LastScan,
-  ShiftBand,
-  WorkFacts,
-  type LastTone,
-} from "./WorkInstruments.js";
+import { BoxFill, LastScan, ShiftBand, WorkFacts, type LastTone } from "./WorkInstruments.js";
 import "./work-screen.css";
 
 /**
@@ -827,6 +814,7 @@ export function WorkScreen(props: WorkScreenProps) {
         : shift.snapshot.boxTemplate.spec;
   const { t } = useTranslation();
   const [totals, setTotals] = useState<WorkTotals | null>(null);
+  const [previousBoxClosed, setPreviousBoxClosed] = useState(false);
   const [last, setLast] = useState<Last | null>(null);
   const [flash, setFlash] = useState<{
     tone: SignalTone;
@@ -889,35 +877,13 @@ export function WorkScreen(props: WorkScreenProps) {
     ...(props.onRefreshShifts === undefined ? {} : { onRefresh: props.onRefreshShifts }),
   });
   const sharedPart = sharedParticipation(participation);
-  // What became of the close of this station's part of a shared shift (plan 2b).
-  const [partState, setPartState] = useState<PartState | null>(null);
-  // Read when the part is closed here, and again after every batch of receipts and every list.
-  const closedHere = stop?.kind === "closed";
   const sharedHere = sharedPart !== null;
   const { hostId: partHost, deviceId: partDevice } = props.pairing;
-  useEffect(() => {
-    if (!closedHere || !sharedHere) return undefined;
-    let cancelled = false;
-    readPartState(props.local, { hostId: partHost, deviceId: partDevice }, shift.copy.id).then(
-      (state) => {
-        // An unknown read (no row: the shift copy is gone) keeps what was known before.
-        if (!cancelled && state !== null) setPartState(state);
-      },
-      () => undefined,
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    closedHere,
-    sharedHere,
-    props.local,
-    partHost,
-    partDevice,
+  const [partState, setPartState] = useClosedPartState(
+    props,
     shift.copy.id,
-    props.outboxVersion,
-    props.shiftReads,
-  ]);
+    sharedHere && stop?.kind === "closed",
+  );
 
   // This station's codes the host counts for no one here (final review I2): read while the shift
   // is shared, again after every batch of receipts (a `conflict`), every notice read that brought a
@@ -1119,6 +1085,7 @@ export function WorkScreen(props: WorkScreenProps) {
   /** After a box closed (also one read back after a lost answer): tell, and keep serials in stock. */
   const afterClosed = useCallback(
     (box: ClosingBox) => {
+      if (alive.current) setPreviousBoxClosed(true);
       live.current.onRecorded();
       try {
         live.current.onClosed?.(box);
@@ -1252,31 +1219,6 @@ export function WorkScreen(props: WorkScreenProps) {
     totals !== null,
   );
 
-  // The serials (AI 21) of the open box's codes, for the cells' second line: read again with the
-  // box's count; a failed read leaves the cells with their numbers alone.
-  const openBoxId = totals?.openBox?.id ?? null;
-  const openBoxCount = totals?.openBox?.itemCount ?? 0;
-  const [boxSerials, setBoxSerials] = useState<string[]>([]);
-  const { local: boxLocal, pairing: boxPairing } = props;
-  useEffect(() => {
-    if (openBoxId === null) {
-      setBoxSerials([]);
-      return undefined;
-    }
-    let cancelled = false;
-    readOpenBoxSerials(boxLocal, boxPairing, openBoxId).then(
-      (serials) => {
-        if (!cancelled) setBoxSerials(serials);
-      },
-      () => {
-        if (!cancelled) setBoxSerials([]);
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [boxLocal, boxPairing, openBoxId, openBoxCount]);
-
   /** «Пауза»: out of the shift; the label is kept for the next entry, where its window opens. */
   const pauseUnit = () => {
     if (!leavingNow()) onLeave();
@@ -1401,7 +1343,11 @@ export function WorkScreen(props: WorkScreenProps) {
     (summary: CloseSummary) =>
       setStop({
         kind: "closed",
-        record: { actualQty: summary.actualQty, closedBoxCount: summary.closedBoxes },
+        record: {
+          actualQty: summary.actualQty,
+          closedBoxCount: summary.closedBoxes,
+          ...(summary.closedPallets === undefined ? {} : { closedPallets: summary.closedPallets }),
+        },
       }),
     [setStop],
   );
@@ -1483,14 +1429,20 @@ export function WorkScreen(props: WorkScreenProps) {
     async (reason: ShiftCloseReasonCode | null, shown: CloseSummary): Promise<void> => {
       try {
         const now = live.current;
-        const guards = [openPalletGuard(pairingOf(now), now.shift.copy.id)];
+        const guards = [openPalletGuard(pairingOf(now), now.shift.copy.id, shown.closedPallets)];
         const result = await closeShift(boxContextOf(live), reason, guards, live.current.online);
         if (result.kind === "closed") {
           live.current.onRecorded();
           // The record was just written to the outbox: its part waits there (final review m4),
           // until the stored receipt's read says more.
           setPartState("queued");
-          setStop({ kind: "closed", record: result.record });
+          setStop({
+            kind: "closed",
+            record: {
+              ...result.record,
+              ...(shown.closedPallets === undefined ? {} : { closedPallets: shown.closedPallets }),
+            },
+          });
           return;
         }
         await showSummary(
@@ -1502,7 +1454,7 @@ export function WorkScreen(props: WorkScreenProps) {
         await closeFailed(shown);
       }
     },
-    [showSummary, readSummaryNow, closeFailed, setStop],
+    [showSummary, readSummaryNow, closeFailed, setStop, setPartState],
   );
 
   const nextCloseStep = useCallback(async (): Promise<void> => {
@@ -1547,6 +1499,7 @@ export function WorkScreen(props: WorkScreenProps) {
       const text = lastText(outcome, say, boxCapacity);
       setLast(outcome);
       if (outcome.kind === "accepted") {
+        setPreviousBoxClosed(false);
         show("ok", say("floor.work.signal.ok"), text === "" ? null : text);
         if (outcome.boxId !== null && boxIsFull(outcome.itemCount, boxCapacity)) {
           await closeBox(true);
@@ -2533,6 +2486,7 @@ export function WorkScreen(props: WorkScreenProps) {
     // A `section`: the app's shell owns the page's `main`.
     <section
       className="work-screen"
+      data-closed={stop?.kind === "closed"}
       aria-label={t("floor.work.title", { number: shift.copy.number })}
       ref={actionsRef}
     >
@@ -2623,8 +2577,7 @@ export function WorkScreen(props: WorkScreenProps) {
                 <BoxFill
                   items={items}
                   capacity={capacity}
-                  acceptedToken={last?.kind === "accepted" ? (totals?.accepted ?? 0) : 0}
-                  serials={boxSerials}
+                  previousBoxClosed={items === 0 && previousBoxClosed}
                   actions={
                     <>
                       {!confirming && (
@@ -2715,56 +2668,62 @@ export function WorkScreen(props: WorkScreenProps) {
           </div>
         </div>
       </div>
-      <FloorFooter
-        className={validation && !printsLabels ? "work-footer work-footer--two" : "work-footer"}
-        ariaLabel={t(
-          printsLabels
-            ? "floor.unitLabels.actions"
-            : validation
-              ? "floor.validation.actions"
-              : "floor.work.layout.actions",
-        )}
-      >
-        {/* A shift that prints the duplicate has its labels' history there (plan РЕЖ part B). */}
-        {printsLabels && (
-          <FooterAction
-            variant="secondary"
-            data-action="unit-history"
-            disabled={stop !== null || leaving}
-            onClick={unit.openHistory}
-          >
-            {t("floor.unitLabels.history")}
-          </FooterAction>
-        )}
-        {/* A validation shift has no exceptions (plan РЕЖ, Р9: the cloud's are its boxes'). */}
-        {!validation && (
-          <FooterAction
-            variant="secondary"
-            data-action="exceptions"
-            disabled={stop !== null || leaving}
-            onClick={() => openExceptions()}
-          >
-            {t("floor.exceptions.open")}
-          </FooterAction>
-        )}
-        {/* On the keyboard while the leave waits: `aria-disabled`, and a press that does nothing. */}
-        <FooterAction
-          variant="warning-outline"
-          aria-disabled={leaving ? true : undefined}
-          style={leaving ? WAITING_STYLE : undefined}
-          onClick={leaving ? undefined : onLeave}
+      {stop?.kind !== "closed" && stop?.kind !== "unit_label" && (
+        <FloorFooter
+          className={validation && !printsLabels ? "work-footer work-footer--two" : "work-footer"}
+          ariaLabel={t(
+            printsLabels
+              ? "floor.unitLabels.actions"
+              : validation
+                ? "floor.validation.actions"
+                : "floor.work.layout.actions",
+          )}
         >
-          {t("floor.work.leave")}
-        </FooterAction>
-        <FooterAction
-          variant="destructive-outline"
-          data-action="close-shift"
-          disabled={stop !== null || leaving}
-          onClick={openClose}
-        >
-          {closeLabel}
-        </FooterAction>
-      </FloorFooter>
+          {/* A shift that prints the duplicate has its labels' history there (plan РЕЖ part B). */}
+          {printsLabels && (
+            <ShiftActionButton
+              footer
+              action="history"
+              data-action="unit-history"
+              disabled={stop !== null || leaving}
+              onClick={unit.openHistory}
+            >
+              {t("floor.unitLabels.history")}
+            </ShiftActionButton>
+          )}
+          {/* A validation shift has no exceptions (plan РЕЖ, Р9: the cloud's are its boxes'). */}
+          {!validation && (
+            <ShiftActionButton
+              footer
+              action="exceptions"
+              data-action="exceptions"
+              disabled={stop !== null || leaving}
+              onClick={() => openExceptions()}
+            >
+              {t("floor.exceptions.open")}
+            </ShiftActionButton>
+          )}
+          {/* On the keyboard while the leave waits: `aria-disabled`, and a press that does nothing. */}
+          <ShiftActionButton
+            footer
+            action="pause"
+            aria-disabled={leaving ? true : undefined}
+            style={leaving ? WAITING_STYLE : undefined}
+            onClick={leaving ? undefined : onLeave}
+          >
+            {t("floor.work.pause")}
+          </ShiftActionButton>
+          <ShiftActionButton
+            footer
+            action="close"
+            data-action="close-shift"
+            disabled={stop !== null || leaving}
+            onClick={openClose}
+          >
+            {closeLabel}
+          </ShiftActionButton>
+        </FloorFooter>
+      )}
       {/*
         The stops and notices share one polite region that is on the screen
         before any of them, so each is heard once, when it comes; the alerts
@@ -2844,14 +2803,14 @@ export function WorkScreen(props: WorkScreenProps) {
             <>
               {/* A validation shift is offered its close at the plan, as at the cloud station. */}
               {validation && (
-                <Button
-                  size="floor"
+                <ShiftActionButton
+                  action="close"
                   aria-disabled={leaving || stop !== null ? true : undefined}
                   style={leaving || stop !== null ? WAITING_STYLE : undefined}
                   onClick={openClose}
                 >
                   {closeLabel}
-                </Button>
+                </ShiftActionButton>
               )}
               <Button
                 size="floor"
@@ -2962,6 +2921,7 @@ export function WorkScreen(props: WorkScreenProps) {
                 setStop(null);
               }}
               onLabel={toLabel}
+              boxCapacity={shift.copy.boxCapacity}
               palletCapacity={pallets?.capacity ?? null}
               onCloseBox={() => confirmPackageClose("open_box")}
               onClosePallet={() => confirmPackageClose("open_pallet")}

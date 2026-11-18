@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, FullScreenDialog } from "@markiro/ui";
 
 import { REPRINT_REASONS } from "../../host/protocol.js";
+import { ShiftActionButton } from "../kit/ShiftActionButton.js";
 import { VIEW_GUARD_MS } from "../print/LabelPanel.js";
 import type { UnitLabelEntry } from "./unit-label-store.js";
 import { unitLabelStatus } from "./unit-label-work.js";
@@ -357,14 +358,21 @@ export function UnitLabelVerification({
     <FullScreenDialog
       open
       title={title}
-      backLabel={t("floor.unitLabels.pause")}
-      backPlacement="footer"
+      backPlacement="custom"
       backDisabled={running}
       onClose={onPause}
       initialFocus="dialog"
       className={`unit-label-window${awaiting ? " unit-label-window--awaiting" : ""}`}
       footer={
         <>
+          <ShiftActionButton
+            action="pause"
+            disabled={running}
+            aria-disabled={busy || undefined}
+            onClick={onPause}
+          >
+            {t("floor.work.pause")}
+          </ShiftActionButton>
           {main}
           {awaiting && !closed && (
             <Button size="floor" variant="secondary" {...press(onSkip)}>

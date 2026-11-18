@@ -57,6 +57,13 @@ function fact(name: string): string | null {
   return term?.nextElementSibling?.textContent ?? null;
 }
 
+async function expectClosedCounts(units: number, boxes: number) {
+  const done = within(await screen.findByRole("group", { name: CLOSED_TITLE }));
+  expect(done.getByText("Принято, шт.").nextElementSibling?.textContent).toBe(String(units));
+  expect(done.getByText("Коробов закрыто").nextElementSibling?.textContent).toBe(String(boxes));
+  expect(done.queryByText("Палет закрыто")).toBeNull();
+}
+
 /** «Закрыть смену» pressed and the summary read. */
 async function openSummary(work: WorkHarness): Promise<void> {
   await work.press("Закрыть смену");
@@ -119,7 +126,7 @@ describe("the close of a shift on the work screen", () => {
     await openSummary(work);
     expect(fact("Товар")).toBe("Молоко 3,2%");
     expect(fact("План")).toBe("1\u00a0200");
-    expect(fact("Факт")).toBe("12");
+    expect(fact("Принято, шт.")).toBe("12");
     expect(fact("Отклонение")).toBe("−1\u00a0188");
     expect(fact("Коробов закрыто")).toBe("1");
     expect(fact("В среднем в коробе")).toBe("12");
@@ -129,6 +136,8 @@ describe("the close of a shift on the work screen", () => {
       summary().getByText("Закрытие нельзя отменить: в смену больше нельзя сканировать."),
     ).toBeTruthy();
     const confirm = screen.getByRole("button", { name: "Подтвердить закрытие" });
+    expect(confirm.classList.contains("mk-btn--destructive")).toBe(true);
+    expect(confirm.querySelector('svg[aria-hidden="true"]')).toBeTruthy();
     expect(confirm.hasAttribute("disabled")).toBe(true);
     await work.press("Недостаток сырья");
     expect(
@@ -144,7 +153,7 @@ describe("the close of a shift on the work screen", () => {
     await work.press("Подтвердить закрытие");
     expect(await screen.findByText(CLOSED_TITLE)).toBeTruthy();
     expect(screen.getByText(CLOSED_BODY)).toBeTruthy();
-    expect(screen.getByText("Принято: 12 шт., коробов: 1.")).toBeTruthy();
+    await expectClosedCounts(12, 1);
     expect(outboxKinds(at).at(-1)).toBe("shift_closed");
     expect(closedRecords(at)).toHaveLength(1);
     expect(closedRecords(at)[0]).toMatchObject({
@@ -268,7 +277,7 @@ describe("the close of a shift on the work screen", () => {
     held.release();
     await work.settled();
     await screen.findByRole("region", { name: TITLE });
-    expect(fact("Факт")).toBe("12");
+    expect(fact("Принято, шт.")).toBe("12");
     expect(fact("Коробов закрыто")).toBe("1");
     await work.press("Недостаток сырья");
     await work.press("Подтвердить закрытие");
@@ -300,18 +309,19 @@ describe("the close of a shift on the work screen", () => {
     expect(rows(at.db, "SELECT count(*) AS n FROM floor_scans")).toEqual([{ n: 13 }]);
   });
 
-  it("never holds the operator: «Выйти из смены» stays open on the summary and after the close", async () => {
+  it("never holds the operator: pause leaves the summary and the closed screen has one return action", async () => {
     const at = await printStation();
     const onLeave = vi.fn();
     const work = renderWork(at, { onLeave });
     await fillBox(work);
     await openSummary(work);
-    await work.press("Выйти из смены");
+    await work.press("Пауза");
     expect(onLeave).toHaveBeenCalledTimes(1);
     await work.press("Ошибка в плановом количестве");
     await work.press("Подтвердить закрытие");
     await screen.findByText(CLOSED_TITLE);
-    await work.press("Выйти из смены");
+    expect(screen.queryByRole("button", { name: "Пауза" })).toBeNull();
+    await work.press("К списку смен");
     expect(onLeave).toHaveBeenCalledTimes(2);
   });
 
@@ -388,7 +398,7 @@ describe("the close of a shift on the work screen", () => {
     lose.now = true;
     await work.press("Подтвердить закрытие");
     expect(await screen.findByText(CLOSED_TITLE)).toBeTruthy();
-    expect(screen.getByText("Принято: 12 шт., коробов: 1.")).toBeTruthy();
+    await expectClosedCounts(12, 1);
     expect(screen.queryByText(FAILED)).toBeNull();
     expect(closedRecords(at)).toHaveLength(1);
     expect(localState(at)).toBe("closing");
@@ -422,7 +432,7 @@ describe("the close of a shift on the work screen", () => {
     at.db.exec("UPDATE floor_shifts SET local_state = 'closing'");
     await work.press("Закрыть смену");
     expect(await screen.findByText(CLOSED_TITLE)).toBeTruthy();
-    expect(screen.getByText("Принято: 12 шт., коробов: 1.")).toBeTruthy();
+    await expectClosedCounts(12, 1);
     // Not a summary with «Назад к работе»: a live screen on a closed shift takes no scan.
     expect(screen.queryByRole("region", { name: TITLE })).toBeNull();
     expect(screen.queryByRole("button", { name: "Назад к работе" })).toBeNull();
@@ -515,13 +525,13 @@ describe("the close of a shift on the work screen", () => {
     await work.press("Производственный брак");
     loseACode(at);
     await work.press("Подтвердить закрытие");
-    await vi.waitFor(() => expect(fact("Факт")).toBe("11"));
+    await vi.waitFor(() => expect(fact("Принято, шт.")).toBe("11"));
     expect(screen.getByText(STALE)).toBeTruthy();
     // The second showing says the same: the note is the same, the blocker is the same.
     work.pause();
     loseACode(at);
     await work.press("Подтвердить закрытие");
-    await vi.waitFor(() => expect(fact("Факт")).toBe("10"));
+    await vi.waitFor(() => expect(fact("Принято, шт.")).toBe("10"));
     expect(screen.getByText(STALE)).toBeTruthy();
     // A second tap, as the first one's echo, lands on the button the new summary put there.
     tap("Подтвердить закрытие");
@@ -536,7 +546,7 @@ describe("the close of a shift on the work screen", () => {
     work.clock.now += 1;
     tap("Подтвердить закрытие");
     await work.settled();
-    expect(await screen.findByText("Принято: 10 шт., коробов: 1.")).toBeTruthy();
+    await expectClosedCounts(10, 1);
     expect(closedRecords(at)).toHaveLength(1);
   });
 
@@ -565,14 +575,14 @@ describe("the close of a shift on the work screen", () => {
     const work = renderWork(at);
     await fillBox(work);
     await openSummary(work);
-    expect(fact("Факт")).toBe("12");
+    expect(fact("Принято, шт.")).toBe("12");
     await work.press("Производственный брак");
     loseACode(at);
     await work.press("Подтвердить закрытие");
     expect(await screen.findByText(STALE)).toBeTruthy();
     // The note is an alert of the work screen's polite region: it has no role of its own.
     expect(screen.getByText(STALE).closest(".mk-alert")?.getAttribute("role")).toBe("presentation");
-    expect(fact("Факт")).toBe("11");
+    expect(fact("Принято, шт.")).toBe("11");
     expect(localState(at)).toBeNull();
     expect(outboxKinds(at)).not.toContain("shift_closed");
     // The reason chosen for the old numbers stands while the plan is still unmet; the new numbers close.
@@ -580,7 +590,7 @@ describe("the close of a shift on the work screen", () => {
       screen.getByRole("button", { name: "Производственный брак" }).getAttribute("aria-pressed"),
     ).toBe("true");
     await work.press("Подтвердить закрытие");
-    expect(await screen.findByText("Принято: 11 шт., коробов: 1.")).toBeTruthy();
+    await expectClosedCounts(11, 1);
     expect(closedRecords(at)[0]).toMatchObject({
       data: { actualQty: 11, reasonCode: "production_defect" },
     });
@@ -600,11 +610,11 @@ describe("the close of a shift on the work screen", () => {
     held.release();
     await work.settled();
     expect(await screen.findByText(STALE)).toBeTruthy();
-    expect(fact("Факт")).toBe("11");
+    expect(fact("Принято, шт.")).toBe("11");
     expect(localState(at)).toBeNull();
     expect(outboxKinds(at)).not.toContain("shift_closed");
     await work.press("Подтвердить закрытие");
-    expect(await screen.findByText("Принято: 11 шт., коробов: 1.")).toBeTruthy();
+    await expectClosedCounts(11, 1);
     expect(closedRecords(at)).toHaveLength(1);
   });
 
@@ -789,7 +799,7 @@ describe("the close of a shift on the work screen", () => {
     );
   });
 
-  it("keeps «К списку смен» and «Выйти из смены» of the closed shift on the keyboard while the leave waits", async () => {
+  it("keeps the return action of the closed shift on the keyboard while the leave waits", async () => {
     const at = await printStation();
     const onLeave = vi.fn();
     const work = renderWork(at, { onLeave });
@@ -799,13 +809,11 @@ describe("the close of a shift on the work screen", () => {
     await work.press("Подтвердить закрытие");
     await screen.findByText(CLOSED_TITLE);
     work.rerender({ leaving: true });
-    for (const name of ["К списку смен", "Выйти из смены"]) {
-      const button = screen.getByRole("button", { name });
-      expect(button.getAttribute("aria-disabled"), name).toBe("true");
-      expect(button.hasAttribute("disabled"), name).toBe(false);
-    }
+    const button = screen.getByRole("button", { name: "К списку смен" });
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    expect(button.hasAttribute("disabled")).toBe(false);
+    expect(screen.queryByRole("button", { name: "Пауза" })).toBeNull();
     await work.press("К списку смен");
-    await work.press("Выйти из смены");
     expect(onLeave).not.toHaveBeenCalled();
     expect(screen.getByText("Дожидаемся окончания начатой работы…")).toBeTruthy();
   });
@@ -1098,7 +1106,7 @@ describe("the close of a shift on the work screen, in its races", () => {
     // Neither "closed" nor "not closed" is known: the note hedges, and does not call the shift open.
     expect(await screen.findByText(UNKNOWN)).toBeTruthy();
     expect(screen.queryByText(FAILED)).toBeNull();
-    expect(fact("Факт")).toBe("12");
+    expect(fact("Принято, шт.")).toBe("12");
     expect(screen.getByRole("button", { name: "Подтвердить закрытие" })).toBeTruthy();
     broken = false;
     await work.press("Подтвердить закрытие");
@@ -1126,7 +1134,7 @@ describe("the close of a shift on the work screen, in its races", () => {
     lose.now = true;
     await work.press("Подтвердить закрытие");
     expect(await screen.findByText(FAILED)).toBeTruthy();
-    expect(fact("Факт")).toBe("11");
+    expect(fact("Принято, шт.")).toBe("11");
   });
 
   it("ignores a tap just after the summary appears, however long it was read for", async () => {
@@ -1182,9 +1190,7 @@ describe("the close of a shift on the work screen, in its races", () => {
       screen.getByRole("button", { name: "Недостаток сырья" }).getAttribute("aria-pressed"),
     ).toBe("true");
     // The way out of the shift is not among them.
-    expect(
-      screen.getByRole("button", { name: "Выйти из смены" }).getAttribute("aria-disabled"),
-    ).toBe(null);
+    expect(screen.getByRole("button", { name: "Пауза" }).getAttribute("aria-disabled")).toBe(null);
     held.release();
     await work.settled();
     expect(await screen.findByText(CLOSED_TITLE)).toBeTruthy();

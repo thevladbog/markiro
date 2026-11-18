@@ -13,9 +13,9 @@ import { Reconfirm } from "../../../src/floor/Reconfirm.js";
 import { ShiftClosePanel, ShiftClosedPanel } from "../../../src/floor/close/ShiftClosePanel.js";
 import type { CloseSummary, PartState } from "../../../src/floor/close/shift-close.js";
 import { ExceptionFlow } from "../../../src/floor/exceptions/ExceptionFlow.js";
+import { ShiftActionButton } from "../../../src/floor/kit/ShiftActionButton.js";
 import { FloorFooter } from "../../../src/floor/shifts/FloorScreen.js";
 import { UnitLabelHistory } from "../../../src/floor/unit-labels/UnitLabelHistory.js";
-import { FooterAction } from "../../../src/floor/work/WorkInstruments.js";
 import { ScanHistoryScreen } from "../../../src/floor/work/ScanHistory.js";
 import { SCAN_HISTORY_SQL } from "../../../src/floor/work/scan-history.js";
 import type { LocalExecutor } from "../../../src/local/executor.js";
@@ -332,7 +332,7 @@ function Page() {
               onMute: () => undefined,
             }}
           />
-          <section className="work-screen" aria-label="Смена">
+          <section className="work-screen" data-closed={view === "closed"} aria-label="Смена">
             <div className="work-screen__content" />
             <div className="work-screen__overlays">
               {view === "close" || view === "closed" ? (
@@ -345,11 +345,19 @@ function Page() {
                 </div>
               )}
             </div>
-            <FloorFooter ariaLabel="Действия" className="work-footer">
-              <FooterAction variant="secondary">Исключения</FooterAction>
-              <FooterAction variant="warning-outline">Выйти</FooterAction>
-              <FooterAction variant="destructive-outline">Закрыть смену</FooterAction>
-            </FloorFooter>
+            {view !== "closed" && (
+              <FloorFooter ariaLabel="Действия" className="work-footer">
+                <ShiftActionButton footer action="exceptions">
+                  Исключения
+                </ShiftActionButton>
+                <ShiftActionButton footer action="pause">
+                  Пауза
+                </ShiftActionButton>
+                <ShiftActionButton footer action="close">
+                  Закрыть смену
+                </ShiftActionButton>
+              </FloorFooter>
+            )}
           </section>
           {view === "reconfirm" && (
             <Reconfirm

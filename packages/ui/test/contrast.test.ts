@@ -68,6 +68,8 @@ const TEXT: ReadonlyArray<readonly [string, string]> = [
   ["muted2", "panel"],
   ["bg", "fg"],
   ["onerr", "err"],
+  ["shift-pause-fg", "shift-pause-bg"],
+  ["shift-close-fg", "shift-close-bg"],
   ["fg", "brand1"],
   ["ok", "okbg"],
   ["warn", "warnbg"],

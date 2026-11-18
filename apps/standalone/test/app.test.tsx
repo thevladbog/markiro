@@ -3115,7 +3115,7 @@ describe("the operator on the floor", () => {
   it("shows the shifts the host lists for the line and opens one into its work screen", async () => {
     const { host } = await inTheShift();
     expect(host.enterShift).toHaveBeenCalledWith(PLANNED.id, STATION_ENTRY);
-    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    fireEvent.click(screen.getByRole("button", { name: "Пауза" }));
     expect(await screen.findByRole("button", { name: "Продолжить" })).toBeTruthy();
     isOnTheList();
   });
@@ -3127,7 +3127,7 @@ describe("the operator on the floor", () => {
     await waitFor(() => expect(host.getDeviceUpdate).toHaveBeenCalled());
     expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
     expect(screen.queryByText(UPDATE_LINE)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    fireEvent.click(screen.getByRole("button", { name: "Пауза" }));
     expect(await screen.findByText(UPDATE_LINE)).toBeTruthy();
   });
 
@@ -3154,7 +3154,7 @@ describe("the operator on the floor", () => {
     await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
     expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
     expect(screen.queryByText("Хост не принимает это устройство")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    fireEvent.click(screen.getByRole("button", { name: "Пауза" }));
     expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
   });
 
@@ -3206,7 +3206,7 @@ describe("the operator on the floor", () => {
     await flush();
     expect(reached()).toEqual(before);
     expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    fireEvent.click(screen.getByRole("button", { name: "Пауза" }));
     expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
     expect(reached()).toEqual(before);
   });
@@ -3263,7 +3263,7 @@ describe("the operator on the floor", () => {
       expect(screen.getByText("Принято в смене").nextElementSibling?.textContent).toBe("1"),
     );
     expect(host.checkCode).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    fireEvent.click(screen.getByRole("button", { name: "Пауза" }));
     expect(await screen.findByText("Устройство подключено к другому хосту")).toBeTruthy();
     expect(screen.queryByText("Смена OCT26-005/S")).toBeNull();
   });
@@ -3287,7 +3287,7 @@ describe("the operator on the floor", () => {
     // Not the probe's screen, in the middle of the work.
     expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
     expect(screen.queryByText("Хост не принимает это устройство")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    fireEvent.click(screen.getByRole("button", { name: "Пауза" }));
     expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
   });
 
@@ -3307,7 +3307,7 @@ describe("the operator on the floor", () => {
     expect(within(bar).getByText(/^Нет связи с хостом/)).toBeTruthy();
     await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
     expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    fireEvent.click(screen.getByRole("button", { name: "Пауза" }));
     expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
   });
 
@@ -3316,7 +3316,7 @@ describe("the operator on the floor", () => {
     const bar = screen.getByRole("region", { name: "Строка состояния цеха" });
     expect(within(bar).getByText("Станция на линии 1")).toBeTruthy();
     expect(await within(bar).findByText("OCT26-005/S")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    fireEvent.click(screen.getByRole("button", { name: "Пауза" }));
     expect(await screen.findByRole("button", { name: "Продолжить" })).toBeTruthy();
     expect(within(bar).queryByText("OCT26-005/S")).toBeNull();
     expect(within(bar).getByText("Станция на линии 1")).toBeTruthy();
@@ -3411,11 +3411,11 @@ describe("the operator on the floor", () => {
     });
     // The station entered it before the office closed it: it is finished here, with no new code.
     expect(await screen.findByText("Смену закрыли в офисе")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Выйти из смены" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Пауза" })).toBeTruthy();
     // The shell is told of work, so a refused key waits until the operator leaves the shift.
     await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
     expect(screen.queryByText("Хост не принимает это устройство")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    fireEvent.click(screen.getByRole("button", { name: "Пауза" }));
     expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
   });
 
@@ -3463,7 +3463,7 @@ describe("the operator on the floor", () => {
     await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
     await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
     expect(screen.queryByText("Хост не принимает это устройство")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    fireEvent.click(screen.getByRole("button", { name: "Пауза" }));
     expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
   });
 

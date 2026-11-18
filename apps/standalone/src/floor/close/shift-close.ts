@@ -5,7 +5,7 @@ import type { ShiftClosedFact } from "../../host/protocol.js";
 import { LocalDbError, type LocalExecutor, type LocalStatement } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import { outboxStatement, shiftClosedRecord } from "../facts.js";
-import { LIVE_BOXES } from "../pallets/pallets.js";
+import { CLOSED_PALLET_COUNT_SQL, LIVE_BOXES } from "../pallets/pallets.js";
 import { OPEN_JOB_SQL } from "../print/print-jobs.js";
 import { readShiftCopy } from "../shifts/shift-copies.js";
 import {
@@ -59,6 +59,8 @@ export interface CloseSummary {
   actualQty: number;
   /** The shift's closed boxes not taken apart. */
   closedBoxes: number;
+  /** Present for palletizing shifts, scoped to this station and excluding disassembled pallets. */
+  closedPallets?: number;
   /** The plan is given and not met: one of the domain's six reasons is needed. */
   reasonRequired: boolean;
   blocker: CloseBlocker | null;
@@ -156,7 +158,7 @@ const SET_MARK_CLOSING_SQL =
   "AND s.device_id = ? AND s.id = ? AND s.local_state IS NULL AND s.planned_qty IS ? " +
   `AND NOT EXISTS (SELECT 1 ${DRAFT_ITEMS}) AND ${COMPLETED_SETS} = ? AND ? = 0`;
 
-const unresolvedRow = z.object({ n: z.number().int().nonnegative() });
+const countRow = z.object({ n: z.number().int().nonnegative() });
 
 /**
  * Reads the summary of the shift's close: the plan from this station's copy
@@ -185,7 +187,7 @@ export async function readCloseSummary(
   const [unresolved] = await local.query(
     SHIFT_UNRESOLVED_UNIT_LABEL_SQL,
     [pairing.hostId, pairing.deviceId, shiftId],
-    unresolvedRow,
+    countRow,
   );
   if (copy === null || row === undefined) {
     return {
@@ -196,6 +198,13 @@ export async function readCloseSummary(
       blocker: { kind: "closed" },
     };
   }
+  const [pallets] = copy.palletsEnabled
+    ? await local.query(
+        CLOSED_PALLET_COUNT_SQL,
+        [pairing.hostId, pairing.deviceId, shiftId],
+        countRow,
+      )
+    : [];
   const blocker: CloseBlocker | null =
     row.local_state !== null
       ? { kind: "closed" }
@@ -228,6 +237,7 @@ export async function readCloseSummary(
     plannedQty: copy.plannedQty,
     actualQty: row.actual,
     closedBoxes: row.closed,
+    ...(pallets === undefined ? {} : { closedPallets: pallets.n }),
     reasonRequired: stationReasonRequired({
       plannedQty: copy.plannedQty,
       actualQty: row.actual,

@@ -23,9 +23,9 @@ const FIRST_PALLET = buildSscc(PALLET_EXTENSION, PREFIX, 0);
 const SECOND_PALLET = buildSscc(PALLET_EXTENSION, PREFIX, 1);
 const FIRST_BOX = buildSscc(0, PREFIX, 1500);
 const PAUSED = "Скан не принят: работа остановлена — сначала ответьте на сообщение на экране.";
-const STALE = "Пока вы выбирали, паллета изменилась. Ничего не сделано — повторите.";
-const GONE = "Этой паллеты больше нет среди закрытых паллет смены. Ничего не сделано.";
-const WAITING = "Этикетка этой паллеты ещё ждёт решения на рабочем экране. Ничего не сделано.";
+const STALE = "Пока вы выбирали, палета изменилась. Ничего не сделано — повторите.";
+const GONE = "Этой палеты больше нет среди закрытых палет смены. Ничего не сделано.";
+const WAITING = "Этикетка этой палеты ещё ждёт решения на рабочем экране. Ничего не сделано.";
 const FAILED =
   "Не удалось подтвердить, что действие записано на этом компьютере. Перед повторной попыткой проверьте список исключений и показатели смены.";
 
@@ -78,7 +78,7 @@ async function pallets(at: PalletStation, codes: readonly string[]): Promise<Wor
 
 async function openExceptions(work: Work): Promise<void> {
   await work.press("Исключения");
-  await screen.findByRole("button", { name: "Расформировать паллету" });
+  await screen.findByRole("button", { name: "Расформировать палету" });
 }
 
 async function twoPallets(at: PalletStation): Promise<Work> {
@@ -106,21 +106,21 @@ describe("the exceptions of a pallet on the work screen (plan ПЛ-Ц)", () => {
   it("takes apart a pallet chosen by a scan of its label, with a reason; its boxes stay closed", async () => {
     const at = await palletStation({ capacity: 1, boxCapacity: 1 });
     const work = await twoPallets(at);
-    await work.press("Расформировать паллету");
-    expect(screen.getByText("Какую паллету расформировать?")).toBeTruthy();
+    await work.press("Расформировать палету");
+    expect(screen.getByText("Какую палету расформировать?")).toBeTruthy();
     await work.scan(km("A9"));
-    expect(screen.getByText("Это не код SSCC. Отсканируйте этикетку паллеты.")).toBeTruthy();
+    expect(screen.getByText("Это не код SSCC. Отсканируйте этикетку палеты.")).toBeTruthy();
     await work.scan(`]C100${FIRST_BOX}`);
-    expect(screen.getByText("Паллеты с этим SSCC нет среди закрытых паллет смены.")).toBeTruthy();
+    expect(screen.getByText("Палеты с этим SSCC нет среди закрытых палет смены.")).toBeTruthy();
     // The flash of the scan is neutral: the subject may be a pallet, and the box is no pallet.
     expect(screen.getByText("НЕ НАЙДЕНО СРЕДИ ЗАКРЫТЫХ")).toBeTruthy();
     await work.scan(`]C100${FIRST_PALLET}`);
-    expect(screen.getByText(`Паллета ${formatSsccHri(FIRST_PALLET)}`)).toBeTruthy();
+    expect(screen.getByText(`Палета ${formatSsccHri(FIRST_PALLET)}`)).toBeTruthy();
     await work.press("Не тот товар");
-    expect(screen.getByText("Расформировать паллету?")).toBeTruthy();
+    expect(screen.getByText("Расформировать палету?")).toBeTruthy();
     await work.press("Расформировать");
     expect(
-      await screen.findByText("Паллета расформирована, её короба остались закрытыми."),
+      await screen.findByText("Палета расформирована, её короба остались закрытыми."),
     ).toBeTruthy();
     expect(palletExceptions(at)).toEqual([
       { kind: "disassemble", reason_code: "wrong_product", reason_text: null },
@@ -138,7 +138,7 @@ describe("the exceptions of a pallet on the work screen (plan ПЛ-Ц)", () => {
     expect(work.props.onRecorded).toHaveBeenCalled();
     // The pallet taken apart is not among the closed ones any more.
     await work.press("Другое действие");
-    await work.press("Расформировать паллету");
+    await work.press("Расформировать палету");
     expect(screen.queryByRole("button", { name: option(FIRST_PALLET) })).toBeNull();
     expect(screen.getByRole("button", { name: option(SECOND_PALLET) })).toBeTruthy();
   });
@@ -146,7 +146,7 @@ describe("the exceptions of a pallet on the work screen (plan ПЛ-Ц)", () => {
   it("prints a pallet's label again, chosen by the last digits of its SSCC", async () => {
     const at = await palletStation({ capacity: 1, boxCapacity: 1 });
     const work = await twoPallets(at);
-    await work.press("Перепечатать этикетку паллеты");
+    await work.press("Перепечатать этикетку палеты");
     expect(screen.getByRole("button", { name: option(SECOND_PALLET) })).toBeTruthy();
     const pad = within(screen.getByRole("group", { name: "Последние цифры SSCC" }));
     work.pause();
@@ -158,9 +158,9 @@ describe("the exceptions of a pallet on the work screen (plan ПЛ-Ц)", () => {
     expect(screen.queryByRole("button", { name: option(SECOND_PALLET) })).toBeNull();
     await work.press(option(FIRST_PALLET));
     await work.press("Замятие в принтере");
-    expect(screen.getByText("Перепечатать этикетку паллеты?")).toBeTruthy();
+    expect(screen.getByText("Перепечатать этикетку палеты?")).toBeTruthy();
     await work.press("Перепечатать");
-    expect(await screen.findByText("Этикетка паллеты отправлена на принтер.")).toBeTruthy();
+    expect(await screen.findByText("Этикетка палеты отправлена на принтер.")).toBeTruthy();
     expect(work.shell.sends.at(-1)).toEqual({
       target: ZEBRA.target,
       text: renderedText(ZEBRA, FIRST_PALLET, "100x150"),
@@ -177,23 +177,21 @@ describe("the exceptions of a pallet on the work screen (plan ПЛ-Ц)", () => {
     await work.settled();
     await work.press("Исключения");
     await screen.findByRole("button", { name: "Расформировать короб" });
-    expect(screen.queryByRole("button", { name: "Перепечатать этикетку паллеты" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Расформировать паллету" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Перепечатать этикетку палеты" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Расформировать палету" })).toBeNull();
   });
 
   it("offers a pallet's exceptions disabled while no pallet is closed, and the box's own as before", async () => {
     const at = await palletStation({ capacity: 40, boxCapacity: 1 });
     const work = await pallets(at, ["A1"]);
     await work.press("Исключения");
-    await screen.findByRole("button", { name: "Расформировать паллету" });
+    await screen.findByRole("button", { name: "Расформировать палету" });
     // One box on an open pallet: no closed pallet yet, a closed box.
     expect(
-      screen.getByRole("button", { name: "Расформировать паллету" }).hasAttribute("disabled"),
+      screen.getByRole("button", { name: "Расформировать палету" }).hasAttribute("disabled"),
     ).toBe(true);
     expect(
-      screen
-        .getByRole("button", { name: "Перепечатать этикетку паллеты" })
-        .hasAttribute("disabled"),
+      screen.getByRole("button", { name: "Перепечатать этикетку палеты" }).hasAttribute("disabled"),
     ).toBe(true);
     expect(
       screen.getByRole("button", { name: "Расформировать короб" }).hasAttribute("disabled"),
@@ -208,7 +206,7 @@ describe("the choice of the pallet never acts on a guess", () => {
     const codes = Array.from({ length: 11 }, (_, index) => `C${index}`);
     const work = await pallets(at, codes);
     await openExceptions(work);
-    await work.press("Расформировать паллету");
+    await work.press("Расформировать палету");
     const sscc = Array.from({ length: 11 }, (_, serial) =>
       buildSscc(PALLET_EXTENSION, PREFIX, serial),
     );
@@ -229,14 +227,14 @@ describe("the choice of the pallet never acts on a guess", () => {
       expect(screen.getByRole("button", { name: option(each) })).toBeTruthy();
     }
     // Still the choice: no reason is asked, nothing is written.
-    expect(screen.getByText("Какую паллету расформировать?")).toBeTruthy();
+    expect(screen.getByText("Какую палету расформировать?")).toBeTruthy();
     expect(screen.queryByText("Укажите причину")).toBeNull();
     expect(disassembledPallets(at)).toBe(0);
     // The pallet pressed is the pallet the reason is asked for.
     const chosen = same[1];
     if (chosen === undefined) throw new Error("no second pallet");
     await work.press(option(chosen));
-    expect(screen.getByText(`Паллета ${formatSsccHri(chosen)}`)).toBeTruthy();
+    expect(screen.getByText(`Палета ${formatSsccHri(chosen)}`)).toBeTruthy();
     expect(disassembledPallets(at)).toBe(0);
   });
 
@@ -262,21 +260,21 @@ describe("the choice of the pallet never acts on a guess", () => {
     const work = await twoPallets(at);
     const impostor = endsAlike(FIRST_PALLET);
     expect(impostor).not.toBe(FIRST_PALLET);
-    await work.press("Расформировать паллету");
+    await work.press("Расформировать палету");
     await work.scan(`]C100${impostor}`);
-    expect(screen.getByText("Паллеты с этим SSCC нет среди закрытых паллет смены.")).toBeTruthy();
-    expect(screen.getByText("Какую паллету расформировать?")).toBeTruthy();
-    expect(screen.queryByText(`Паллета ${formatSsccHri(FIRST_PALLET)}`)).toBeNull();
+    expect(screen.getByText("Палеты с этим SSCC нет среди закрытых палет смены.")).toBeTruthy();
+    expect(screen.getByText("Какую палету расформировать?")).toBeTruthy();
+    expect(screen.queryByText(`Палета ${formatSsccHri(FIRST_PALLET)}`)).toBeNull();
     expect(disassembledPallets(at)).toBe(0);
     expect(palletExceptions(at)).toEqual([]);
     // The pallet itself is found.
     await work.scan(`]C100${FIRST_PALLET}`);
-    expect(screen.getByText(`Паллета ${formatSsccHri(FIRST_PALLET)}`)).toBeTruthy();
+    expect(screen.getByText(`Палета ${formatSsccHri(FIRST_PALLET)}`)).toBeTruthy();
   });
 
   it.each([
-    ["Расформировать паллету", "Какую паллету расформировать?"],
-    ["Перепечатать этикетку паллеты", "Этикетку какой паллеты перепечатать?"],
+    ["Расформировать палету", "Какую палету расформировать?"],
+    ["Перепечатать этикетку палеты", "Этикетку какой палеты перепечатать?"],
   ])(
     "ignores a tap on «%s» just after the exceptions opened, the second tap of a double tap",
     async (name, heading) => {
@@ -296,12 +294,12 @@ describe("the choice of the pallet never acts on a guess", () => {
   it("does not let a scan change the pallet once it is chosen, and writes nothing for it", async () => {
     const at = await palletStation({ capacity: 1, boxCapacity: 1 });
     const work = await twoPallets(at);
-    await work.press("Расформировать паллету");
+    await work.press("Расформировать палету");
     await work.scan(`]C100${FIRST_PALLET}`);
-    expect(screen.getByText(`Паллета ${formatSsccHri(FIRST_PALLET)}`)).toBeTruthy();
+    expect(screen.getByText(`Палета ${formatSsccHri(FIRST_PALLET)}`)).toBeTruthy();
     await work.scan(`]C100${SECOND_PALLET}`);
     expect(lastLine()).toBe(PAUSED);
-    expect(screen.getByText(`Паллета ${formatSsccHri(FIRST_PALLET)}`)).toBeTruthy();
+    expect(screen.getByText(`Палета ${formatSsccHri(FIRST_PALLET)}`)).toBeTruthy();
     expect(rows(at.db, "SELECT count(*) AS n FROM floor_scans")).toEqual([{ n: 2 }]);
     expect(disassembledPallets(at)).toBe(0);
   });
@@ -321,20 +319,20 @@ describe("a pallet's disassembly is confirmed, with a reason, and cannot be undo
   it("writes nothing until the confirmation is pressed, names the pallet, its boxes and the reason, and says it cannot be undone", async () => {
     const at = await palletStation({ capacity: 1, boxCapacity: 1 });
     const work = await onePallet(at);
-    await work.press("Расформировать паллету");
+    await work.press("Расформировать палету");
     await work.press(option(FIRST_PALLET));
     // Reasons are asked first; nothing is written by choosing the pallet.
     expect(screen.getByText("Укажите причину")).toBeTruthy();
     expect(disassembledPallets(at)).toBe(0);
     await work.press("Повреждена упаковка");
-    expect(screen.getByText("Расформировать паллету?")).toBeTruthy();
+    expect(screen.getByText("Расформировать палету?")).toBeTruthy();
     // The warning is said by its colour and by its words: an error, not a plain warning.
-    expect(screen.getByText("Расформировать паллету?").closest(".mk-alert--error")).not.toBeNull();
+    expect(screen.getByText("Расформировать палету?").closest(".mk-alert--error")).not.toBeNull();
     expect(
       screen.getByText((text) => text.includes(`SSCC ${formatSsccHri(FIRST_PALLET)} больше не`)),
     ).toBeTruthy();
-    expect(screen.getByText(/Короба паллеты \(1\) останутся закрытыми/)).toBeTruthy();
-    expect(screen.getByText("Отменить это нельзя: снимите этикетку с паллеты.")).toBeTruthy();
+    expect(screen.getByText(/Короба палеты \(1\) останутся закрытыми/)).toBeTruthy();
+    expect(screen.getByText("Отменить это нельзя: снимите этикетку с палеты.")).toBeTruthy();
     expect(screen.getByText("Причина: Повреждена упаковка")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Расформировать" }).className).toContain(
       "mk-btn--destructive",
@@ -348,7 +346,7 @@ describe("a pallet's disassembly is confirmed, with a reason, and cannot be undo
     await work.press("Повреждена упаковка");
     await work.press("Расформировать");
     expect(
-      await screen.findByText("Паллета расформирована, её короба остались закрытыми."),
+      await screen.findByText("Палета расформирована, её короба остались закрытыми."),
     ).toBeTruthy();
     expect(disassembledPallets(at)).toBe(1);
   });
@@ -356,7 +354,7 @@ describe("a pallet's disassembly is confirmed, with a reason, and cannot be undo
   it("ignores the second tap of a double tap on the confirmation, and runs the disassembly once", async () => {
     const at = await palletStation({ capacity: 1, boxCapacity: 1 });
     const work = await onePallet(at);
-    await work.press("Расформировать паллету");
+    await work.press("Расформировать палету");
     await work.press(option(FIRST_PALLET));
     work.pause();
     tap("Повреждена упаковка");
@@ -364,7 +362,7 @@ describe("a pallet's disassembly is confirmed, with a reason, and cannot be undo
     tap("Расформировать");
     await work.settled();
     expect(disassembledPallets(at)).toBe(0);
-    expect(screen.getByText("Расформировать паллету?")).toBeTruthy();
+    expect(screen.getByText("Расформировать палету?")).toBeTruthy();
     work.pause();
     const confirm = screen.getByRole("button", { name: "Расформировать" });
     await act(async () => {
@@ -373,7 +371,7 @@ describe("a pallet's disassembly is confirmed, with a reason, and cannot be undo
       await work.gate.drain();
     });
     expect(
-      await screen.findByText("Паллета расформирована, её короба остались закрытыми."),
+      await screen.findByText("Палета расформирована, её короба остались закрытыми."),
     ).toBeTruthy();
     expect(palletExceptions(at)).toHaveLength(1);
   });
@@ -386,12 +384,12 @@ describe("a pallet's disassembly is confirmed, with a reason, and cannot be undo
   ])("records the reason «%s» of a disassembly as %s", async (name, code) => {
     const at = await palletStation({ capacity: 1, boxCapacity: 1 });
     const work = await onePallet(at);
-    await work.press("Расформировать паллету");
+    await work.press("Расформировать палету");
     await work.press(option(FIRST_PALLET));
     await work.press(name);
     expect(screen.getByText(`Причина: ${name}`)).toBeTruthy();
     await work.press("Расформировать");
-    await screen.findByText("Паллета расформирована, её короба остались закрытыми.");
+    await screen.findByText("Палета расформирована, её короба остались закрытыми.");
     expect(palletExceptions(at)).toEqual([
       { kind: "disassemble", reason_code: code, reason_text: null },
     ]);
@@ -400,7 +398,7 @@ describe("a pallet's disassembly is confirmed, with a reason, and cannot be undo
   it("records the words of «Другая причина» trimmed, and refuses words that are too long", async () => {
     const at = await palletStation({ capacity: 1, boxCapacity: 1 });
     const work = await onePallet(at);
-    await work.press("Расформировать паллету");
+    await work.press("Расформировать палету");
     await work.press(option(FIRST_PALLET));
     await work.press("Другая причина");
     const words = screen.getByLabelText("Причина своими словами (необязательно)");
@@ -409,28 +407,26 @@ describe("a pallet's disassembly is confirmed, with a reason, and cannot be undo
     fireEvent.change(words, { target: { value: "Я".repeat(201) } });
     await work.press("Дальше");
     expect(screen.getByText("Не больше 200 знаков, одной строкой.")).toBeTruthy();
-    fireEvent.change(words, { target: { value: "  Паллета рассыпалась  " } });
+    fireEvent.change(words, { target: { value: "  Палета рассыпалась  " } });
     fireEvent.keyDown(words, { key: "Enter" });
     expect(work.scanner.textEntry.at(-1)).toBe(false);
-    expect(screen.getByText("Причина: Паллета рассыпалась")).toBeTruthy();
+    expect(screen.getByText("Причина: Палета рассыпалась")).toBeTruthy();
     await work.press("Расформировать");
-    await screen.findByText("Паллета расформирована, её короба остались закрытыми.");
+    await screen.findByText("Палета расформирована, её короба остались закрытыми.");
     expect(palletExceptions(at)).toEqual([
-      { kind: "disassemble", reason_code: "other", reason_text: "Паллета рассыпалась" },
+      { kind: "disassemble", reason_code: "other", reason_text: "Палета рассыпалась" },
     ]);
   });
 
   it("moves the focus to each view, never to a button", async () => {
     const at = await palletStation({ capacity: 1, boxCapacity: 1 });
     const work = await onePallet(at);
-    await work.press("Расформировать паллету");
-    expect(document.activeElement?.getAttribute("aria-label")).toBe(
-      "Какую паллету расформировать?",
-    );
+    await work.press("Расформировать палету");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Какую палету расформировать?");
     await work.press(option(FIRST_PALLET));
     expect(document.activeElement?.getAttribute("aria-label")).toBe("Укажите причину");
     await work.press("Не тот товар");
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Расформировать паллету?");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Расформировать палету?");
     expect(document.activeElement?.tagName).not.toBe("BUTTON");
   });
 
@@ -442,7 +438,7 @@ describe("a pallet's disassembly is confirmed, with a reason, and cannot be undo
         .getAllByRole("button")
         .map((button) => button.className.includes("mk-btn--floor"));
     expect(floor().every(Boolean)).toBe(true);
-    await work.press("Расформировать паллету");
+    await work.press("Расформировать палету");
     expect(floor().every(Boolean)).toBe(true);
     await work.press(option(FIRST_PALLET));
     expect(floor().every(Boolean)).toBe(true);
@@ -460,11 +456,11 @@ describe("a pallet's reprint says where it goes and keeps the reason it was give
   ])("records the reason «%s» of a reprint as %s", async (name, code) => {
     const at = await palletStation({ capacity: 1, boxCapacity: 1 });
     const work = await onePallet(at);
-    await work.press("Перепечатать этикетку паллеты");
+    await work.press("Перепечатать этикетку палеты");
     await work.press(option(FIRST_PALLET));
     await work.press(name);
     await work.press("Перепечатать");
-    await screen.findByText("Этикетка паллеты отправлена на принтер.");
+    await screen.findByText("Этикетка палеты отправлена на принтер.");
     expect(palletExceptions(at)).toEqual([
       { kind: "reprint", reason_code: code, reason_text: null },
     ]);
@@ -473,7 +469,7 @@ describe("a pallet's reprint says where it goes and keeps the reason it was give
   it("records the words of «Другая причина» of a reprint", async () => {
     const at = await palletStation({ capacity: 1, boxCapacity: 1 });
     const work = await onePallet(at);
-    await work.press("Перепечатать этикетку паллеты");
+    await work.press("Перепечатать этикетку палеты");
     await work.press(option(FIRST_PALLET));
     await work.press("Другая причина");
     fireEvent.change(screen.getByLabelText("Причина своими словами (необязательно)"), {
@@ -481,7 +477,7 @@ describe("a pallet's reprint says where it goes and keeps the reason it was give
     });
     await work.press("Дальше");
     await work.press("Перепечатать");
-    await screen.findByText("Этикетка паллеты отправлена на принтер.");
+    await screen.findByText("Этикетка палеты отправлена на принтер.");
     expect(palletExceptions(at)).toEqual([
       { kind: "reprint", reason_code: "other", reason_text: "Склеилась лента" },
     ]);
@@ -494,7 +490,7 @@ describe("a pallet's reprint says where it goes and keeps the reason it was give
       settings: { assignments: { box: "zebra", pallet: "tsc", duplicate: null } },
     });
     const work = await onePallet(at);
-    await work.press("Перепечатать этикетку паллеты");
+    await work.press("Перепечатать этикетку палеты");
     await work.press(option(FIRST_PALLET));
     await work.press("Этикетка повреждена");
     expect(
@@ -502,7 +498,7 @@ describe("a pallet's reprint says where it goes and keeps the reason it was give
     ).toBeTruthy();
     expect(screen.queryByText(/Zebra у линии/)).toBeNull();
     await work.press("Перепечатать");
-    await screen.findByText("Этикетка паллеты отправлена на принтер.");
+    await screen.findByText("Этикетка палеты отправлена на принтер.");
     expect(work.shell.sends.at(-1)).toEqual({
       target: TSC.target,
       text: renderedText(TSC, FIRST_PALLET, "100x150"),
@@ -520,12 +516,12 @@ describe("a pallet's reprint says where it goes and keeps the reason it was give
     await work.press("Продолжить без этикетки");
     await work.press("Продолжить без этикетки");
     await openExceptions(work);
-    await work.press("Перепечатать этикетку паллеты");
+    await work.press("Перепечатать этикетку палеты");
     await work.press(option(FIRST_PALLET));
     await work.press("Этикетка повреждена");
     expect(
       await screen.findByText(
-        "Принтер для этикетки паллеты не назначен, поэтому она не напечатается. Исключение всё равно будет записано, а этикетка останется на экране работы: напечатайте её, когда принтер будет настроен.",
+        "Принтер для этикетки палеты не назначен, поэтому она не напечатается. Исключение всё равно будет записано, а этикетка останется на экране работы: напечатайте её, когда принтер будет настроен.",
       ),
     ).toBeTruthy();
     expect(screen.queryByText(/Принтер для этикетки короба не назначен/)).toBeNull();
@@ -542,11 +538,11 @@ describe("a pallet's reprint says where it goes and keeps the reason it was give
     await work.scan(`]C100${FIRST_BOX}`);
     await work.scan(`]C100${FIRST_PALLET}`);
     await openExceptions(work);
-    await work.press("Перепечатать этикетку паллеты");
+    await work.press("Перепечатать этикетку палеты");
     await work.press(option(FIRST_PALLET));
     await work.press("Замятие в принтере");
     await work.press("Перепечатать");
-    expect(await screen.findByText("Отсканируйте SSCC на этикетке паллеты.")).toBeTruthy();
+    expect(await screen.findByText("Отсканируйте SSCC на этикетке палеты.")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Исключения" })).toBeNull();
     // While the label waits the pallet cannot be taken apart: the exceptions are shut.
     expect(screen.getByRole("button", { name: "Исключения" }).hasAttribute("disabled")).toBe(true);
@@ -559,8 +555,8 @@ describe("a pallet's reprint says where it goes and keeps the reason it was give
 
 describe("the errors of a pallet's exception are told by their class", () => {
   it.each([
-    ["a disassembly", "Расформировать паллету", "Брак по качеству", "Расформировать"],
-    ["a reprint", "Перепечатать этикетку паллеты", "Замятие в принтере", "Перепечатать"],
+    ["a disassembly", "Расформировать палету", "Брак по качеству", "Расформировать"],
+    ["a reprint", "Перепечатать этикетку палеты", "Замятие в принтере", "Перепечатать"],
   ])(
     "refuses %s while a label waits, and the label's panel takes the screen",
     async (_name, action, reason, confirm) => {
@@ -572,7 +568,7 @@ describe("the errors of a pallet's exception are told by their class", () => {
       // The label of the other pallet waits, though the screen shows no stop (a state it did not see).
       failPalletLabel(at, SECOND_PALLET);
       await work.press(confirm);
-      expect(await screen.findByText("Этикетка паллеты не напечатана")).toBeTruthy();
+      expect(await screen.findByText("Этикетка палеты не напечатана")).toBeTruthy();
       expect(screen.queryByRole("region", { name: "Исключения" })).toBeNull();
       expect(palletExceptions(at)).toEqual([]);
       expect(disassembledPallets(at)).toBe(0);
@@ -584,12 +580,12 @@ describe("the errors of a pallet's exception are told by their class", () => {
   it("refuses a disassembly of the pallet whose own label waits", async () => {
     const at = await palletStation({ capacity: 1, boxCapacity: 1 });
     const work = await onePallet(at);
-    await work.press("Расформировать паллету");
+    await work.press("Расформировать палету");
     await work.press(option(FIRST_PALLET));
     await work.press("Не тот товар");
     failPalletLabel(at, FIRST_PALLET);
     await work.press("Расформировать");
-    expect(await screen.findByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(await screen.findByText("Этикетка палеты не напечатана")).toBeTruthy();
     expect(disassembledPallets(at)).toBe(0);
     expect(palletExceptions(at)).toEqual([]);
     expect(outboxKinds(at)).not.toContain("pallet_exception");
@@ -598,7 +594,7 @@ describe("the errors of a pallet's exception are told by their class", () => {
   it("refuses a disassembly while a box's label waits, though the pallet's label is done", async () => {
     const at = await palletStation({ capacity: 1, boxCapacity: 1 });
     const work = await onePallet(at);
-    await work.press("Расформировать паллету");
+    await work.press("Расформировать палету");
     await work.press(option(FIRST_PALLET));
     await work.press("Не тот товар");
     failPalletLabel(at, FIRST_BOX);
@@ -608,8 +604,8 @@ describe("the errors of a pallet's exception are told by their class", () => {
   });
 
   it.each([
-    ["a reprint", "Перепечатать этикетку паллеты", "Замятие в принтере", "Перепечатать"],
-    ["a disassembly", "Расформировать паллету", "Брак по качеству", "Расформировать"],
+    ["a reprint", "Перепечатать этикетку палеты", "Замятие в принтере", "Перепечатать"],
+    ["a disassembly", "Расформировать палету", "Брак по качеству", "Расформировать"],
   ])(
     "says that the pallet is no longer a closed one when %s finds it taken apart",
     async (_name, action, reason, confirm) => {
@@ -634,7 +630,7 @@ describe("the errors of a pallet's exception are told by their class", () => {
     await work.settled();
     await work.scan(km("A1"));
     await openExceptions(work);
-    await work.press("Расформировать паллету");
+    await work.press("Расформировать палету");
     await work.press(option(FIRST_PALLET));
     await work.press("Брак по качеству");
     held.holdNext();
@@ -656,7 +652,7 @@ describe("the errors of a pallet's exception are told by their class", () => {
     await work.settled();
     await work.scan(km("A1"));
     await openExceptions(work);
-    await work.press("Перепечатать этикетку паллеты");
+    await work.press("Перепечатать этикетку палеты");
     await work.press(option(FIRST_PALLET));
     await work.press("Замятие в принтере");
     held.holdNext();
@@ -693,7 +689,7 @@ describe("the errors of a pallet's exception are told by their class", () => {
       },
     });
     await openExceptions(work);
-    await work.press("Перепечатать этикетку паллеты");
+    await work.press("Перепечатать этикетку палеты");
     await work.press(option(FIRST_PALLET));
     await work.press("Замятие в принтере");
     await work.press("Перепечатать");
@@ -720,14 +716,14 @@ describe("the errors of a pallet's exception are told by their class", () => {
     await work.settled();
     await work.scan(km("A1"));
     await openExceptions(work);
-    await work.press("Расформировать паллету");
+    await work.press("Расформировать палету");
     await work.press(option(FIRST_PALLET));
     await work.press("Не тот товар");
     broken = true;
     await work.press("Расформировать");
     expect(await screen.findByText(FAILED)).toBeTruthy();
     await work.press("Другое действие");
-    expect(screen.getByRole("button", { name: "Расформировать паллету" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Расформировать палету" })).toBeTruthy();
     expect(disassembledPallets(at)).toBe(0);
   });
 
@@ -739,7 +735,7 @@ describe("the errors of a pallet's exception are told by their class", () => {
     await work.settled();
     await work.scan(km("A1"));
     await openExceptions(work);
-    await work.press("Расформировать паллету");
+    await work.press("Расформировать палету");
     await work.press(option(FIRST_PALLET));
     await work.press("Не тот товар");
     held.holdNext();
@@ -752,7 +748,7 @@ describe("the errors of a pallet's exception are told by their class", () => {
     await work.settled();
     expect(work.gate.pending()).toBe(0);
     expect(
-      await screen.findByText("Паллета расформирована, её короба остались закрытыми."),
+      await screen.findByText("Палета расформирована, её короба остались закрытыми."),
     ).toBeTruthy();
   });
 
@@ -764,7 +760,7 @@ describe("the errors of a pallet's exception are told by their class", () => {
     await work.settled();
     await work.scan(km("A1"));
     await openExceptions(work);
-    await work.press("Расформировать паллету");
+    await work.press("Расформировать палету");
     await work.press(option(FIRST_PALLET));
     await work.press("Не тот товар");
     leaving = true;
@@ -830,7 +826,7 @@ describe("the pallet's part of the exceptions screen by itself", () => {
     async (_kind, outcome, words) => {
       const onPalletDisassemble = vi.fn(async () => outcome);
       await mount(<ExceptionFlow {...flowProps({ pallets: ONE_PALLET, onPalletDisassemble })} />);
-      fireEvent.click(screen.getByRole("button", { name: "Расформировать паллету" }));
+      fireEvent.click(screen.getByRole("button", { name: "Расформировать палету" }));
       fireEvent.click(screen.getByRole("button", { name: option(FIRST_PALLET, 3) }));
       fireEvent.click(screen.getByRole("button", { name: "Не тот товар" }));
       await act(async () => {
@@ -865,7 +861,7 @@ describe("the pallet's part of the exceptions screen by itself", () => {
 
   it("does nothing, and says the pallet is not there, when the floor gives no handler for the action", async () => {
     await mount(<ExceptionFlow {...flowProps({ pallets: ONE_PALLET })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Перепечатать этикетку паллеты" }));
+    fireEvent.click(screen.getByRole("button", { name: "Перепечатать этикетку палеты" }));
     fireEvent.click(screen.getByRole("button", { name: option(FIRST_PALLET, 3) }));
     fireEvent.click(screen.getByRole("button", { name: "Этикетка повреждена" }));
     await act(async () => {
@@ -879,14 +875,14 @@ describe("the pallet's part of the exceptions screen by itself", () => {
     // Every box of the pallet was taken apart, the pallet is closed all the same.
     expect(screen.queryByText(/Сейчас исключений нет/)).toBeNull();
     expect(
-      screen.getByRole("button", { name: "Расформировать паллету" }).hasAttribute("disabled"),
+      screen.getByRole("button", { name: "Расформировать палету" }).hasAttribute("disabled"),
     ).toBe(false);
     await act(async () => {
       view.rerender(<ExceptionFlow {...flowProps({ pallets: null })} />);
     });
     expect(screen.queryByText(/Сейчас исключений нет/)).toBeNull();
     expect(
-      screen.getByRole("button", { name: "Расформировать паллету" }).hasAttribute("disabled"),
+      screen.getByRole("button", { name: "Расформировать палету" }).hasAttribute("disabled"),
     ).toBe(true);
     await act(async () => {
       view.rerender(<ExceptionFlow {...flowProps({ pallets: [] })} />);
@@ -902,19 +898,19 @@ describe("the pallet's part of the exceptions screen by itself", () => {
       closedAt: "2026-10-08T06:15:00.000Z",
     }));
     const view = await mount(<ExceptionFlow {...flowProps({ pallets: many })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Перепечатать этикетку паллеты" }));
+    fireEvent.click(screen.getByRole("button", { name: "Перепечатать этикетку палеты" }));
     expect(screen.getAllByRole("button", { name: /коробов: 2$/ })).toHaveLength(MAX_LISTED_BOXES);
-    expect(screen.getByText("Ещё паллет: 3. Наберите больше цифр.")).toBeTruthy();
+    expect(screen.getByText("Ещё палет: 3. Наберите больше цифр.")).toBeTruthy();
     expect(
-      screen.getByText("Отсканируйте этикетку паллеты или наберите последние цифры её SSCC."),
+      screen.getByText("Отсканируйте этикетку палеты или наберите последние цифры её SSCC."),
     ).toBeTruthy();
     const pad = within(screen.getByRole("group", { name: "Последние цифры SSCC" }));
     for (const digit of "9999") fireEvent.click(pad.getByRole("button", { name: digit }));
-    expect(screen.getByText("Нет закрытых паллет с такими цифрами.")).toBeTruthy();
+    expect(screen.getByText("Нет закрытых палет с такими цифрами.")).toBeTruthy();
     await act(async () => {
       view.rerender(<ExceptionFlow {...flowProps({ pallets: null })} />);
     });
-    expect(screen.getByText("Читаем закрытые паллеты…")).toBeTruthy();
+    expect(screen.getByText("Читаем закрытые палеты…")).toBeTruthy();
   });
 
   it("reads a scan against the pallets for a pallet's action and against the boxes for a box's", async () => {
@@ -941,7 +937,7 @@ describe("the pallet's part of the exceptions screen by itself", () => {
       });
       return verdict;
     };
-    fireEvent.click(screen.getByRole("button", { name: "Расформировать паллету" }));
+    fireEvent.click(screen.getByRole("button", { name: "Расформировать палету" }));
     expect(scan(`]C100${FIRST_BOX}`)).toBe("not_found");
     expect(scan(km("A9"))).toBe("not_sscc");
     const choice = listening();
@@ -949,7 +945,7 @@ describe("the pallet's part of the exceptions screen by itself", () => {
     // The choice is made: a second scan, before any render, is not the choice's to read.
     expect(scan(`]C100${FIRST_PALLET}`, choice)).toBeNull();
     expect(registerScan.mock.lastCall?.[0]).toBeNull();
-    expect(screen.getByText(`Паллета ${formatSsccHri(FIRST_PALLET)}`)).toBeTruthy();
+    expect(screen.getByText(`Палета ${formatSsccHri(FIRST_PALLET)}`)).toBeTruthy();
     // A box's action takes the box, not the pallet.
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
@@ -960,16 +956,16 @@ describe("the pallet's part of the exceptions screen by itself", () => {
 
   it("goes back from the reason to the choice of the pallet, not of a box", async () => {
     await mount(<ExceptionFlow {...flowProps({ pallets: ONE_PALLET })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Перепечатать этикетку паллеты" }));
+    fireEvent.click(screen.getByRole("button", { name: "Перепечатать этикетку палеты" }));
     fireEvent.click(screen.getByRole("button", { name: option(FIRST_PALLET, 3) }));
     expect(screen.getByText("Укажите причину")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
-    expect(screen.getByText("Этикетку какой паллеты перепечатать?")).toBeTruthy();
+    expect(screen.getByText("Этикетку какой палеты перепечатать?")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: option(FIRST_PALLET, 3) }));
     fireEvent.click(screen.getByRole("button", { name: "Другая причина" }));
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
     expect(screen.getByText("Укажите причину")).toBeTruthy();
-    expect(screen.getByText(`Паллета ${formatSsccHri(FIRST_PALLET)}`)).toBeTruthy();
+    expect(screen.getByText(`Палета ${formatSsccHri(FIRST_PALLET)}`)).toBeTruthy();
   });
 
   it("offers the setup where no printer is assigned to pallets, though one is to boxes, and not the other way round", async () => {
@@ -982,12 +978,12 @@ describe("the pallet's part of the exceptions screen by itself", () => {
       />,
     );
     const toConfirm = () => {
-      fireEvent.click(screen.getByRole("button", { name: "Перепечатать этикетку паллеты" }));
+      fireEvent.click(screen.getByRole("button", { name: "Перепечатать этикетку палеты" }));
       fireEvent.click(screen.getByRole("button", { name: option(FIRST_PALLET, 3) }));
       fireEvent.click(screen.getByRole("button", { name: "Этикетка повреждена" }));
     };
     toConfirm();
-    expect(screen.getByText(/Принтер для этикетки паллеты не назначен/)).toBeTruthy();
+    expect(screen.getByText(/Принтер для этикетки палеты не назначен/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Настроить принтер" })).toBeTruthy();
     view.unmount();
     const noBoxPrinter = async () =>

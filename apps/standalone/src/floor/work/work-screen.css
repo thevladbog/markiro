@@ -348,160 +348,98 @@
   white-space: nowrap;
 }
 
-/* The open box: its title and count in one row, the places as cells, its action under them. */
 .work-box-fill {
   display: grid;
   padding: var(--sp-3);
   gap: var(--sp-2);
-  grid-template-rows: auto minmax(96px, 1fr) minmax(64px, auto);
+  grid-template-rows: auto minmax(72px, 1fr) minmax(64px, auto);
 }
-
-.work-box-fill[data-grouped="true"] {
-  grid-template-rows: auto minmax(96px, 1fr) auto minmax(64px, auto);
-}
-
-/* The title on the left, the counter on the right edge of the block's header, on one baseline. */
-.work-box-fill__head {
-  display: flex;
-  min-width: 0;
-  flex-wrap: nowrap;
-  gap: var(--sp-1) var(--sp-3);
-  align-items: baseline;
-  justify-content: space-between;
-}
-
-.work-box-fill__head h2 {
-  flex: 0 1 auto;
-  min-width: 0;
+.work-box-fill h2 {
   margin: 0;
   font: var(--floor-lg);
 }
-
-.work-box-fill__count {
-  flex: 0 0 auto;
-  margin-inline-start: auto;
-  font: var(--floor-counter-sm);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-/* «Короб откроется с первым кодом»: words, not a count. */
-.work-box-fill__count[data-empty="true"] {
-  color: var(--fg-2);
-  font: var(--floor-body);
-  white-space: normal;
-}
-
-/* «5 из 12»: the numbers in the counter's face, the words (and the spaces) in the interface's. */
-.work-box-fill__count.work-of-count {
-  font: var(--floor-body);
-}
-
-.work-box-fill__count .work-of-count__number {
-  font: var(--floor-counter-sm);
-}
-
-.work-box-fill__count .work-of-count__word {
-  color: var(--fg-2);
-}
-
-.work-box-fill__grid {
+.work-box-fill__body {
   display: grid;
+  grid-template-columns: minmax(0, 0.96fr) minmax(0, 1.04fr);
+  gap: var(--sp-4);
+  min-height: 0;
+  container-type: size;
+}
+.work-box-fill__illustration {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+}
+.work-carton {
+  --carton-flap: color-mix(in srgb, var(--warn-border) 80%, var(--floor-paper-warn));
+  --carton-edge: color-mix(in srgb, var(--floor-paper-warn) 44%, var(--floor-paper-ink));
+  --carton-board: color-mix(in srgb, var(--carton-flap) 63%, var(--carton-edge));
+  --carton-floor: color-mix(in srgb, var(--carton-flap) 58%, var(--carton-edge));
+  --carton-inside: color-mix(in srgb, var(--carton-flap) 46%, var(--carton-edge));
+  --carton-top: color-mix(in srgb, var(--accent-module) 35%, var(--cat-teal-bg));
+  --carton-front: color-mix(in srgb, var(--ok-solid) 63%, var(--cat-teal-border));
+  --carton-level: var(--ok-fg);
+  --carton-side: color-mix(in srgb, var(--carton-front) 66%, var(--carton-level));
+  display: block;
   width: 100%;
   height: 100%;
+  max-height: 205px;
+}
+[data-theme="dark"] .work-carton {
+  --carton-flap: color-mix(in srgb, var(--fg-2) 61%, var(--warn-fg));
+  --carton-edge: var(--surface-panel);
+  --carton-top: color-mix(in srgb, var(--accent-strong) 66%, var(--floor-paper));
+  --carton-front: color-mix(in srgb, var(--accent-strong) 72%, var(--ok-border));
+  --carton-level: var(--ok-border);
+}
+.work-box-fill__summary {
+  grid-column: 2;
+  display: grid;
   min-width: 0;
-  min-height: 0;
-  gap: 5px;
-  grid-template-columns: repeat(10, minmax(0, 1fr));
-  align-content: stretch;
-  justify-items: center;
+  align-content: center;
+  gap: var(--sp-1);
 }
-
-.work-box-fill__grid[data-grouped="true"],
-.work-box-fill__grid[data-dense="true"] {
-  gap: 3px;
+.work-box-fill__summary:only-child {
+  grid-column: 1 / -1;
 }
-
-/* Ten or fewer places: one row of large numbered segments, readable from across the line. */
-.work-box-fill__grid[data-large="true"] {
-  gap: 8px;
-  justify-items: stretch;
-}
-
-.work-box-fill__grid[data-large="true"] .work-box-fill__cell {
-  display: flex;
-  flex-direction: column;
-  aspect-ratio: auto;
-  gap: 4px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 10px;
-  color: var(--fg-3);
-  font: 700 clamp(20px, 2vw, 30px) / 1 var(--font-ui);
+.work-box-fill__count {
+  font: 600 clamp(24px, min(8.5cqi, 32cqh), 54px) / 1.3 var(--font-ui);
   font-variant-numeric: tabular-nums;
-}
-
-.work-box-fill__grid[data-large="true"] .work-box-fill__cell[data-state="filled"] {
-  color: var(--fg-on-ok-solid);
-}
-
-.work-box-fill__grid[data-large="true"] .work-box-fill__cell[data-state="next"] {
-  color: var(--fg-1);
-}
-
-/* The serial under the number: one monospace line, only where `cellSerialPlan` found room. */
-.work-box-fill__serial {
-  max-width: 100%;
-  overflow: hidden;
-  font-family: var(--font-mono);
-  font-weight: 500;
-  line-height: 1.25;
   white-space: nowrap;
 }
-
-.work-box-fill__cell {
-  box-sizing: border-box;
-  height: 100%;
-  max-width: 100%;
-  aspect-ratio: 1;
-  min-width: 0;
-  border: 2px solid var(--line-strong);
-  border-radius: 3px;
-  background: var(--surface-card);
+.work-box-fill__summary[data-wide="true"] .work-box-fill__count {
+  font-size: clamp(20px, 4.3cqi, 34px);
 }
-
-.work-box-fill__cell[data-state="filled"] {
-  border-color: var(--ok-border);
-  background: var(--ok-solid);
-}
-
-.work-box-fill__cell[data-state="partial"] {
-  border-color: var(--ok-border);
-  background: linear-gradient(90deg, var(--ok-solid) 50%, var(--surface-card) 50%);
-}
-
-.work-box-fill__cell[data-state="next"] {
-  outline: 3px solid var(--focus-ring);
-  outline-offset: -3px;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .work-box-fill__cell[data-latest="true"] {
-    animation: work-box-fill-accepted 150ms ease-out;
-  }
-}
-
-@keyframes work-box-fill-accepted {
-  50% {
-    transform: scale(1.12);
-  }
-}
-
-.work-box-fill__grouped {
-  margin: 0;
+.work-box-fill__caption {
   color: var(--fg-2);
   font: var(--floor-body);
-  text-align: center;
+}
+.work-box-fill__remaining {
+  margin-top: clamp(0px, 5cqh, 12px);
+  border-top: 1px solid var(--line);
+  padding-top: clamp(2px, 4cqh, 10px);
+  font: 600 clamp(17px, min(4.6cqi, 18cqh), 29px) / 1.3 var(--font-ui);
+}
+.work-box-fill__remaining[data-last="true"] {
+  color: var(--ok-fg);
+}
+@container (max-height: 114px) {
+  .work-box-fill__summary {
+    gap: 2px;
+  }
+  .work-box-fill__caption {
+    font-size: 15px;
+    line-height: 18px;
+  }
+  .work-box-fill__remaining {
+    margin-top: 0;
+    padding-top: 2px;
+  }
+}
+@container (max-height: 82px) {
+  .work-box-fill__caption {
+    display: none;
+  }
 }
 
 .work-box-fill__actions {
@@ -517,7 +455,7 @@
 }
 
 /*
- * The three buttons under the cells are sized for a two-line label at the narrowest real width
+ * The three buttons under the carton are sized for a two-line label at the narrowest real width
  * (a 1280 px panel at 125 % scaling is 1024 CSS px, a third of the box column is ~160 px): the
  * kit's inline 64 px height gives way to `min-height`, the line is 24 px so two lines and the
  * padding are 64 px exactly, the text is centred and balanced, and a word is never cut.
@@ -535,6 +473,12 @@
   text-align: center;
   text-wrap: balance;
   white-space: normal;
+}
+
+@media (max-width: 1100px) {
+  .work-box-fill__actions .mk-btn {
+    font-size: 18px !important;
+  }
 }
 
 /* The last scan: the verdict as one large word on its tone, readable from the line. */
@@ -1117,36 +1061,11 @@
     padding-inline: var(--sp-1);
   }
 
-  /* The open box: title and count on a slim row, the cells share the rest, the buttons keep 64 px. */
   .work-box-fill {
     padding: var(--sp-2) var(--sp-3);
-    gap: var(--sp-2);
-    grid-template-rows: auto minmax(72px, 1fr) minmax(64px, auto);
   }
-
-  .work-box-fill[data-grouped="true"] {
-    grid-template-rows: auto minmax(72px, 1fr) auto minmax(64px, auto);
-  }
-
-  .work-box-fill__head h2 {
+  .work-box-fill h2 {
     font: 600 20px/28px var(--font-ui);
-  }
-
-  .work-box-fill__count {
-    font: 600 32px/36px var(--font-mono);
-  }
-
-  .work-box-fill__count[data-empty="true"],
-  .work-box-fill__count.work-of-count {
-    font: var(--floor-body);
-  }
-
-  .work-box-fill__count .work-of-count__number {
-    font: 600 32px/36px var(--font-mono);
-  }
-
-  .work-box-fill__grid[data-large="true"] {
-    gap: 6px;
   }
 
   /* The last scan: the title and time on a slim row, the verdict and the code on one row. */
@@ -1261,4 +1180,8 @@
 .work-screen__demo > p {
   margin: 0;
   max-width: 72ch;
+}
+
+.work-screen[data-closed="true"] {
+  --work-footer-h: 0px;
 }

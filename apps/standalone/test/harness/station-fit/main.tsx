@@ -131,7 +131,7 @@ const local: LocalExecutor = {
         { id: TEMPLATE, name: "Короб 100x150", purpose: "box", enabled: 1, category_codes: null },
         {
           id: PALLET_TEMPLATE,
-          name: "Паллета 100x150",
+          name: "Палета 100x150",
           purpose: "pallet",
           enabled: 1,
           category_codes: null,
@@ -216,7 +216,7 @@ const updateKind = query.get("update") ?? "latest";
 const NOTES = [
   "Исправлено зависание очереди отправки после обрыва связи.",
   "Новая сводка смены на экране работы.",
-  "Печать листа А4 для паллет через драйвер Windows.",
+  "Печать листа А4 для палет через драйвер Windows.",
 ];
 const updateEntry: FloorUpdateEntry = {
   offer:

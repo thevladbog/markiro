@@ -5,13 +5,20 @@ import type { ShiftCloseReasonCode } from "@markiro/domain";
 
 import { shiftProductTitle } from "../../lib/shift-product.js";
 import { closeShift, readCloseSummary, type CloseSummary } from "../close/shift-close.js";
-import { sameSummary, ShiftClosePanel, type CloseNote } from "../close/ShiftClosePanel.js";
+import {
+  sameSummary,
+  ShiftClosedPanel,
+  ShiftClosePanel,
+  type ClosedNumbers,
+  type CloseNote,
+} from "../close/ShiftClosePanel.js";
 import { FloorFooter } from "../shifts/FloorScreen.js";
 import { SetRecipe } from "../shifts/SetRecipe.js";
 import { readShiftCopy } from "../shifts/shift-copies.js";
 import { sharedCount, sharedParticipation } from "../shifts/shift-participation.js";
 import { formatQuantity } from "../shifts/shift-text.js";
-import { FooterAction, ShiftBand } from "./WorkInstruments.js";
+import { ShiftActionButton } from "../kit/ShiftActionButton.js";
+import { ShiftBand } from "./WorkInstruments.js";
 import type { WorkScreenProps } from "./WorkScreen.js";
 import {
   readLostSets,
@@ -22,7 +29,7 @@ import {
   type SetAssemblyContext,
   type SetScanResult,
 } from "./set-assembly.js";
-import { useShiftParticipation } from "./use-shift-participation.js";
+import { useClosedPartState, useShiftParticipation } from "./use-shift-participation.js";
 import { playSignalTone } from "./signal-sound.js";
 import { createWorkQueue } from "./work-queue.js";
 import "../print/label-panel.css";
@@ -50,8 +57,9 @@ export function SetWorkScreen(props: WorkScreenProps) {
     attempt: number;
   } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [closed, setClosed] = useState(false);
+  const [closed, setClosed] = useState<ClosedNumbers | null>(null);
   const pausing = useRef(false);
+  const confirming = useRef(false);
   const ready = assembly !== null;
 
   const { hostId, deviceId } = props.pairing;
@@ -64,6 +72,11 @@ export function SetWorkScreen(props: WorkScreenProps) {
     ...(props.onRefreshShifts === undefined ? {} : { onRefresh: props.onRefreshShifts }),
   });
   const sharedPart = sharedParticipation(participation);
+  const [partState, setPartState] = useClosedPartState(
+    props,
+    shift.copy.id,
+    sharedPart !== null && closed !== null,
+  );
   const [plannedQty, setPlannedQty] = useState(shift.copy.plannedQty);
   const [lost, setLost] = useState(0);
 
@@ -182,7 +195,7 @@ export function SetWorkScreen(props: WorkScreenProps) {
             current.shiftId,
             live.current.online,
           );
-          setPanel({ summary, note: null, attempt: 0 });
+          showSummary(summary, null, 0);
         } catch {
           pausing.current = false;
           setFeedback("failed");
@@ -194,11 +207,13 @@ export function SetWorkScreen(props: WorkScreenProps) {
   }
 
   function confirmClose(reason: ShiftCloseReasonCode | null) {
-    if (leavingNow() || panel === null || busy) return;
+    if (leavingNow() || panel === null || busy || confirming.current) return;
+    confirming.current = true;
     setBusy(true);
     void live.current.track(
       queue.run(async () => {
         if (leavingNow()) {
+          confirming.current = false;
           setBusy(false);
           return;
         }
@@ -216,33 +231,39 @@ export function SetWorkScreen(props: WorkScreenProps) {
               online,
             );
             if (result.kind === "closed") {
-              leaveAfterClose();
+              setPartState("queued");
+              showClosed(result.record);
               return;
             }
           }
-          setPanel({ summary: await read(), note: "stale", attempt: panel.attempt + 1 });
+          showSummary(await read(), "stale", panel.attempt + 1);
         } catch {
           const summary = await read().catch(() => null);
-          if (summary?.blocker?.kind === "closed") {
-            leaveAfterClose();
-          } else {
-            setPanel({
-              summary: summary ?? panel.summary,
-              note: summary === null ? "unknown" : "failed",
-              attempt: panel.attempt + 1,
-            });
-          }
+          showSummary(
+            summary ?? panel.summary,
+            summary === null ? "unknown" : "failed",
+            panel.attempt + 1,
+          );
         } finally {
+          confirming.current = false;
           setBusy(false);
         }
       }),
     );
   }
 
-  function leaveAfterClose() {
-    setClosed(true);
+  function showSummary(summary: CloseSummary, note: CloseNote | null, attempt: number) {
+    if (summary.blocker?.kind === "closed") {
+      showClosed({ actualQty: summary.actualQty, closedBoxCount: summary.closedBoxes });
+    } else {
+      setPanel({ summary, note, attempt });
+    }
+  }
+
+  function showClosed(numbers: ClosedNumbers) {
+    setPanel(null);
+    setClosed(numbers);
     live.current.onRecorded();
-    live.current.onLeave();
   }
 
   const counts = setItemCounts(assembly?.items ?? []);
@@ -259,9 +280,13 @@ export function SetWorkScreen(props: WorkScreenProps) {
   );
   const accepted = feedback === "assembled" || feedback === "item" || feedback === "undone";
   return (
-    <main className="work-screen" aria-label={t("floor.setAssembly.mode")}>
+    <section
+      className="work-screen"
+      data-closed={closed !== null}
+      aria-label={t("floor.setAssembly.mode")}
+    >
       <div className="work-screen__content">
-        <div className="work-screen__work">
+        <div className="work-screen__work" inert={panel !== null || closed !== null}>
           <ShiftBand
             productName={productName}
             gtin={shift.snapshot.product.gtin14}
@@ -274,107 +299,126 @@ export function SetWorkScreen(props: WorkScreenProps) {
             local={props.local}
             productId={shift.copy.productId}
           />
-          {panel !== null ? (
-            <ShiftClosePanel
-              number={shift.copy.number}
-              productName={productName}
-              summary={panel.summary}
-              note={panel.note}
-              attempt={panel.attempt}
-              waitingSscc={null}
-              busy={busy}
-              onClose={confirmClose}
-              onLabel={() => undefined}
-              boxless
-              ownPart={sharedPart !== null}
-              {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
-              onBack={() => {
-                setPanel(null);
-                pausing.current = false;
-              }}
-            />
-          ) : (
-            <div className="work-screen__instruments set-assembly">
-              <section className="set-assembly__status">
-                {officeClosed ? (
-                  <Alert tone="warn" title={t("floor.work.officeClosed.title")} />
-                ) : (
-                  <>
-                    <section
-                      className={
-                        awaitingSetMark ? "label-panel__stage set-assembly__scan-stage" : undefined
-                      }
-                      aria-labelledby={scanTitleId}
-                      aria-describedby={awaitingSetMark ? scanHintId : undefined}
-                    >
-                      {awaitingSetMark && (
-                        <div className="label-panel__scanner" aria-hidden="true">
-                          <span />
-                        </div>
-                      )}
-                      <h2 id={scanTitleId}>{scanTitle}</h2>
-                      {awaitingSetMark && (
-                        <p id={scanHintId} className="label-panel__instruction">
-                          {t("floor.setAssembly.scanSetHint")}
-                        </p>
-                      )}
-                      <div
-                        className="set-assembly__progress"
-                        aria-label={t("floor.setAssembly.scanned")}
-                      >
-                        {formatQuantity(progress)} / {formatQuantity(target)}
+          <div className="work-screen__instruments set-assembly">
+            <section className="set-assembly__status">
+              {officeClosed ? (
+                <Alert tone="warn" title={t("floor.work.officeClosed.title")} />
+              ) : (
+                <>
+                  <section
+                    className={
+                      awaitingSetMark ? "label-panel__stage set-assembly__scan-stage" : undefined
+                    }
+                    aria-labelledby={scanTitleId}
+                    aria-describedby={awaitingSetMark ? scanHintId : undefined}
+                  >
+                    {awaitingSetMark && (
+                      <div className="label-panel__scanner" aria-hidden="true">
+                        <span />
                       </div>
-                    </section>
-                    <div role="status">
-                      {awaitingSetMark && <VisuallyHidden>{scanTitle}.</VisuallyHidden>}
-                      {feedback !== null && (
-                        <Alert
-                          tone={accepted ? "ok" : "warn"}
-                          role="presentation"
-                          title={
-                            feedback === "item" && lastName !== undefined
-                              ? t("floor.setAssembly.lastProduct", { name: lastName })
-                              : t(`floor.setAssembly.feedback.${feedback}`)
-                          }
-                        />
-                      )}
+                    )}
+                    <h2 id={scanTitleId}>{scanTitle}</h2>
+                    {awaitingSetMark && (
+                      <p id={scanHintId} className="label-panel__instruction">
+                        {t("floor.setAssembly.scanSetHint")}
+                      </p>
+                    )}
+                    <div
+                      className="set-assembly__progress"
+                      aria-label={t("floor.setAssembly.scanned")}
+                    >
+                      {formatQuantity(progress)} / {formatQuantity(target)}
                     </div>
-                  </>
-                )}
-              </section>
-              <SetRecipe
-                local={props.local}
-                items={recipe}
-                counts={counts}
-                {...(lastGtin === undefined ? {} : { lastGtin })}
-              />
-            </div>
-          )}
+                  </section>
+                  <div role="status">
+                    {awaitingSetMark && <VisuallyHidden>{scanTitle}.</VisuallyHidden>}
+                    {feedback !== null && (
+                      <Alert
+                        tone={accepted ? "ok" : "warn"}
+                        role="presentation"
+                        title={
+                          feedback === "item" && lastName !== undefined
+                            ? t("floor.setAssembly.lastProduct", { name: lastName })
+                            : t(`floor.setAssembly.feedback.${feedback}`)
+                        }
+                      />
+                    )}
+                  </div>
+                </>
+              )}
+            </section>
+            <SetRecipe
+              local={props.local}
+              items={recipe}
+              counts={counts}
+              {...(lastGtin === undefined ? {} : { lastGtin })}
+            />
+          </div>
         </div>
       </div>
-      <FloorFooter className="work-footer" ariaLabel={t("floor.work.layout.actions")}>
-        <FooterAction
-          variant="secondary"
-          disabled={progress === 0 || closed || leaving || panel !== null || busy}
-          onClick={undo}
-        >
-          {t("floor.setAssembly.undo")}
-        </FooterAction>
-        <FooterAction
-          variant="warning-outline"
-          disabled={closed || leaving || busy}
-          onClick={onLeave}
-        >
-          {t("floor.setAssembly.pause")}
-        </FooterAction>
-        <FooterAction
-          variant="destructive-outline"
-          disabled={closed || leaving || panel !== null || busy || !ready}
-          onClick={openClose}
-        >
-          {t("floor.setAssembly.close")}
-        </FooterAction>
-      </FloorFooter>
-    </main>
+      {(closed !== null || panel !== null) && (
+        <div className="work-screen__overlays" aria-live="polite">
+          <div className="work-screen__stage" data-centred="true">
+            {closed !== null && (
+              <ShiftClosedPanel
+                number={shift.copy.number}
+                record={closed}
+                linkHeld={props.linkHeld ?? false}
+                leaving={leaving}
+                onDone={onLeave}
+                boxless
+                acceptedLabel={t("floor.setAssembly.assembled")}
+                part={sharedPart === null ? null : (partState ?? "unknown")}
+                {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
+              />
+            )}
+            {panel !== null && (
+              <ShiftClosePanel
+                number={shift.copy.number}
+                productName={productName}
+                summary={panel.summary}
+                note={panel.note}
+                attempt={panel.attempt}
+                waitingSscc={null}
+                busy={busy}
+                onClose={confirmClose}
+                onLabel={() => undefined}
+                boxless
+                acceptedLabel={t("floor.setAssembly.assembled")}
+                ownPart={sharedPart !== null}
+                {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
+                onBack={() => {
+                  setPanel(null);
+                  pausing.current = false;
+                }}
+              />
+            )}
+          </div>
+        </div>
+      )}
+      {closed === null && (
+        <FloorFooter className="work-footer" ariaLabel={t("floor.setAssembly.actions")}>
+          <ShiftActionButton
+            footer
+            action="undo"
+            disabled={progress === 0 || leaving || panel !== null || busy}
+            onClick={undo}
+          >
+            {t("floor.setAssembly.undo")}
+          </ShiftActionButton>
+          <ShiftActionButton footer action="pause" disabled={leaving || busy} onClick={onLeave}>
+            {t("floor.work.pause")}
+          </ShiftActionButton>
+          <ShiftActionButton
+            footer
+            action="close"
+            disabled={leaving || panel !== null || busy || !ready}
+            onClick={openClose}
+          >
+            {t(sharedPart === null ? "floor.close.open" : "floor.close.openPart")}
+          </ShiftActionButton>
+        </FloorFooter>
+      )}
+    </section>
   );
 }

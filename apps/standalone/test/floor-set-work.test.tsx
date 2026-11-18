@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 
 import { SetWorkScreen } from "../src/floor/work/SetWorkScreen.js";
@@ -41,14 +41,27 @@ it("shows the last accepted product, pauses the shift, and returns to the list w
   expect(row.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,iVBORw0KGgo=");
   expect(within(row).getByText(OTHER_GTIN)).toBeTruthy();
   expect(screen.getByRole("status").textContent).toContain("Крем для рук");
-  await work.press("На паузу");
+  await work.press("Пауза");
   expect(onLeave).toHaveBeenCalledTimes(1);
   expect(db.prepare("SELECT kind FROM outbox").all()).toEqual([]);
   await work.scan(km("SET0001"));
   expect(scanSet()).toBeNull();
   await work.press("Закрыть смену");
   await screen.findByRole("region", { name: `Закрытие смены ${shift.copy.number}` });
-  await work.press("Подтвердить закрытие");
+  work.pause();
+  const confirm = screen.getByRole("button", { name: "Подтвердить закрытие" });
+  act(() => {
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+  });
+  await work.settled();
+  const done = await screen.findByRole("group", { name: /закрыта на этой станции/ });
+  expect(screen.queryByRole("region", { name: `Закрытие смены ${shift.copy.number}` })).toBeNull();
+  expect(within(done).getByText("Наборов собрано")).toBeTruthy();
+  expect(within(done).getByRole("definition").textContent).toBe("1");
+  expect(screen.queryByRole("button", { name: "Пауза" })).toBeNull();
+  expect(onLeave).toHaveBeenCalledTimes(1);
+  await work.press("К списку смен");
   expect(onLeave).toHaveBeenCalledTimes(2);
   expect(db.prepare("SELECT kind FROM outbox ORDER BY seq").all()).toEqual([
     { kind: "set_assembled" },

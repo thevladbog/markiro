@@ -7204,7 +7204,7 @@
     },
     {
       "purpose": "pallet",
-      "sourceName": "Паллета 58×40",
+      "sourceName": "Палета 58×40",
       "sourceSpec": {
         "widthMm": 58,
         "heightMm": 40,
@@ -7347,7 +7347,7 @@
           }
         ]
       },
-      "name": "Паллета 58×40 · номер партии",
+      "name": "Палета 58×40 · номер партии",
       "spec": {
         "widthMm": 58,
         "heightMm": 40,

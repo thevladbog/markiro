@@ -64,7 +64,7 @@ const SHEETS: PalletSheets = {
   sheets: [
     {
       id: SHEET_A,
-      name: "Паллета А4 книжная",
+      name: "Палета А4 книжная",
       enabled: true,
       presetKey: null,
       revision: 1,
@@ -72,7 +72,7 @@ const SHEETS: PalletSheets = {
     },
     {
       id: SHEET_B,
-      name: "Паллета А4 альбомная",
+      name: "Палета А4 альбомная",
       enabled: true,
       presetKey: null,
       revision: 1,
@@ -112,9 +112,9 @@ function palletTemplate(id: string, name: string): ChangeItem {
 }
 const COPIES: ChangeItem[] = [
   ...CATALOG,
-  palletTemplate("c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f", "Паллета 100×150"),
-  palletTemplate("d5e6f7a8-b9c0-4d1e-8f2a-3b4c5d6e7f8a", "Паллета 120×80"),
-  palletTemplate("e6f7a8b9-c0d1-4e2f-9a3b-4c5d6e7f8a9b", "Паллета узкая"),
+  palletTemplate("c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f", "Палета 100×150"),
+  palletTemplate("d5e6f7a8-b9c0-4d1e-8f2a-3b4c5d6e7f8a", "Палета 120×80"),
+  palletTemplate("e6f7a8b9-c0d1-4e2f-9a3b-4c5d6e7f8a9b", "Палета узкая"),
 ];
 
 function raster(): MonoRaster {
@@ -202,25 +202,25 @@ describe("the pallet step of a new shift follows the printer assigned to pallets
     const palletSheets = vi.fn(async () => SHEETS);
     const { create } = renderNew(local, palletSheets);
     await toPalletStep();
-    const group = await screen.findByRole("group", { name: "Лист А4 паллеты" });
+    const group = await screen.findByRole("group", { name: "Лист А4 палеты" });
     expect(palletSheets).toHaveBeenCalledWith(MILK);
     // «По умолчанию товара» and the two enabled sheets; the disabled one is not offered.
     expect(
       within(group)
         .getAllByRole("button")
         .map((button) => button.textContent),
-    ).toEqual(["По умолчанию товара", "Паллета А4 книжная", "Паллета А4 альбомная"]);
-    expect(screen.queryByRole("group", { name: "Шаблон этикетки паллеты" })).toBeNull();
+    ).toEqual(["По умолчанию товара", "Палета А4 книжная", "Палета А4 альбомная"]);
+    expect(screen.queryByRole("group", { name: "Шаблон этикетки палеты" })).toBeNull();
     expect(
-      screen.getByText("Лист А4 для паллеты: по умолчанию товара (Паллета А4 книжная)"),
+      screen.getByText("Лист А4 для палеты: по умолчанию товара (Палета А4 книжная)"),
     ).toBeTruthy();
     await waitFor(() => expect(paintMonoRaster).toHaveBeenCalledTimes(1));
     expect(vi.mocked(renderSheetRaster).mock.calls[0]?.[0]).toEqual(PORTRAIT.spec);
     expect(
-      screen.getByRole("img", { name: "Предпросмотр листа А4 «Паллета А4 книжная»" }),
+      screen.getByRole("img", { name: "Предпросмотр листа А4 «Палета А4 книжная»" }),
     ).toBeTruthy();
     // Another sheet is drawn, and the shift is made with it.
-    fireEvent.click(within(group).getByRole("button", { name: "Паллета А4 альбомная" }));
+    fireEvent.click(within(group).getByRole("button", { name: "Палета А4 альбомная" }));
     await waitFor(() => expect(paintMonoRaster).toHaveBeenCalledTimes(2));
     expect(vi.mocked(renderSheetRaster).mock.calls[1]?.[0]).toEqual(LANDSCAPE.spec);
     fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
@@ -239,7 +239,7 @@ describe("the pallet step of a new shift follows the printer assigned to pallets
     });
     const { create } = renderNew(local, async () => SHEETS);
     await toPalletStep();
-    await screen.findByRole("group", { name: "Лист А4 паллеты" });
+    await screen.findByRole("group", { name: "Лист А4 палеты" });
     fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     const body = create.mock.calls[0]?.[0];
@@ -269,9 +269,9 @@ describe("the pallet step of a new shift follows the printer assigned to pallets
     const palletSheets = vi.fn(async () => SHEETS);
     renderNew(local, palletSheets);
     await toPalletStep();
-    const group = await screen.findByRole("group", { name: "Шаблон этикетки паллеты" });
+    const group = await screen.findByRole("group", { name: "Шаблон этикетки палеты" });
     expect(within(group).getAllByRole("button")).toHaveLength(3);
-    expect(screen.queryByRole("group", { name: "Лист А4 паллеты" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Лист А4 палеты" })).toBeNull();
     expect(palletSheets).not.toHaveBeenCalled();
     expect(renderSheetRaster).not.toHaveBeenCalled();
   });

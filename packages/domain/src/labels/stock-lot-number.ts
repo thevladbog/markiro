@@ -6,7 +6,7 @@ import {
 import { buildDefaultLabelTemplates } from "./defaults.js";
 import { buildDuplicateLabelTemplates } from "./duplicate.js";
 import { LOT_NUMBER_LABEL_FIELD, type LabelElement, type LabelTemplateSpec } from "./model.js";
-import { buildPalletLabelTemplates } from "./pallet-defaults.js";
+import { buildPalletLabelTemplates, PALLET_LABEL_58X40_TEMPLATE_NAME } from "./pallet-defaults.js";
 
 export interface StockLotNumberLabelVariant {
   purpose: LabelTemplatePurpose;
@@ -152,7 +152,9 @@ export function buildStockLotNumberLabelVariants(): StockLotNumberLabelVariant[]
   ] as const;
   const variants: StockLotNumberLabelVariant[] = sources.flatMap(([purpose, templates]) =>
     templates.map(({ name, spec }) => {
-      const base = { purpose, sourceName: name, sourceSpec: spec, name: `${name} · номер партии` };
+      const sourceName =
+        purpose === "pallet" && name === PALLET_LABEL_58X40_TEMPLATE_NAME ? "Палета 58×40" : name;
+      const base = { purpose, sourceName, sourceSpec: spec, name: `${sourceName} · номер партии` };
       if (purpose === "product_duplicate") return { ...base, spec: duplicateVariant(spec) };
       const previous = aggregationVariant(spec, purpose);
       if (spec.widthMm !== 75 || spec.heightMm !== 120) return { ...base, spec: previous };

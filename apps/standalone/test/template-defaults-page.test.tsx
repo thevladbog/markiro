@@ -62,10 +62,10 @@ const OLD = summary("9e3a6d4c-1f5b-4a7c-8d8e-3f4a5b6c7d8e", "Старая кор
   stock: false,
   enabled: false,
 });
-const PALLET = summary("0f4b7e5d-2a6c-4b8d-9e9f-4a5b6c7d8e9f", "Паллета 100×150", {
+const PALLET = summary("0f4b7e5d-2a6c-4b8d-9e9f-4a5b6c7d8e9f", "Палета 100×150", {
   purpose: "pallet",
 });
-const PALLET_58 = summary("1a5c8f6e-3b7d-4c9e-8f0a-5b6c7d8e9f0a", "Паллета 58×40", {
+const PALLET_58 = summary("1a5c8f6e-3b7d-4c9e-8f0a-5b6c7d8e9f0a", "Палета 58×40", {
   purpose: "pallet",
 });
 const DUPLICATE = summary("2b6d9a7f-4c8e-4d0f-9a1b-6c7d8e9f0a1b", "Дубликат [Полное]", {
@@ -167,7 +167,7 @@ describe("office template defaults: the organization's", () => {
     await openDefaults(session());
     expect(screen.getByRole("heading", { name: "Шаблоны по умолчанию" })).toBeTruthy();
     expect(choices("Шаблон короба")).toEqual(["Не выбран", "Коробка 58×40", "Коробка 100×100"]);
-    expect(choices("Шаблон палета")).toEqual(["Не выбран", "Паллета 58×40", "Паллета 100×150"]);
+    expect(choices("Шаблон палета")).toEqual(["Не выбран", "Палета 58×40", "Палета 100×150"]);
     expect(choices("Шаблон дубликата товара")).toEqual(["Не выбран", "Дубликат [Полное]"]);
     expect(valueOf("Шаблон короба")).toBe(BOX.id);
     expect(valueOf("Шаблон палета")).toBe(PALLET.id);
@@ -501,10 +501,7 @@ describe("office template defaults: the categories'", () => {
       "Коробка 58×40",
       "Коробка 100×100",
     ]);
-    expect(choices("Шаблон: Упакованная вода, Палет")).toEqual([
-      "Паллета 58×40",
-      "Паллета 100×150",
-    ]);
+    expect(choices("Шаблон: Упакованная вода, Палет")).toEqual(["Палета 58×40", "Палета 100×150"]);
     expect(
       screen.getByRole("button", { name: "Убрать умолчание: Упакованная вода, Палет" }),
     ).toBeTruthy();
@@ -540,7 +537,7 @@ describe("office template defaults: the categories'", () => {
 
   it("adds a category default: a category with a purpose left, a purpose it has no default of, then a template that fits both", async () => {
     const fake = session(FULL_WATER);
-    const milkPallet = summary("3c7e0b8a-5d9f-4e1a-8b2c-7d8e9f0a1b2c", "Паллета молока", {
+    const milkPallet = summary("3c7e0b8a-5d9f-4e1a-8b2c-7d8e9f0a1b2c", "Палета молока", {
       purpose: "pallet",
       stock: false,
       chzProductGroupCodes: [8],
@@ -563,9 +560,9 @@ describe("office template defaults: the categories'", () => {
     // A template scoped to the category fits it too.
     expect(choices("Шаблон")).toEqual([
       "Не выбран",
-      "Паллета 58×40",
-      "Паллета 100×150",
-      "Паллета молока",
+      "Палета 58×40",
+      "Палета 100×150",
+      "Палета молока",
     ]);
     choose("Шаблон", PALLET_58.id);
     // A new category starts the purpose and the template afresh.
@@ -1655,7 +1652,7 @@ describe("office template defaults: the A4 sheets beside the pallet labels", () 
     expect(valueOf("Лист А4 палета")).toBe(PORTRAIT.id);
     // Neither list offers the other's: a pallet label is no sheet.
     expect(choices("Шаблон палета")).not.toContain("Палета · две А5");
-    expect(choices("Лист А4 палета")).not.toContain("Паллета 100×150");
+    expect(choices("Лист А4 палета")).not.toContain("Палета 100×150");
     expect(screen.getByText(/Для палета можно печатать термоэтикетку или лист А4/)).toBeTruthy();
     choose("Лист А4 палета", TWO_A5.id);
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));

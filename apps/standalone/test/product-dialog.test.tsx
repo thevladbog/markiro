@@ -110,7 +110,7 @@ const TEMPLATES: LabelTemplateSummary[] = [
   summary(WATER_58, "Вода 58×40", { chzProductGroupCodes: [13] }),
   summary(BOX_58, "Коробка 58×40"),
   summary(OLD_BOX, "Старая коробка", { enabled: false }),
-  summary(PALLET, "Паллета 100×150", { purpose: "pallet" }),
+  summary(PALLET, "Палета 100×150", { purpose: "pallet" }),
   summary("1a5c8f6e-3b7d-4c9e-8f0a-5b6c7d8e9f0a", "Дубликат", { purpose: "product_duplicate" }),
 ];
 
@@ -712,7 +712,7 @@ describe("office product dialog: default templates", () => {
     // By name counts numbers by value: 80 comes before 100.
     fake.api.listTemplates.mockResolvedValue([
       ...TEMPLATES,
-      summary("4d8e1c9b-6f0a-4b2c-9d3e-8f9a0b1c2d3e", "Паллета 80×120", { purpose: "pallet" }),
+      summary("4d8e1c9b-6f0a-4b2c-9d3e-8f9a0b1c2d3e", "Палета 80×120", { purpose: "pallet" }),
     ]);
     fake.api.createProduct.mockResolvedValue({
       ...MILK,
@@ -730,7 +730,7 @@ describe("office product dialog: default templates", () => {
     ).toHaveLength(2);
     // No group yet: only templates for every category fit.
     expect(choices("Шаблон короба")).toEqual(["Не выбран", "Коробка 58×40"]);
-    expect(choices("Шаблон палета")).toEqual(["Не выбран", "Паллета 80×120", "Паллета 100×150"]);
+    expect(choices("Шаблон палета")).toEqual(["Не выбран", "Палета 80×120", "Палета 100×150"]);
     chooseValue("Товарная группа", "8");
     expect(choices("Шаблон короба")).toEqual(["Не выбран", "Коробка 58×40", "Молоко 58×40"]);
     chooseValue("Шаблон короба", MILK_58);
@@ -804,7 +804,7 @@ describe("office product dialog: default templates", () => {
     await openEdit(fake, "Молоко 3,2% 0,9 л");
     expect(choices("Шаблон палета")).toEqual([
       "Не выбран",
-      "Паллета 100×150",
+      "Палета 100×150",
       "Шаблон 2b6d9a7f… — нет в списке",
     ]);
     // «Не выбран» holds the empty value, and the choice is made through the option itself.
@@ -928,7 +928,7 @@ describe("office product dialog: default templates", () => {
     expect(valueOf("Лист А4 палета")).toBe(off);
     // Pallet labels are not sheets, and the sheets are no pallet labels.
     expect(choices("Шаблон палета")).not.toContain("Палета А4 · вертикальная");
-    expect(choices("Лист А4 палета")).not.toContain("Паллета 100×150");
+    expect(choices("Лист А4 палета")).not.toContain("Палета 100×150");
     chooseValue("Лист А4 палета", portrait);
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
     expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();

@@ -106,7 +106,7 @@ describe("the guard against a second tap", () => {
     ]) {
       await at.pressAtOnce(name);
     }
-    expect(screen.queryByLabelText(/Номер короба или паллеты/)).toBeNull();
+    expect(screen.queryByLabelText(/Номер короба или палеты/)).toBeNull();
     expect(screen.queryByRole("heading", { name: "Причина новой попытки" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Завершить сеанс перепечатки?" })).toBeNull();
     expect(at.props.onLeave).not.toHaveBeenCalled();
@@ -121,12 +121,12 @@ describe("the guard against a second tap", () => {
   it("holds the submit of the typed code, and takes it when the pause has passed", async () => {
     const at = await startedWarehouse();
     await at.press("Ввести код вручную");
-    fireEvent.change(screen.getByLabelText(/Номер короба или паллеты/), {
+    fireEvent.change(screen.getByLabelText(/Номер короба или палеты/), {
       target: { value: BOX_SSCC },
     });
     await at.pressAtOnce("Найти и напечатать");
     expect(at.lookup).not.toHaveBeenCalled();
-    expect(screen.getByLabelText(/Номер короба или паллеты/)).toBeTruthy();
+    expect(screen.getByLabelText(/Номер короба или палеты/)).toBeTruthy();
     await at.press("Найти и напечатать");
     expect(at.lookup).toHaveBeenCalledTimes(1);
   });
@@ -135,7 +135,7 @@ describe("the guard against a second tap", () => {
     const at = await renderWarehouse();
     await screen.findByRole("button", { name: "Начать перепечатку" });
     await at.press("Изменить: Коды единиц");
-    await at.press("Паллеты");
+    await at.press("Палеты");
     await at.pressAtOnce("Применить шаблоны");
     expect(screen.getByLabelText("Поиск шаблона")).toBeTruthy();
     await at.press("Применить шаблоны");
@@ -206,7 +206,7 @@ describe("work in hand", () => {
         }),
     });
     await at.press("Ввести код вручную");
-    fireEvent.change(screen.getByLabelText(/Номер короба или паллеты/), {
+    fireEvent.change(screen.getByLabelText(/Номер короба или палеты/), {
       target: { value: BOX_SSCC },
     });
     const touches = vi.mocked(at.props.touch).mock.calls.length;
@@ -458,7 +458,7 @@ describe("the keyboard and the scanner", () => {
     await keys.type(PALLET_SSCC);
     await at.settled();
     expect(at.lookup).toHaveBeenCalledTimes(1);
-    fireEvent.keyDown(screen.getByLabelText(/Номер короба или паллеты/), { key: "Escape" });
+    fireEvent.keyDown(screen.getByLabelText(/Номер короба или палеты/), { key: "Escape" });
     expect(keys.calls.at(-1)).toBe(false);
     await keys.type(PALLET_SSCC);
     await waitFor(() => expect(at.lookup).toHaveBeenCalledTimes(2));
@@ -592,7 +592,7 @@ describe("the templates of the picker", () => {
     await at.press("Короба");
     await at.press(/Коробка узкая/);
     // Another kind is looked at and chosen; the boxes' choice stays.
-    await at.press("Паллеты");
+    await at.press("Палеты");
     await at.press(/Палета 100×150/);
     await at.press("Короба");
     expect(screen.getByRole("button", { name: /Коробка узкая/ }).getAttribute("aria-pressed")).toBe(
@@ -621,7 +621,7 @@ describe("the templates of the picker", () => {
     await at.press("Короба");
     fireEvent.change(screen.getByLabelText("Поиск шаблона"), { target: { value: "нет такого" } });
     expect(screen.getByText("По этому запросу шаблонов нет.")).toBeTruthy();
-    await at.press("Паллеты");
+    await at.press("Палеты");
     expect((screen.getByLabelText("Поиск шаблона") as HTMLInputElement).value).toBe("");
     expect(screen.queryByText("По этому запросу шаблонов нет.")).toBeNull();
     expect(screen.getByRole("button", { name: /Палета 100×150/ })).toBeTruthy();
@@ -690,7 +690,7 @@ describe("the templates of the picker", () => {
       }),
     });
     expect(await screen.findByText(/шаблон не выбран/)).toBeTruthy();
-    await at.press("Изменить: Паллеты");
+    await at.press("Изменить: Палеты");
     expect(
       screen.getByText("Нет включённых шаблонов этого назначения. Добавьте шаблон в офисе."),
     ).toBeTruthy();
@@ -722,12 +722,10 @@ describe("what a waiting label and an empty field keep", () => {
     const at = await startedWarehouse();
     await at.press("Ввести код вручную");
     await act(async () => {
-      fireEvent.submit(
-        screen.getByLabelText(/Номер короба или паллеты/).closest("form") as Element,
-      );
+      fireEvent.submit(screen.getByLabelText(/Номер короба или палеты/).closest("form") as Element);
       await at.gate.drain();
     });
-    expect(screen.getByLabelText(/Номер короба или паллеты/)).toBeTruthy();
+    expect(screen.getByLabelText(/Номер короба или палеты/)).toBeTruthy();
     expect(at.lookup).not.toHaveBeenCalled();
   });
 });

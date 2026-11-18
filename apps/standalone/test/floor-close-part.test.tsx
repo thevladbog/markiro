@@ -218,12 +218,12 @@ describe("the close panel of a part (plan 2b)", () => {
     );
     expect(
       screen.getByText(
-        "Этикетка паллеты уйдёт на печать. После работы с этикеткой вы вернётесь к закрытию смены.",
+        "Этикетка палеты уйдёт на печать. После работы с этикеткой вы вернётесь к закрытию смены.",
       ),
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Подтвердить закрытие части" })).toBeNull();
     pause();
-    fireEvent.click(screen.getByRole("button", { name: "Закрыть паллету" }));
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть палету" }));
     expect(onClosePallet).toHaveBeenCalledExactlyOnceWith();
     expect(onClose).not.toHaveBeenCalled();
   });
@@ -467,7 +467,8 @@ describe("the closed part's panel (plan 2b)", () => {
     );
     expect(screen.getByRole("group", { name: "Ваша часть смены OCT26-004 закрыта" })).toBeTruthy();
     expect(screen.getByText(words)).toBeTruthy();
-    expect(screen.getByText("Принято: 280 шт., коробов: 23.")).toBeTruthy();
+    expect(screen.getByText("Моя станция").nextElementSibling?.textContent).toBe("280");
+    expect(screen.getByText("Моих коробов").nextElementSibling?.textContent).toBe("23");
   });
 });
 

@@ -108,7 +108,7 @@ describe("the work screen prints a pallet's sheet (plan А4)", () => {
       { purpose: "box", state: "sent", attempts: 1 },
       { purpose: "pallet", state: "sent", attempts: 1 },
     ]);
-    expect(screen.queryByText("Этикетка паллеты не напечатана")).toBeNull();
+    expect(screen.queryByText("Этикетка палеты не напечатана")).toBeNull();
   });
 
   it("offers every printer for a pallet's «Другой принтер», prints the thermal label on a label printer, and sends no second sheet", async () => {
@@ -120,7 +120,7 @@ describe("the work screen prints a pallet's sheet (plan А4)", () => {
     await harness.scanner.listening();
     await harness.settled();
     await harness.scan(km("A1"));
-    expect(await screen.findByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(await screen.findByText("Этикетка палеты не напечатана")).toBeTruthy();
     expect(prints).toHaveLength(1);
     await harness.press("Другой принтер");
     expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(
@@ -134,7 +134,7 @@ describe("the work screen prints a pallet's sheet (plan А4)", () => {
     // The thermal pallet label of the snapshot's 100 x 150 mm layout, not a sheet.
     expect(shell.sends.at(-1)?.text).toContain("^PW799\n^LL1199");
     expect(prints).toHaveLength(1);
-    expect(screen.queryByText("Этикетка паллеты не напечатана")).toBeNull();
+    expect(screen.queryByText("Этикетка палеты не напечатана")).toBeNull();
   });
 
   it("keeps a pallet whose shift froze no sheet closed, says the label did not render, and prints a label elsewhere", async () => {
@@ -143,7 +143,7 @@ describe("the work screen prints a pallet's sheet (plan А4)", () => {
     await harness.scanner.listening();
     await harness.settled();
     await harness.scan(km("A1"));
-    expect(await screen.findByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(await screen.findByText("Этикетка палеты не напечатана")).toBeTruthy();
     expect(screen.getByText(/Этикетку не удалось подготовить для этого принтера/)).toBeTruthy();
     expect(prints).toEqual([]);
     expect(rows(at.db, "SELECT count(*) AS n FROM outbox WHERE kind = 'pallet_closed'")).toEqual([
@@ -202,9 +202,9 @@ describe("the work screen prints a pallet's sheet (plan А4)", () => {
 });
 
 describe("an A4 sheet without the EGAIS code says so (plan ТОВ)", () => {
-  const TITLE = "Лист А4 паллеты — без кода ЕГАИС";
+  const TITLE = "Лист А4 палеты — без кода ЕГАИС";
   const BODY =
-    "Код ЕГАИС товара не из 19 цифр, поэтому на листе А4 его нет; на этикетках короба и паллеты он есть. Исправьте код ЕГАИС в карточке товара в офисе: новые смены возьмут исправленный код.";
+    "Код ЕГАИС товара не из 19 цифр, поэтому на листе А4 его нет; на этикетках короба и палеты он есть. Исправьте код ЕГАИС в карточке товара в офисе: новые смены возьмут исправленный код.";
 
   // The diagnostic line stays (`EGAIS_NOT_ON_SHEET_LINE`); it goes to the console.
   let logged: ReturnType<typeof vi.spyOn>;
@@ -254,11 +254,11 @@ describe("an A4 sheet without the EGAIS code says so (plan ТОВ)", () => {
     await harness.scanner.listening();
     await harness.settled();
     await harness.scan(km("A1"));
-    expect(await screen.findByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(await screen.findByText("Этикетка палеты не напечатана")).toBeTruthy();
     await harness.press("Напечатать снова");
     expect(prints).toHaveLength(2);
     expect(await screen.findByText(TITLE)).toBeTruthy();
-    expect(screen.queryByText("Этикетка паллеты не напечатана")).toBeNull();
+    expect(screen.queryByText("Этикетка палеты не напечатана")).toBeNull();
   });
 
   it("says nothing for a code of 19 digits, which the sheet prints", async () => {
@@ -277,7 +277,7 @@ describe("an A4 sheet without the EGAIS code says so (plan ТОВ)", () => {
     await harness.scanner.listening();
     await harness.settled();
     await harness.scan(km("A1"));
-    expect(await screen.findByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(await screen.findByText("Этикетка палеты не напечатана")).toBeTruthy();
     expect(screen.getByText(TITLE)).toBeTruthy();
     await harness.press("Другой принтер");
     await harness.press("Zebra у линии · ZPL · 203 dpi");

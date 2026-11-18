@@ -5,6 +5,21 @@ the master database plus the station and office desktop app. Design:
 `docs/superpowers/specs/2026-09-26-standalone-station-design.md`; rules for
 changes: [AGENTS.md](AGENTS.md).
 
+## Shift controls
+
+On the line station, «Пауза» returns the operator to «Смены линии». Choosing
+«Продолжить» on the same shift resumes the open box, pallet or set.
+
+On an aggregation shift, the carton fills in proportion to the accepted units.
+The station shows both the count (for example, «10 из 20») and how many units
+remain. Once the box closes, the counter starts at zero for the next box.
+
+«Закрыть смену» shows the local totals before confirmation and again after the
+close. Aggregation shows accepted units and closed boxes, plus closed pallets
+when palletizing is enabled. Validation counts accepted units and set assembly
+counts completed sets. On a shared shift, «Закрыть мою часть» closes this
+station’s part. The screen identifies when other stations still have work open.
+
 ## Development
 
 1. Start the host (development data stays in `apps/standalone/.markiro-host`):

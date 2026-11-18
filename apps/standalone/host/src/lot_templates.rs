@@ -95,6 +95,31 @@ pub(crate) async fn add_label_variants(
     conn: &mut SqliteConnection,
     rev: Option<i64>,
 ) -> Result<(), Error> {
+    // Older wizards and restored sites carry the original compact pallet template names.
+    // Keep their IDs, rendering specs and references while publishing the corrected names.
+    let legacy: Vec<(String, String)> = sqlx::query_as(
+        "SELECT id, name FROM label_templates WHERE stock = 1 AND purpose = 'pallet' AND (
+            (lot_number_source_id IS NULL AND name = 'Паллета 58×40') OR
+            (lot_number_source_id IS NOT NULL AND name = 'Паллета 58×40 · номер партии'))",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut revision = rev;
+    if !legacy.is_empty() {
+        let rev = match revision {
+            Some(rev) => rev,
+            None => next_revision(conn).await?,
+        };
+        for (id, name) in legacy {
+            sqlx::query("UPDATE label_templates SET name = ?, rev = ? WHERE id = ?")
+                .bind(name.replacen("Паллета", "Палета", 1))
+                .bind(rev)
+                .bind(id)
+                .execute(&mut *conn)
+                .await?;
+        }
+        revision = Some(rev);
+    }
     let sources: Vec<SourceLabel> = sqlx::query_as(
         "SELECT id, name, purpose, spec, enabled, category_codes FROM label_templates source \
          WHERE stock = 1 AND lot_number_source_id IS NULL AND NOT EXISTS ( \
@@ -107,7 +132,6 @@ pub(crate) async fn add_label_variants(
         return Ok(());
     }
     let variants = variants()?.labels;
-    let mut revision = rev;
     for source in sources {
         let spec: Value =
             serde_json::from_str(&source.spec).map_err(|error| Error::Decode(Box::new(error)))?;
@@ -295,6 +319,46 @@ pub(crate) async fn register(pool: &SqlitePool, at: &str) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn corrects_legacy_pallet_stock_names_in_place_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let pool = crate::db::open(&directory.path().join("host.db"))
+            .await
+            .unwrap();
+        let base = "Паллета 58×40";
+        let copy = "Паллета 58×40 · номер партии";
+        for (id, name, stock, source) in [
+            ("base", base, true, None),
+            ("copy", copy, true, Some("base")),
+            ("custom", base, false, None),
+        ] {
+            sqlx::query("INSERT INTO label_templates (id, name, purpose, enabled, spec, stock, rev, lot_number_source_id) VALUES (?, ?, 'pallet', 1, '{}', ?, 0, ?)")
+                .bind(id).bind(name).bind(stock).bind(source).execute(&pool).await.unwrap();
+        }
+        for _ in 0..2 {
+            register(&pool, "2026-11-19T10:00:00Z").await.unwrap();
+        }
+        let names: Vec<(String, String, i64)> =
+            sqlx::query_as("SELECT id, name, rev FROM label_templates ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            names,
+            vec![
+                ("base".into(), "Палета 58×40".into(), 1),
+                ("copy".into(), "Палета 58×40 · номер партии".into(), 1),
+                ("custom".into(), base.into(), 0),
+            ]
+        );
+        assert_eq!(
+            crate::db::current_revision(&mut *pool.acquire().await.unwrap())
+                .await
+                .unwrap(),
+            1
+        );
+    }
 
     #[tokio::test]
     async fn existing_site_receives_wide_duplicates_and_updated_stock_pallet_once() {

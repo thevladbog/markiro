@@ -44,6 +44,11 @@
   --fg-on-ok-solid: #0b2a17; /* 5.37:1 */
   /* semantic: error */
   --err-fg: #a1231a;
+  --shift-pause-bg: #f2d77a;
+  --shift-pause-fg: #382e12;
+  --shift-pause-border: #d5bb65;
+  --shift-close-bg: var(--err-fg);
+  --shift-close-fg: var(--onerr);
   --err-bg: #fdeae7;
   --err-border: #f2d4d0;
   --err-solid: #c0392b;
@@ -172,6 +177,11 @@
   --fg-on-ok-solid: #0b2a17; /* 8.63:1 */
 
   --err-fg: #ff6b5e;
+  --shift-pause-bg: #d5b858;
+  --shift-pause-fg: #2b2410;
+  --shift-pause-border: #e3c969;
+  --shift-close-bg: #ab303b;
+  --shift-close-fg: #ffffff;
   --err-bg: #391a16;
   --err-border: #5c2a24;
   --err-solid: #ff6b5e;

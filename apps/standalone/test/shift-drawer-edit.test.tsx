@@ -109,13 +109,13 @@ describe("office shifts: the list's «Открыть» and the card's «Изме
     await openShifts(shiftsSession([shift, ACTIVE, CLOSED]));
     fireEvent.click(screen.getByRole("button", { name: "Открыть смену OCT26-005" }));
     const dialog = await screen.findByRole("dialog", { name: "Смена OCT26-005" });
-    await within(dialog).findByText("Паллета 100×150");
+    await within(dialog).findByText("Палета 100×150");
     const facts = Object.fromEntries(
       within(dialog)
         .getAllByRole("term")
         .map((term) => [term.textContent ?? "", term.nextElementSibling?.textContent ?? ""]),
     );
-    expect(facts["Шаблон палета"]).toBe("Паллета 100×150");
+    expect(facts["Шаблон палета"]).toBe("Палета 100×150");
     expect(facts["Лист палета А4"]).toBe("По умолчанию (стандартный лист)");
   });
 

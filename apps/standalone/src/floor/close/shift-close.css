@@ -9,8 +9,8 @@
 .shift-close {
   display: grid;
   min-width: 0;
-  padding: var(--sp-4);
-  gap: var(--sp-2);
+  padding: clamp(16px, 2.5vw, 32px);
+  gap: var(--sp-4);
   border: 1px solid var(--line);
   border-radius: var(--floor-r-card);
   background: var(--surface-card);
@@ -26,7 +26,7 @@
 
 .shift-close h3 {
   margin: 0;
-  font: var(--floor-title);
+  font: 600 clamp(24px, 2.4vw, 34px)/1.15 var(--font-ui);
 }
 
 .shift-close p {
@@ -43,55 +43,99 @@
   font: 400 15px/20px var(--font-ui) !important;
 }
 
-/* The figures: a tile each, the term over its value. */
-.shift-close__facts {
-  display: grid;
+.shift-close__product,
+.shift-close__facts,
+.shift-close__counters {
+  min-width: 0;
   margin: 0;
-  gap: var(--sp-2);
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
-.shift-close__facts > div {
-  display: grid;
-  min-width: 0;
-  padding: var(--sp-2) var(--sp-3);
-  gap: 2px;
-  align-content: start;
-  border-left: 4px solid var(--line-strong);
-  border-radius: 0 var(--r-2) var(--r-2) 0;
-  background: var(--surface-panel);
-}
-
-/* The product's name is a line across the card, «Товар  Молоко…»; the figures are tiles. */
-.shift-close__facts > div:first-child {
-  display: flex;
-  grid-column: 1 / -1;
-  padding: 0;
-  gap: var(--sp-2);
-  align-items: baseline;
-  border: 0;
-  background: none;
-}
-
-.shift-close__facts dt {
-  color: var(--fg-2);
-  font: 600 14px/18px var(--font-ui);
-}
-
-.shift-close__facts dd {
-  min-width: 0;
+.shift-close dd {
   margin: 0;
   overflow-wrap: anywhere;
-  font: 600 22px/28px var(--font-mono);
-  font-variant-numeric: tabular-nums;
 }
 
-.shift-close__facts > div:first-child dt {
+.shift-close__product,
+.shift-close__facts,
+.shift-close__facts > div {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.shift-close dt {
+  color: var(--fg-2);
+}
+
+.shift-close__product dd {
+  font: var(--floor-body-strong);
+}
+
+.shift-close__counters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr));
+  padding-block: var(--sp-4);
+  border-block: 1px solid var(--line);
+}
+
+.shift-close__counters > div {
+  min-width: 0;
+  padding-inline: var(--sp-4);
+  border-inline-start: 1px solid var(--line);
+}
+
+.shift-close__counters > div:first-child {
+  padding-inline-start: 0;
+  border: 0;
+}
+
+.shift-close__counters dt {
   font: var(--floor-body);
 }
 
-.shift-close__facts > div:first-child dd {
-  font: var(--floor-body-strong);
+.shift-close__counters dd {
+  font: 600 clamp(32px, 3.6vw, 48px)/1.15 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.shift-close__facts {
+  column-gap: var(--sp-4);
+  font: var(--floor-body);
+}
+
+.shift-close__facts dd {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.shift-close__blocker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+}
+
+.shift-close__blocker .mk-alert {
+  flex: 1 1 300px;
+}
+
+.shift-close__load {
+  margin: 0;
+  padding-block: var(--sp-3);
+}
+
+.shift-close__load dd {
+  font: 600 clamp(32px, 3.6vw, 48px)/1.15 var(--font-mono);
+}
+
+.shift-close__load small {
+  color: var(--fg-2);
+  font-size: 0.6em;
+}
+
+.shift-close__closed-title {
+  color: var(--ok-fg);
 }
 
 .shift-close__result {
@@ -142,7 +186,12 @@
   /* Selected (kit): the `fg` border, the check in the mark and the weight, never colour alone. */
   border: 2px solid var(--fg) !important;
   background: var(--panel) !important;
+  color: var(--fg) !important;
   font: var(--floor-body-strong) !important;
+}
+
+.shift-close .floor-choice.mk-btn[aria-pressed="true"]::before {
+  content: none;
 }
 
 .floor-choice__mark {
@@ -190,23 +239,9 @@
   padding-inline: var(--sp-3) !important;
 }
 
-/* The closed shift: the ok card's title at floor size. */
-.shift-close__done {
-  padding: var(--sp-4) !important;
-}
-
-.shift-close__done > div > span:first-child {
-  font: var(--floor-lg) !important;
-}
-
 /* A note or a blocker inside the card: its title at floor size, not the Alert's office size. */
 .shift-close .mk-alert > div > span:first-child {
   font: var(--floor-body-strong) !important;
-}
-
-/* Plan 2b: a part's six tiles (the whole shift's count joins the five) stay in one row on a tall window too. */
-.shift-close__facts:has(> :nth-child(7)) {
-  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
 }
 
 /* Plan 2b: what the close of a part does to the shift, under the result. */
@@ -226,8 +261,8 @@
 @media (max-height: 860px) {
   .shift-close {
     max-height: 100%;
-    padding: 6px var(--sp-4);
-    gap: var(--sp-1);
+    padding: var(--sp-3) var(--sp-4);
+    gap: var(--sp-2);
     overflow: hidden;
   }
 
@@ -243,49 +278,18 @@
   }
 
   .shift-close h3 {
-    font: 600 22px/28px var(--font-ui);
+    font-size: clamp(22px, 2.4vw, 30px);
   }
 
-  /* The figures share one row: the product's line across it, the tiles an equal share each. */
+  .shift-close__counters {
+    padding-block: var(--sp-2);
+  }
+
+  .shift-close__counters dd {
+    font-size: clamp(30px, 3.3vw, 42px);
+  }
+
   .shift-close__facts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--sp-1);
-  }
-
-  .shift-close__facts > div {
-    flex: 1 1 0;
-  }
-
-  .shift-close__facts > div:first-child {
-    flex: 0 0 100%;
-  }
-
-  .shift-close__facts > div {
-    padding: 0 var(--sp-3);
-    gap: 0;
-  }
-
-  .shift-close__facts dt {
-    font: 600 13px/16px var(--font-ui);
-  }
-
-  .shift-close__facts dd {
-    font: 600 20px/22px var(--font-mono);
-  }
-
-  /* Plan 2b: a part has one tile more (the whole shift's count): the labels stay on one line. */
-  .shift-close__facts:has(> :nth-child(7)) > div {
-    padding: 0 var(--sp-2);
-  }
-
-  .shift-close__facts:has(> :nth-child(7)) > div:not(:first-child) dt {
-    font-size: 12px;
-    white-space: nowrap;
-  }
-
-  .shift-close__facts > div:first-child dt,
-  .shift-close__facts > div:first-child dd {
     font-size: 16px;
     line-height: 20px;
   }
@@ -345,5 +349,24 @@
 
   .shift-close .mk-alert p {
     font: 400 15px/20px var(--font-ui);
+  }
+}
+
+@media (max-height: 700px) {
+  .shift-close {
+    padding-block: var(--sp-1);
+    gap: var(--sp-1);
+  }
+
+  .shift-close__body {
+    gap: 2px;
+  }
+
+  .shift-close__counters {
+    padding-block: var(--sp-1);
+  }
+
+  .shift-close__counters dd {
+    font-size: 30px;
   }
 }

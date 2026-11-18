@@ -90,7 +90,7 @@ describe("the list of closed boxes by the last digits of their SSCC", () => {
 });
 
 describe("the open box's own «Снять последний код» and «Очистить короб» (the cloud's box instrument)", () => {
-  const box = () => within(screen.getByRole("region", { name: "Открытый короб" }));
+  const box = () => within(screen.getByRole("region", { name: /^(Открытый|Новый) короб$/ }));
 
   it("offers both under the box only while it holds codes and nothing stops the work", async () => {
     const at = await printStation();
@@ -139,7 +139,7 @@ describe("the open box's own «Снять последний код» and «Оч
     expect(await screen.findByText("Короб очищен.")).toBeTruthy();
     expect(exceptionKinds(at)).toEqual([{ kind: "clear", reason_code: null, reason_text: null }]);
     await work.press("Вернуться к работе");
-    expect(openBoxLine()).toBe("Короб откроется с первым кодом");
+    expect(openBoxLine()).toBe("0 из 12");
   });
 
   it("goes back from the confirmation with nothing cleared", async () => {
@@ -341,7 +341,7 @@ describe("the exceptions of the work screen", () => {
     expect(exceptionKinds(at)).toEqual([]);
   });
 
-  it("opens neither at a label that waits nor while the operator leaves; «Выйти из смены» stays open in it", async () => {
+  it("opens neither at a label that waits nor while the operator leaves; «Пауза» stays open in it", async () => {
     const at = await printStation();
     const shell = fakeHardware(async () => ({ sent: false, code: "not_sent" }));
     const work = renderWork(at, { shell });
@@ -352,15 +352,15 @@ describe("the exceptions of the work screen", () => {
     await work.press("Продолжить без этикетки");
     await work.press("Исключения");
     // The leave button never uses `disabled`: it says `aria-disabled` while the leave waits.
-    const leave = screen.getByRole("button", { name: "Выйти из смены" });
+    const leave = screen.getByRole("button", { name: "Пауза" });
     expect(leave.hasAttribute("aria-disabled")).toBe(false);
-    expect(region().queryByRole("button", { name: "Выйти из смены" })).toBeNull();
+    expect(region().queryByRole("button", { name: "Пауза" })).toBeNull();
     await work.press("Назад");
     work.rerender({ leaving: true });
     expect(screen.getByRole("button", { name: "Исключения" }).hasAttribute("disabled")).toBe(true);
-    expect(
-      screen.getByRole("button", { name: "Выйти из смены" }).getAttribute("aria-disabled"),
-    ).toBe("true");
+    expect(screen.getByRole("button", { name: "Пауза" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
   });
 });
 
