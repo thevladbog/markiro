@@ -18,8 +18,29 @@ export function productLabelsEndpoints(env: NodeJS.ProcessEnv = process.env) {
     stationUrl: env.STATION_PRODUCT_LABELS_URL ?? `http://127.0.0.1:${stationPort}`,
   };
 }
-const { adminPort, stationPort, stationUrl } = productLabelsEndpoints();
+const { adminPort, adminUrl, stationPort, stationUrl } = productLabelsEndpoints();
+const cabinetOnly = process.env.PRODUCT_LABELS_CABINET_ONLY === "1";
+const adminServer = {
+  command: `node ../../apps/admin/node_modules/vite/bin/vite.js ../../apps/admin --config ../../apps/admin/test/browser/product-labels-vite.config.ts --host 127.0.0.1 --port ${adminPort} --strictPort`,
+  url: adminUrl,
+  reuseExistingServer: false,
+  timeout: 30000,
+};
+const stationServer = {
+  command: `node ../../apps/station/node_modules/vite/bin/vite.js --config ../../apps/station/test/browser/product-labels-vite.config.mjs --host 127.0.0.1 --port ${stationPort} --strictPort`,
+  url: `http://127.0.0.1:${stationPort}`,
+  reuseExistingServer: false,
+  timeout: 30000,
+};
 export default defineConfig({
+  testIgnore: cabinetOnly
+    ? [
+        "**/station.spec.ts",
+        "**/pallet-sheet-station.spec.ts",
+        "**/pallet-reprint.spec.ts",
+        "**/bundled-logo.spec.ts",
+      ]
+    : [],
   testDir: "./product-labels-tests",
   fullyParallel: false,
   workers: 1,
@@ -31,7 +52,7 @@ export default defineConfig({
   // Inside the workspace so CI can upload traces and failure screenshots.
   outputDir: "./test-results/product-labels",
   use: {
-    baseURL: stationUrl,
+    baseURL: cabinetOnly ? adminUrl : stationUrl,
     browserName: "chromium",
     // Capture the scrolling affordances that are present in the installed Station shell.
     launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"] },
@@ -41,18 +62,5 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
-  webServer: [
-    {
-      command: `node ../../apps/admin/node_modules/vite/bin/vite.js ../../apps/admin --config ../../apps/admin/test/browser/product-labels-vite.config.ts --host 127.0.0.1 --port ${adminPort} --strictPort`,
-      url: `http://127.0.0.1:${adminPort}`,
-      reuseExistingServer: false,
-      timeout: 30000,
-    },
-    {
-      command: `node ../../apps/station/node_modules/vite/bin/vite.js --config ../../apps/station/test/browser/product-labels-vite.config.mjs --host 127.0.0.1 --port ${stationPort} --strictPort`,
-      url: `http://127.0.0.1:${stationPort}`,
-      reuseExistingServer: false,
-      timeout: 30000,
-    },
-  ],
+  webServer: cabinetOnly ? [adminServer] : [adminServer, stationServer],
 });

@@ -124,7 +124,7 @@ function scenarioHost() {
  * and checked; the first box taken apart; the second box's label printed
  * again with a reason, and checked; the pallet's label printed again with a
  * reason, and checked; two of the freed codes in a third box, closed
- * incomplete with its label, on a second pallet; «Закрыть паллету и смену»:
+ * incomplete with its label, on a second pallet; «Закрыть палету и смену»:
  * the second pallet closed early with its label, then taken apart, and the
  * shift closed with a reason — all on this station alone. The host comes
  * back: a send that finds no host, one whose answer is lost, and one that
@@ -240,7 +240,7 @@ async function runScenario() {
   const third = await closeOpenBox(context, steps);
   if (third.kind !== "closed") throw new Error(third.kind);
   await printAndCheckAll();
-  // «Закрыть паллету и смену»: the second pallet first, with its label.
+  // «Закрыть палету и смену»: the second pallet first, with its label.
   const secondPallet = await closeOpenPallet(palletContext, pallets);
   if (secondPallet.kind !== "closed") throw new Error(secondPallet.kind);
   await printAndCheckAll();

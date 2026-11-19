@@ -138,7 +138,7 @@ async function stationClosesBox(computer) {
   // «Закрыть неполный короб? В коробе 5 из 12.» answers with its own «Закрыть короб».
   await page.getByText("Закрыть неполный короб?").waitFor();
   await page.getByRole("button", { name: "Закрыть короб" }).last().click();
-  await page.getByText("Открытый короб").waitFor();
+  await page.getByRole("region", { name: "Новый короб" }).waitFor();
   await page
     .getByText("0 из 12")
     .or(page.getByText(/^0$/))
@@ -184,12 +184,12 @@ export const OFFICE_STATES = {
     await page.getByRole("dialog").getByLabel("План, шт").fill("2400");
     await settle(page);
   }),
-  "ins08/shift-new-pallets": state("08: новая смена, агрегация и паллеты", async (page) => {
+  "ins08/shift-new-pallets": state("08: новая смена, агрегация и палеты", async (page) => {
     await newShift(page);
     await choose(page, "Товар", /негаз\. 0,5 л/);
     await choose(page, "Линия", "Линия розлива 1");
     await page.getByRole("dialog").getByLabel("План, шт").fill("2400");
-    await page.getByRole("dialog").getByLabel("С паллетами").check();
+    await page.getByRole("dialog").getByLabel("С палетами").check();
     await panelToEnd(page);
   }),
   "ins08/shift-new-duplicate": state("08: новая смена, проверка с дубликатом", async (page) => {
@@ -239,9 +239,9 @@ export const OFFICE_STATES = {
     await openCard(page, ACTIVE);
     await cardTab(page, "Короба");
   }),
-  "ins09/card-pallets": state("09: паллеты смены", async (page) => {
+  "ins09/card-pallets": state("09: палеты смены", async (page) => {
     await openCard(page, ACTIVE);
-    await cardTab(page, "Паллеты");
+    await cardTab(page, "Палеты");
   }),
   "ins09/card-scans": state("09: сканирования смены", async (page) => {
     await openCard(page, ACTIVE);

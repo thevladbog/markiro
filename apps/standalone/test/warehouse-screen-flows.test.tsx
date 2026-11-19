@@ -82,7 +82,7 @@ describe("what the screen says of a scan that printed nothing", () => {
         reason: "disassembled",
       }),
       BOX_SSCC,
-      "Короб или паллета расформированы: перепечатка недоступна.",
+      "Короб или палета расформированы: перепечатка недоступна.",
     ],
     [
       "a host that cannot be reached",
@@ -167,7 +167,7 @@ describe("the kinds of label", () => {
     await at.press("Напечатать");
     await at.scan(PALLET_SSCC);
     // A sent label is decided by the next scan only through a new job: the code is another.
-    expect(await screen.findByLabelText("Паллета")).toBeTruthy();
+    expect(await screen.findByLabelText("Палета")).toBeTruthy();
     expect(screen.getByText(groupSscc(PALLET_SSCC))).toBeTruthy();
     expect(at.shell.sends[2]?.target).toMatchObject({ kind: "tcp", host: "192.168.1.50" });
   });
@@ -245,7 +245,7 @@ describe("a label that did not go out", () => {
         overrides: { palletSheets: async () => HOST_SHEETS },
       });
       await screen.findByRole("button", { name: "Начать перепечатку" });
-      await at.press("Изменить: Паллеты");
+      await at.press("Изменить: Палеты");
       return at;
     };
     // A printer of sheets: «по умолчанию товара» (chosen) and the host's sheets, no label template.
@@ -267,7 +267,7 @@ describe("a label that did not go out", () => {
     cleanup();
     // No printer for pallets: it is said, and nothing is offered.
     await choose({ box: "zebra", pallet: null, duplicate: "tsc" });
-    expect(screen.getByText(/Принтер паллет не выбран/)).toBeTruthy();
+    expect(screen.getByText(/Принтер палет не выбран/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Палета 100×150/ })).toBeNull();
   });
 
@@ -290,7 +290,7 @@ describe("a label that did not go out", () => {
       },
     });
     await screen.findByRole("button", { name: "Начать перепечатку" });
-    await at.press("Изменить: Паллеты");
+    await at.press("Изменить: Палеты");
     expect(await screen.findByText("Листы А4 не получены от хоста. Проверьте связь.")).toBeTruthy();
     await at.press("Повторить");
     expect(await screen.findByRole("button", { name: "Вертикальная" })).toBeTruthy();
@@ -470,7 +470,7 @@ describe("the session", () => {
     expect(rows(at.db, "SELECT reason FROM wh_jobs")).toEqual([{ reason: "lost" }]);
     await at.press("Следующий код");
     await at.press("Шаблоны");
-    await at.press("Паллеты");
+    await at.press("Палеты");
     await at.press("Применить шаблоны");
     await at.settled();
     expect(
@@ -563,27 +563,25 @@ describe("the typed code", () => {
     const at = await startedWarehouse();
     await at.press("Ввести код вручную");
     const field = screen.getByLabelText(
-      "Номер короба или паллеты (18 цифр) либо полный код единицы",
+      "Номер короба или палеты (18 цифр) либо полный код единицы",
     );
     expect(document.activeElement).toBe(field);
     expect(
       screen.getByRole("button", { name: "Найти и напечатать" }).hasAttribute("disabled"),
     ).toBe(true);
     fireEvent.keyDown(field, { key: "Escape" });
-    expect(screen.queryByLabelText(/Номер короба или паллеты/)).toBeNull();
+    expect(screen.queryByLabelText(/Номер короба или палеты/)).toBeNull();
     await at.press("Ввести код вручную");
-    fireEvent.change(screen.getByLabelText(/Номер короба или паллеты/), {
+    fireEvent.change(screen.getByLabelText(/Номер короба или палеты/), {
       target: { value: BOX_SSCC },
     });
     await act(async () => {
-      fireEvent.submit(
-        screen.getByLabelText(/Номер короба или паллеты/).closest("form") as Element,
-      );
+      fireEvent.submit(screen.getByLabelText(/Номер короба или палеты/).closest("form") as Element);
       await at.gate.drain();
     });
     expect(await screen.findByText(/Этикетка передана на принтер/)).toBeTruthy();
     expect(at.lookup).toHaveBeenCalledWith({ sscc: BOX_SSCC });
-    expect(screen.queryByLabelText(/Номер короба или паллеты/)).toBeNull();
+    expect(screen.queryByLabelText(/Номер короба или палеты/)).toBeNull();
   });
 });
 

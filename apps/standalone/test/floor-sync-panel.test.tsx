@@ -130,7 +130,7 @@ describe("the «Синхронизация» panel", () => {
     const section = (await screen.findByText("Запас номеров SSCC")).closest("section");
     expect(section).not.toBeNull();
     expect(within(section as HTMLElement).getByText("Для коробов осталось: 1 998")).toBeTruthy();
-    expect(within(section as HTMLElement).getByText("Для паллет осталось: 197")).toBeTruthy();
+    expect(within(section as HTMLElement).getByText("Для палет осталось: 197")).toBeTruthy();
     // Plenty left: the counts, no warning words.
     expect(
       screen.queryByText(/четверть блока|десятая часть|последний номер|закончились/),
@@ -141,7 +141,7 @@ describe("the «Синхронизация» panel", () => {
     panel(executor, { stock: { boxes: { left: 200, level: "tenth" }, pallets: null } });
     const low = (await screen.findByText("Запас номеров SSCC")).closest("section") as HTMLElement;
     expect(within(low).getByText("Для коробов осталось: 200")).toBeTruthy();
-    expect(within(low).queryByText(/Для паллет осталось/)).toBeNull();
+    expect(within(low).queryByText(/Для палет осталось/)).toBeNull();
     expect(within(low).getByText(/десятая часть блока или меньше/)).toBeTruthy();
   });
 

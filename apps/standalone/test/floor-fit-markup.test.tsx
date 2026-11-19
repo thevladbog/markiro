@@ -24,8 +24,8 @@ describe("the switch card", () => {
   it("carries its hint as the title of the line that is cut at two, and a plain-text detail likewise", () => {
     render(
       <SwitchCard
-        title="С паллетами"
-        hint="Короба идут на паллету: печатаются этикетки коробов и паллет."
+        title="С палетами"
+        hint="Короба идут на палету: печатаются этикетки коробов и палет."
         detail={<span>Шаблон: Дубликат</span>}
         detailTitle="Шаблон: Дубликат Data Matrix 40x30"
         checked
@@ -33,10 +33,10 @@ describe("the switch card", () => {
         onChange={vi.fn()}
       />,
     );
-    const card = screen.getByRole("switch", { name: "С паллетами" });
+    const card = screen.getByRole("switch", { name: "С палетами" });
     expect(
-      within(card).getByText("Короба идут на паллету: печатаются этикетки коробов и паллет.").title,
-    ).toBe("Короба идут на паллету: печатаются этикетки коробов и паллет.");
+      within(card).getByText("Короба идут на палету: печатаются этикетки коробов и палет.").title,
+    ).toBe("Короба идут на палету: печатаются этикетки коробов и палет.");
     expect(card.querySelector(".floor-switch-card__detail")?.getAttribute("title")).toBe(
       "Шаблон: Дубликат Data Matrix 40x30",
     );
@@ -46,7 +46,7 @@ describe("the switch card", () => {
     render(
       <SwitchCard
         title="Звук"
-        detail="Коробов на паллете: 2"
+        detail="Коробов на палете: 2"
         checked={false}
         stateLabel="Выключено"
         onChange={vi.fn()}

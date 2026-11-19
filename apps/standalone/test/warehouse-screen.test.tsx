@@ -101,7 +101,7 @@ describe("the warehouse reprint screen (plan СКЛ)", () => {
     await at.scan(BOX_SSCC);
     expect(at.lookup).not.toHaveBeenCalled();
     fireEvent.change(
-      screen.getByLabelText("Номер короба или паллеты (18 цифр) либо полный код единицы"),
+      screen.getByLabelText("Номер короба или палеты (18 цифр) либо полный код единицы"),
       { target: { value: BOX_SSCC } },
     );
     await at.press("Найти и напечатать");

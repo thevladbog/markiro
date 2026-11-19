@@ -255,7 +255,7 @@ function IdleWork(props: WorkScreenProps) {
     <div>
       <p>{`Смена ${props.shift.copy.number}`}</p>
       <button type="button" onClick={props.onLeave}>
-        Выйти из смены
+        Пауза
       </button>
     </div>
   );
@@ -324,7 +324,7 @@ describe("the floor after an operator signed in", () => {
       sessionId: 1,
       shiftId: PLANNED.id,
     });
-    const leave = screen.getByRole("button", { name: "Выйти из смены" });
+    const leave = screen.getByRole("button", { name: "Пауза" });
     expect(leave.className).toContain("mk-btn--floor");
     fireEvent.click(leave);
     expect(await screen.findByRole("button", { name: "Продолжить" })).toBeTruthy();
@@ -348,7 +348,7 @@ describe("the floor after an operator signed in", () => {
     expect(screen.queryByRole("button", { name: "Исключения" })).toBeNull();
     // The link is online, and still no SSCC block is asked for: the shift numbers no box.
     expect(handlers.requestBlock).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    fireEvent.click(screen.getByRole("button", { name: "Пауза" }));
     expect(await screen.findByRole("button", { name: "Продолжить" })).toBeTruthy();
     view.unmount();
   });
@@ -599,7 +599,7 @@ describe("the floor after an operator signed in", () => {
     expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
     expect(types(handlers)).not.toContain("work_left");
     // Back in the list it waits to be finished, and «Завершить» comes back to it.
-    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    fireEvent.click(screen.getByRole("button", { name: "Пауза" }));
     fireEvent.click(await screen.findByRole("button", { name: "Завершить" }));
     expect(await screen.findByText("Смену закрыли в офисе")).toBeTruthy();
     expect(handlers.enter).toHaveBeenCalledTimes(1);
@@ -1575,14 +1575,14 @@ describe("what a leave that waits for the work ends in", () => {
     render(floorOf(await floorCopies(), handlers));
     await enterPlanned();
     for (const round of [1, 2, 3]) {
-      fireEvent.click(await screen.findByRole("button", { name: "Выйти из смены" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Пауза" }));
       fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
       await waitFor(() =>
         expect(types(handlers).filter((type) => type === "work_left")).toHaveLength(round),
       );
     }
     expect(types(handlers).filter((type) => type === "work_entered")).toHaveLength(4);
-    expect(await screen.findByRole("button", { name: "Выйти из смены" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Пауза" })).toBeTruthy();
   });
 
   it("is a sign-out when the idle wait runs out meanwhile (the idle lock fires once)", async () => {
@@ -1723,7 +1723,7 @@ describe("what a leave that waits for the work ends in", () => {
     expect(types(handlers).filter((type) => type === "work_left")).toHaveLength(1);
   });
 
-  it("finishes one leave for two presses of «Выйти из смены» in one turn", async () => {
+  it("finishes one leave for two presses of «Пауза» in one turn", async () => {
     const { work, handlers } = await inTheWork();
     const button = screen.getByRole("button", { name: WORK_BUTTON });
     act(() => {
@@ -1787,7 +1787,7 @@ describe("the shift's copy read after every read of the host's list", () => {
     );
     await settle();
     await officeCloses(real, SEEN + 1);
-    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    fireEvent.click(screen.getByRole("button", { name: "Пауза" }));
     await settle();
     gate.release();
     await settle();
@@ -2184,7 +2184,7 @@ describe("the leave button and the wait of the work screen", () => {
         <WorkScreen {...first} />
       </ThemeProvider>,
     );
-    const leave = screen.getByRole("button", { name: "Выйти из смены" });
+    const leave = screen.getByRole("button", { name: "Пауза" });
     expect(leave.className).toContain("mk-btn--floor");
     expect(leave).toHaveProperty("disabled", false);
     expect(leave.getAttribute("aria-disabled")).toBeNull();
@@ -2198,7 +2198,7 @@ describe("the leave button and the wait of the work screen", () => {
     );
     // The same button with the focus still on it: a disabled one drops the
     // focus onto the page, and a keyboard or a screen reader loses its place.
-    const waiting = screen.getByRole("button", { name: "Выйти из смены" });
+    const waiting = screen.getByRole("button", { name: "Пауза" });
     expect(waiting).toBe(leave);
     expect(document.activeElement).toBe(leave);
     expect(waiting).toHaveProperty("disabled", false);
@@ -2213,13 +2213,13 @@ describe("the leave button and the wait of the work screen", () => {
 describe("leaving a shared shift (plan 2b)", () => {
   const pauseRow = z.object({ leave_requested_at: z.string().nullable() });
 
-  it("pauses this station's part on «Выйти из смены» and asks the link to tell the host", async () => {
+  it("pauses this station's part on «Пауза» and asks the link to tell the host", async () => {
     const local = await floorCopies();
     await keepEnteredShift(local, PAIRING, SHARED_ENTERED, "2026-10-08T06:02:00.000Z", SEEN);
     const handlers = handlersOf({ enter: async () => SHARED_ENTERED });
     render(floorOf(local, handlers, { workScreen: IdleWork }));
     fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Выйти из смены" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Пауза" }));
     await waitFor(() => expect(handlers.requestLeaves).toHaveBeenCalledTimes(1));
     const [row] = await local.query(
       "SELECT leave_requested_at FROM floor_shift_participation",

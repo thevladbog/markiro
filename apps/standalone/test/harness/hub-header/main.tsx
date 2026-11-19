@@ -230,7 +230,7 @@ function sharedFirst(kind: string): Participation | null {
   );
   const handheld = row(
     "tsd",
-    long ? "ТСД Urovo DT50 у паллетной зоны склада" : "ТСД 1",
+    long ? "ТСД Urovo DT50 у палетной зоны склада" : "ТСД 1",
     "active",
     "handheld",
   );

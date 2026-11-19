@@ -390,7 +390,7 @@ describe("the shifts of the station's line", () => {
     ],
     [
       "pallet_template_not_fit",
-      "Шаблон этикетки паллеты выключен или не подходит товару: смену не открыть. Обратитесь в офис.",
+      "Шаблон этикетки палеты выключен или не подходит товару: смену не открыть. Обратитесь в офис.",
     ],
     // The template of a validation shift's duplicate (plan РЕЖ, part B).
     [

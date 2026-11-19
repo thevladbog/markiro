@@ -5,10 +5,10 @@ import { describe, expect, it } from "vitest";
 
 /**
  * The structural overflow guard in a real browser: `test/harness/work-fit/measure.mjs` renders
- * the work screen's real components (aggregation, pallets, plain, check, capacities 3 to 48,
+ * the work screen's real components (aggregation, pallets, plain, check, capacities up to 100,000,
  * photo kinds) at 1280 and 1024 wide and 1024, 960, 900, 800 and 720 high, and fails on a page
  * scroll, an overflowing box button or panel, a clipped history row, a clipped code line, a
- * clipped cell serial, or a photo frame that is not as tall as its band. It needs Chromium, so
+ * clipped carton count, or a photo frame that is not as tall as its band. It needs Chromium, so
  * it runs only where `PLAYWRIGHT_CORE` names a `playwright-core` (and the loopback is open):
  *
  *   PLAYWRIGHT_CORE=/path/to/playwright-core pnpm --filter @markiro/standalone exec vitest run test/work-screen-fit.browser.test.ts

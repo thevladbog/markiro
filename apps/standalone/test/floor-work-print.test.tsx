@@ -325,13 +325,13 @@ describe("the label of a box the work screen closes", () => {
     expect(onSetup).toHaveBeenCalledTimes(1);
   });
 
-  it("never holds the operator: «Выйти из смены» stays open at a label that waits", async () => {
+  it("never holds the operator: «Пауза» stays open at a label that waits", async () => {
     const at = await printStation();
     const shell = fakeHardware(async () => ({ sent: false, code: "not_sent" }));
     const onLeave = vi.fn();
     const screenWork = work(at, { shell, onLeave });
     await fillBox(screenWork);
-    const leave = screen.getByRole("button", { name: "Выйти из смены" });
+    const leave = screen.getByRole("button", { name: "Пауза" });
     expect(leave.hasAttribute("disabled")).toBe(false);
     fireEvent.click(leave);
     expect(onLeave).toHaveBeenCalledTimes(1);

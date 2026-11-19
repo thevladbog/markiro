@@ -115,18 +115,21 @@ describe("the work screen of a validation shift", () => {
     expect(screen.queryByRole("button", { name: "Закрыть короб" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Снять последний код" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Очистить короб" })).toBeNull();
-    expect(screen.queryByRole("region", { name: "Паллета" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Палета" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Исключения" })).toBeNull();
     expect(screen.queryByText("Коробов закрыто")).toBeNull();
-    // The way out and the close stay, as floor buttons.
-    expect(screen.getByRole("button", { name: "Выйти из смены" }).className).toContain(
-      "mk-btn--floor",
-    );
+    // Both actions have a visible symbol as well as their accessible name.
+    for (const name of ["Пауза", "Закрыть смену"]) {
+      expect(
+        screen.getByRole("button", { name }).querySelector('svg[aria-hidden="true"]'),
+      ).toBeTruthy();
+    }
+    expect(screen.getByRole("button", { name: "Пауза" }).className).toContain("mk-btn--floor");
     expect(screen.getByRole("button", { name: "Закрыть смену" }).className).toContain(
       "mk-btn--floor",
     );
     expect(document.querySelector(".work-footer")?.getAttribute("aria-label")).toBe(
-      "Выход из смены, закрытие смены",
+      "Пауза, закрытие смены",
     );
   });
 
@@ -208,7 +211,7 @@ describe("the work screen of a validation shift", () => {
     expect(screen.getAllByRole("list", { name: "История сканирований" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Вся история" })).toHaveLength(1);
     // The footer's actions are the kit's 84 px row.
-    for (const name of ["Выйти из смены", "Закрыть смену"]) {
+    for (const name of ["Пауза", "Закрыть смену"]) {
       expect(screen.getByRole("button", { name }).className).toContain("floor-primary");
     }
   });
@@ -288,11 +291,12 @@ describe("the work screen of a validation shift", () => {
     await work.settled();
     expect(await screen.findByRole("region", { name: SUMMARY })).toBeTruthy();
     expect(screen.queryByText("План выполнен: принято 2 из 2.")).toBeNull();
-    expect(fact("Факт")).toBe("2");
+    expect(fact("Принято, шт.")).toBe("2");
     expect(fact("Отклонение")).toBe("0");
     await work.press("Подтвердить закрытие");
     expect(await screen.findByText(CLOSED_TITLE)).toBeTruthy();
-    expect(screen.getByText("Принято: 2 шт.")).toBeTruthy();
+    const counters = within(screen.getByRole("group", { name: "Итоги станции" }));
+    expect(counters.getAllByRole("definition").map((dd) => dd.textContent)).toEqual(["2"]);
     expect(closedRecords(at)).toEqual([
       expect.objectContaining({
         data: expect.objectContaining({
@@ -315,7 +319,7 @@ describe("the work screen of a validation shift", () => {
     await work.press("Закрыть смену");
     expect(await screen.findByRole("region", { name: SUMMARY })).toBeTruthy();
     // No open box keeps it open, and the summary names no box.
-    expect(fact("Факт")).toBe("2");
+    expect(fact("Принято, шт.")).toBe("2");
     expect(fact("План")).toBe("1\u00a0200");
     expect(fact("Коробов закрыто")).toBeNull();
     expect(fact("В среднем в коробе")).toBeNull();
@@ -326,7 +330,8 @@ describe("the work screen of a validation shift", () => {
     await work.press("Недостаток сырья");
     await work.press("Подтвердить закрытие");
     expect(await screen.findByText(CLOSED_TITLE)).toBeTruthy();
-    expect(screen.getByText("Принято: 2 шт.")).toBeTruthy();
+    const counters = within(screen.getByRole("group", { name: "Итоги станции" }));
+    expect(counters.getAllByRole("definition").map((dd) => dd.textContent)).toEqual(["2"]);
     expect(screen.queryByText(/коробов:/)).toBeNull();
     expect(closedRecords(at)).toEqual([
       expect.objectContaining({
@@ -429,8 +434,8 @@ describe("the work screen of a validation shift", () => {
       const work = renderWork({ ...at, shift });
       await ready(work);
       await work.scan(km("Q1"));
-      expect(screen.queryByRole("region", { name: "Паллета" })).toBeNull();
-      expect(screen.queryByText("Паллеты смены не настроены на этой станции")).toBeNull();
+      expect(screen.queryByRole("region", { name: "Палета" })).toBeNull();
+      expect(screen.queryByText("Палеты смены не настроены на этой станции")).toBeNull();
       expect(lastWord()).toBe("Принят");
       expect(rows(at.db, "SELECT count(*) AS n FROM floor_pallets")).toEqual([{ n: 0 }]);
       work.view.unmount();

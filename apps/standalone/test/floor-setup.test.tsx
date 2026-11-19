@@ -565,7 +565,7 @@ describe("what a change of the purposes leaves alone", () => {
     const local = openLocalDb().executor;
     await setUpPrinting(local);
     await setup({ local });
-    for (const purpose of ["Этикетка короба", "Этикетка паллеты", "Дубль кода"]) {
+    for (const purpose of ["Этикетка короба", "Этикетка палеты", "Дубль кода"]) {
       expect(screen.getByLabelText(purpose).getAttribute("aria-describedby")).toBeNull();
     }
     expect(screen.queryByText("Станция пока печатает только этикетки коробов.")).toBeNull();
@@ -593,7 +593,7 @@ describe("what the screen says to a reader of it", () => {
     // `role="presentation"`: inside a polite region an alert would be read twice.
     expect(sent.closest("[role]")?.getAttribute("role")).toBe("presentation");
     expect(sent.closest('[role="alert"]')).toBeNull();
-    setField("Этикетка паллеты", "tsc");
+    setField("Этикетка палеты", "tsc");
     await act(async () => {
       click("Сохранить");
     });
@@ -676,7 +676,7 @@ describe("saving", () => {
     const local = openLocalDb().executor;
     await setUpPrinting(local);
     await setup({ local });
-    setField("Этикетка паллеты", "tsc");
+    setField("Этикетка палеты", "tsc");
     await act(async () => {
       click("Сохранить");
     });

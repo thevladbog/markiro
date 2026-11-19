@@ -66,6 +66,19 @@
   color: var(--onerr) !important;
 }
 
+/* The floor's two filled shift controls keep distinct meanings in both themes. */
+:where(.floor-frame, .station-screen) .mk-btn--floor[data-shift-action="pause"] {
+  background: var(--shift-pause-bg) !important;
+  color: var(--shift-pause-fg) !important;
+  border-color: var(--shift-pause-border) !important;
+}
+
+:where(.floor-frame, .station-screen) .mk-btn--floor[data-shift-action="close"] {
+  background: var(--shift-close-bg) !important;
+  color: var(--shift-close-fg) !important;
+  border-color: var(--shift-close-bg) !important;
+}
+
 /* The one primary action of a screen: 84 px, opt in with the `floor-primary` class. */
 :where(.floor-frame, .station-screen) .mk-btn--floor.floor-primary {
   height: var(--control-floor-primary) !important;

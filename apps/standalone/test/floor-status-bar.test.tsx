@@ -683,7 +683,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     await waitFor(() => expect(shown("Не отправлено")).toBe("0"));
     await flushEffects();
     expect(shown("Номеров SSCC")).toBeNull();
-    expect(shown("Номеров SSCC паллет")).toBeNull();
+    expect(shown("Номеров SSCC палет")).toBeNull();
     expect(screen.queryByText(/Номеров SSCC/)).toBeNull();
     // Plenty left: no warning chip either.
     expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull();
@@ -871,7 +871,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     const chip = await screen.findByText("Заканчиваются номера SSCC");
     const detail = (): string => chip.closest(".floor-stock-chip")?.textContent ?? "";
     expect(detail()).toContain(
-      "Номеров SSCC для паллет осталось 20 — десятая часть блока или меньше. Без связи с хостом полную паллету скоро не закрыть.",
+      "Номеров SSCC для палет осталось 20 — десятая часть блока или меньше. Без связи с хостом полную палету скоро не закрыть.",
     );
     // The boxes' stock is plentiful: nothing is said of it.
     expect(detail()).not.toContain("для коробов");
@@ -881,7 +881,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: 2 }));
     await waitFor(() =>
       expect(detail()).toContain(
-        "Остался последний номер SSCC для паллет: следующую полную паллету без связи с хостом не закрыть.",
+        "Остался последний номер SSCC для палет: следующую полную палету без связи с хостом не закрыть.",
       ),
     );
     expect(chip.closest(".floor-stock-chip")?.getAttribute("data-tone")).toBe("error");
@@ -889,7 +889,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: 3 }));
     await waitFor(() =>
       expect(detail()).toContain(
-        "Номера SSCC для паллет закончились: полную паллету не закрыть, пока хост не выдаст станции новый блок. Нужна связь с хостом.",
+        "Номера SSCC для палет закончились: полную палету не закрыть, пока хост не выдаст станции новый блок. Нужна связь с хостом.",
       ),
     );
     // Pallets are off again: nothing of them.

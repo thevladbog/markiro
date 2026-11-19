@@ -1,6 +1,11 @@
 name: CI
 on:
   workflow_dispatch:
+    inputs:
+      cloud_station:
+        description: Include the unsupported cloud Station checks
+        type: boolean
+        default: false
   push:
     branches: [main]
   pull_request:
@@ -38,8 +43,6 @@ jobs:
       landing_lighthouse: ${{ steps.affected.outputs.landing_lighthouse }}
       saas_admin_browser: ${{ steps.affected.outputs.saas_admin_browser }}
       cabinet_station_galleries: ${{ steps.affected.outputs.cabinet_station_galleries }}
-      station_rust: ${{ steps.affected.outputs.station_rust }}
-      station_windows_build: ${{ steps.affected.outputs.station_windows_build }}
       signer_rust: ${{ steps.affected.outputs.signer_rust }}
       signer_windows_build: ${{ steps.affected.outputs.signer_windows_build }}
       handheld_android: ${{ steps.affected.outputs.handheld_android }}
@@ -135,7 +138,7 @@ jobs:
       # but in no workflow, so a workflow added without registering it stayed
       # green for as long as nobody ran the guard by hand.
       - run: pnpm test:ci-policy
-      - run: pnpm turbo lint typecheck build --concurrency=1 --force
+      - run: pnpm turbo lint typecheck build --filter=!@markiro/station --concurrency=1 --force
 
   verify-api-tests:
     needs: classify-changes
@@ -255,7 +258,7 @@ jobs:
     needs: classify-changes
     if: needs.classify-changes.outputs.verify_app_tests == 'true'
     runs-on: ubuntu-latest
-    # The app suites (admin, kiosk, station, domain, ui, ...) take 11-15 min on
+    # The app suites (admin, kiosk, domain, ui, ...) take 11-15 min on
     # a hosted runner as of 2026-09-18; at 15 the job was cut off after every
     # step had already passed (shown as "cancelled"). A wall-clock budget for
     # the whole job, not a test timeout.
@@ -283,7 +286,7 @@ jobs:
       # move to verify-api-tests instead of silently skipping here. The
       # standalone app's suite runs in standalone-app-tests: added to this
       # slice it ran past the 25-minute budget (run 38221455774).
-      - run: pnpm turbo test --filter=!@markiro/db --filter=!@markiro/api --filter=!@markiro/standalone --concurrency=1 --force
+      - run: pnpm turbo test --filter=!@markiro/db --filter=!@markiro/api --filter=!@markiro/standalone --filter=!@markiro/station --concurrency=1 --force
 
   standalone-app-tests:
     needs: classify-changes
@@ -843,11 +846,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  # Optional, outside ci-required: the cabinet, kiosk and cloud station are no
-  # longer served online (owner decision 2026-10-21) and their functions move to
-  # the offline product, but the code stays in the repository, so its galleries
-  # keep running when it changes. Two runners, because back to back the suites
-  # took about 27 minutes on run 39454185717.
+  # The retired cabinet retains optional browser coverage outside ci-required.
   cabinet-galleries:
     needs: classify-changes
     if: needs.classify-changes.outputs.cabinet_station_galleries == 'true'
@@ -932,9 +931,22 @@ jobs:
           pnpm --dir tools/production-browser --ignore-workspace test:tenant-billing
           pnpm --dir tools/production-browser --ignore-workspace exec playwright test --config device-replacement.playwright.config.ts
 
+      - run: node --test tools/production-browser/test/product-labels-config.test.mjs
+      - name: Verify cabinet product labels
+        env:
+          PRODUCT_LABELS_CABINET_ONLY: "1"
+        run: pnpm --dir tools/production-browser --ignore-workspace exec playwright test --config product-labels.playwright.config.ts
+      - name: Preserve cabinet product label evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cabinet-product-labels-${{ github.sha }}
+          path: tools/production-browser/test-results/product-labels
+          if-no-files-found: ignore
+          retention-days: 14
+
   station-galleries:
-    needs: classify-changes
-    if: needs.classify-changes.outputs.cabinet_station_galleries == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.cloud_station
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -975,8 +987,7 @@ jobs:
           retention-days: 14
 
   station-rust:
-    needs: classify-changes
-    if: needs.classify-changes.outputs.station_rust == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.cloud_station
     runs-on: ubuntu-latest
     # WebKit pulls a large dependency tree and GitHub's Azure apt mirror can
     # occasionally take more than 20 minutes to serve it before Rust even runs.
@@ -1009,14 +1020,15 @@ jobs:
       # be built before cargo ever touches src-tauri.
       - name: Build station webview + workspace deps
         run: pnpm turbo build --filter '@markiro/station...'
+      - name: Verify cloud Station webview
+        run: pnpm turbo lint typecheck test --filter=@markiro/station --concurrency=1 --force
       - name: cargo build + test (station core)
         run: |
           cargo build --manifest-path apps/station/src-tauri/Cargo.toml
           cargo test  --manifest-path apps/station/src-tauri/Cargo.toml
 
   station-windows-build:
-    needs: classify-changes
-    if: needs.classify-changes.outputs.station_windows_build == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.cloud_station
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
@@ -1343,8 +1355,6 @@ jobs:
       - platform-contracts
       - platform-forward-recovery
       - platform-forward-recovery-scenario
-      - station-rust
-      - station-windows-build
       - signer-rust
       - signer-windows-build
       - handheld-android

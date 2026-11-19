@@ -57,11 +57,11 @@ describe("BootstrapWizard", () => {
     const duplicate = buildDuplicateLabelTemplates().length + 2;
     expect(
       screen.getByText(
-        `Мастер создаст типовые шаблоны этикеток: для коробов — ${box}, для паллет — ${pallet}, для дубликатов товара — ${duplicate}.`,
+        `Мастер создаст типовые шаблоны этикеток: для коробов — ${box}, для палет — ${pallet}, для дубликатов товара — ${duplicate}.`,
       ),
     ).toBeTruthy();
     expect(i18n.t("wizard.review.templates", { box: 3, pallet: 1, duplicate: 2 })).toBe(
-      "Мастер создаст типовые шаблоны этикеток: для коробов — 3, для паллет — 1, для дубликатов товара — 2.",
+      "Мастер создаст типовые шаблоны этикеток: для коробов — 3, для палет — 1, для дубликатов товара — 2.",
     );
   });
 

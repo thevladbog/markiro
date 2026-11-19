@@ -73,7 +73,7 @@ const CASES = [
   {
     name: "exceptions-target-pallet",
     query: "view=exceptions",
-    steps: toTarget("Перепечатать этикетку паллеты"),
+    steps: toTarget("Перепечатать этикетку палеты"),
   },
   {
     name: "exceptions-reason",

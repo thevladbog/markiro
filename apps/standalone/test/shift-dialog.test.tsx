@@ -434,7 +434,7 @@ describe("office shifts: planning a shift", () => {
     expect(valueOf("Коробов на палете")).toBe("40");
     // Milk has no pallet preference and its group no pallet default: the organization's.
     expect(valueOf("Шаблон этикетки палета")).toBe(PALLET.id);
-    expect(options("Шаблон этикетки палета")).toEqual(["Паллета 100×150"]);
+    expect(options("Шаблон этикетки палета")).toEqual(["Палета 100×150"]);
     set("Коробов на палете", " 32 ");
     submit();
     await screen.findByText("Смена OCT26-006 запланирована.");
@@ -519,7 +519,7 @@ describe("office shifts: planning a shift", () => {
       ),
     );
     await waitForList(() =>
-      expect(options("Шаблон этикетки палета")).toEqual(["Паллета 100×150 — не подходит"]),
+      expect(options("Шаблон этикетки палета")).toEqual(["Палета 100×150 — не подходит"]),
     );
   });
 
@@ -577,17 +577,17 @@ describe("office shifts: planning a shift", () => {
     const milkOnly = {
       ...PALLET,
       id: "8f7e6d5c-4b3a-4291-8a0b-9c8d7e6f5a4b",
-      name: "Паллета молочная",
+      name: "Палета молочная",
       chzProductGroupCodes: [8],
     };
     session.api.listTemplates.mockResolvedValue([BOX_58, MILK_BOX, PALLET, milkOnly]);
     await openCreate(session);
     set("Товар", MILK.id);
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С палетами" }));
-    expect(options("Шаблон этикетки палета")).toEqual(["Паллета 100×150", "Паллета молочная"]);
+    expect(options("Шаблон этикетки палета")).toEqual(["Палета 100×150", "Палета молочная"]);
     set("Товар", WATER.id);
     // Water is not of group 8; the template of the organization still fits.
-    expect(options("Шаблон этикетки палета")).toEqual(["Паллета 100×150"]);
+    expect(options("Шаблон этикетки палета")).toEqual(["Палета 100×150"]);
   });
 
   it("holds the pallet controls too while the write is on its way", async () => {

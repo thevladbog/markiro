@@ -271,11 +271,11 @@ const lines = (sheets: boolean, none: boolean, long = false): SummaryLine[] =>
     detail:
       row.kind === "sheet"
         ? row.printer === null
-          ? "Лист «Паллета · стандарт» · принтер не назначен"
-          : `Лист «Паллета · стандарт» · ${long ? LONG_PRINTER : row.printer.name}`
+          ? "Лист «Палета · стандарт» · принтер не назначен"
+          : `Лист «Палета · стандарт» · ${long ? LONG_PRINTER : row.printer.name}`
         : row.state === "sheets_only"
-          ? "Принтер паллет печатает листы А4"
-          : `«${{ box: "Короб 100×150", pallet: "Паллета 100×150", unit: "Дубликат Data Matrix 40×30" }[row.kind]}» · ${long ? LONG_PRINTER : (row.printer?.name ?? "принтер не назначен")}`,
+          ? "Принтер палет печатает листы А4"
+          : `«${{ box: "Короб 100×150", pallet: "Палета 100×150", unit: "Дубликат Data Matrix 40×30" }[row.kind]}» · ${long ? LONG_PRINTER : (row.printer?.name ?? "принтер не назначен")}`,
   }));
 
 const sessionProps = {
@@ -306,7 +306,7 @@ const jobProps = (
       ? "Дубликат Data Matrix 40×30"
       : shown.kind === "box"
         ? "Короб 100×150"
-        : "Паллета 100×150",
+        : "Палета 100×150",
   resultText: ((): string | null => {
     const result = resultView(shown, over.verifying ?? false);
     if (result.body === null) return null;

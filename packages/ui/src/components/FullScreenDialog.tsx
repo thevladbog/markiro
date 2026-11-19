@@ -18,8 +18,8 @@ export interface FullScreenDialogProps {
   onClose: () => void;
   backLabel?: string;
   backDisabled?: boolean;
-  /** Places the back action beside footer actions for focused two-choice flows. */
-  backPlacement?: "header" | "footer";
+  /** Use custom when the caller supplies its own return action in the footer. */
+  backPlacement?: "header" | "footer" | "custom";
   /**
    * Focus the inert dialog container when opening flows where the first
    * action must not be triggerable by the key event that opened the dialog.
@@ -212,7 +212,7 @@ export function FullScreenDialog({
         style={{
           display: "flex",
           alignItems: "center",
-          justifyContent: backPlacement === "footer" ? "center" : "space-between",
+          justifyContent: backPlacement === "header" ? "space-between" : "center",
           gap: 24,
           padding: "16px 24px",
           borderBottom: "1px solid var(--line)",
@@ -243,7 +243,7 @@ export function FullScreenDialog({
         <footer
           style={{
             display: "flex",
-            justifyContent: backPlacement === "footer" ? "center" : "flex-end",
+            justifyContent: backPlacement === "header" ? "flex-end" : "center",
             gap: 12,
             padding: "12px 24px",
             borderTop: "1px solid var(--line)",

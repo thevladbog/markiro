@@ -27,8 +27,6 @@ const heavyJobs = [
   ["platform-forward-recovery", "platform_forward_recovery"],
   // The two scenario runners whose evidence platform-forward-recovery accepts.
   ["platform-forward-recovery-scenario", "platform_forward_recovery"],
-  ["station-rust", "station_rust"],
-  ["station-windows-build", "station_windows_build"],
   ["signer-rust", "signer_rust"],
   ["signer-windows-build", "signer_windows_build"],
   ["handheld-android", "handheld_android"],
@@ -42,10 +40,7 @@ const heavyJobs = [
   ["saas-admin-browser", "saas_admin_browser"],
 ];
 // Classified, but outside ci-required (owner decision 2026-10-21).
-const optionalJobs = [
-  ["cabinet-galleries", "cabinet_station_galleries"],
-  ["station-galleries", "cabinet_station_galleries"],
-];
+const optionalJobs = [["cabinet-galleries", "cabinet_station_galleries"]];
 const classifierOutputs = [
   ...new Set(heavyJobs.map(([, name]) => name)),
   "cabinet_station_galleries",
@@ -268,6 +263,24 @@ test("the standalone export runs in the Node job after the domain build and its 
   );
 });
 
+test("cloud Station checks require an explicit manual run", () => {
+  const input = workflow.on.workflow_dispatch?.inputs?.cloud_station;
+  assert.equal(input?.type, "boolean");
+  assert.equal(input.default, false);
+  for (const id of ["station-galleries", "station-rust", "station-windows-build"]) {
+    assert.equal(
+      workflow.jobs[id].if,
+      "github.event_name == 'workflow_dispatch' && inputs.cloud_station",
+      id,
+    );
+    assert.ok(!workflow.jobs["ci-required"].needs.includes(id), id);
+  }
+  const staticCommand = workflow.jobs["verify-static"].steps.find((step) =>
+    step.run?.startsWith("pnpm turbo lint typecheck build"),
+  )?.run;
+  assert.match(staticCommand, /--filter=!@markiro\/station(?: |$)/u);
+});
+
 test("the standalone app's Vitest suite runs in its own job and in no other app slice", () => {
   const appSlice = workflow.jobs["verify-app-tests"].steps.filter((step) =>
     step.run?.startsWith("pnpm turbo test"),
@@ -275,7 +288,7 @@ test("the standalone app's Vitest suite runs in its own job and in no other app 
   assert.deepEqual(
     appSlice.map((step) => step.run),
     [
-      "pnpm turbo test --filter=!@markiro/db --filter=!@markiro/api --filter=!@markiro/standalone --concurrency=1 --force",
+      "pnpm turbo test --filter=!@markiro/db --filter=!@markiro/api --filter=!@markiro/standalone --filter=!@markiro/station --concurrency=1 --force",
     ],
   );
 
@@ -822,7 +835,7 @@ test("no CI job downloads an artifact by a name derived from its own run attempt
   }
 });
 
-test("the SaaS-admin suites stay required and the cabinet and station galleries are optional", () => {
+test("the SaaS-admin suites stay required and both gallery jobs retain their suites", () => {
   const suites = (jobId) =>
     workflow.jobs[jobId].steps
       .flatMap((step) => (step.run ?? "").split("\n"))
@@ -848,7 +861,13 @@ test("the SaaS-admin suites stay required and the cabinet and station galleries 
     "test:catalog",
     "test:tenant-billing",
     "--config device-replacement.playwright.config.ts",
+    "--config product-labels.playwright.config.ts",
   ]);
+  assert.equal(
+    stepByName(workflow.jobs["cabinet-galleries"], "Verify cabinet product labels").env
+      .PRODUCT_LABELS_CABINET_ONLY,
+    "1",
+  );
   assert.deepEqual(suites("station-galleries"), [
     "test:station-inventory:browser",
     "test:station-startup:browser",

@@ -30,7 +30,7 @@ function kinds(at: PalletStation): unknown[] {
 
 /** The pallet's fact: its line in the work screen's numbers. */
 function palletLine(): string | null {
-  const term = screen.getByText("Паллета", { selector: "dt" });
+  const term = screen.getByText("Палета", { selector: "dt" });
   return term.nextElementSibling?.textContent ?? null;
 }
 
@@ -65,17 +65,17 @@ describe("the work screen of a shift with pallets (plan ПЛ-Ц)", () => {
     const work = renderWork(at);
     await work.scanner.listening();
     await work.settled();
-    const early = () => screen.getByRole("button", { name: "Закрыть паллету досрочно" });
+    const early = () => screen.getByRole("button", { name: "Закрыть палету досрочно" });
     expect(early()).toHaveProperty("disabled", true);
     await work.scan(km("A1"));
     await work.scan(km("A2"));
     expect(early()).toHaveProperty("disabled", false);
-    await work.press("Закрыть паллету досрочно");
-    expect(screen.getByText("Закрыть паллету досрочно? На паллете 2 из 40 коробов.")).toBeTruthy();
+    await work.press("Закрыть палету досрочно");
+    expect(screen.getByText("Закрыть палету досрочно? На палете 2 из 40 коробов.")).toBeTruthy();
     await work.press("Не закрывать");
     expect(kinds(at)).not.toContain("pallet_closed");
-    await work.press("Закрыть паллету досрочно");
-    await work.press("Закрыть паллету");
+    await work.press("Закрыть палету досрочно");
+    await work.press("Закрыть палету");
     expect(kinds(at).at(-1)).toBe("pallet_closed");
     expect(work.shell.sends.at(-1)?.text).toBe(renderedText(ZEBRA, PALLET_SSCC, "100x150"));
     expect(palletLine()).toBe("0 из 40 коробов");
@@ -98,11 +98,11 @@ describe("the work screen of a shift with pallets (plan ПЛ-Ц)", () => {
     await work.scanner.listening();
     await work.settled();
     await work.scan(km("A1"));
-    expect(screen.getByText("Паллета заполнена, но не закрыта")).toBeTruthy();
+    expect(screen.getByText("Палета заполнена, но не закрыта")).toBeTruthy();
     // The wait names the way out when the prefix has no numbers left.
     expect(
       screen.getByText(
-        "Нет номеров SSCC для паллет. Паллета закроется, когда хост выдаст номера. Следующие короба пока добавляются к этой же паллете. Если номера префикса закончились, обратитесь к администратору.",
+        "Нет номеров SSCC для палет. Палета закроется, когда хост выдаст номера. Следующие короба пока добавляются к этой же палете. Если номера префикса закончились, обратитесь к администратору.",
       ),
     ).toBeTruthy();
     await work.scan(km("A2"));
@@ -112,7 +112,7 @@ describe("the work screen of a shift with pallets (plan ПЛ-Ц)", () => {
     await work.settled();
     await work.settled();
     expect(kinds(at)).toEqual(["box_closed", "box_closed", "pallet_closed"]);
-    expect(screen.queryByText("Паллета заполнена, но не закрыта")).toBeNull();
+    expect(screen.queryByText("Палета заполнена, но не закрыта")).toBeNull();
     expect(palletLine()).toBe("0 из 1 коробов");
     expect(requestBlock).toHaveBeenCalledWith(
       expect.objectContaining({ extension: PALLET_EXTENSION }),
@@ -157,7 +157,7 @@ describe("the work screen of a shift with pallets (plan ПЛ-Ц)", () => {
     expect(kinds(at)).toEqual(["box_closed", "box_closed", "pallet_closed"]);
     const [closed] = rows(at.db, "SELECT payload FROM outbox WHERE kind = 'pallet_closed'");
     expect(JSON.parse(String(closed?.["payload"]))).toMatchObject({ data: { boxCount: 2 } });
-    expect(screen.queryByText("Паллета заполнена, но не закрыта")).toBeNull();
+    expect(screen.queryByText("Палета заполнена, но не закрыта")).toBeNull();
     expect(palletLine()).toBe("0 из 1 коробов");
     expect(requestBlock).toHaveBeenCalledWith(
       expect.objectContaining({ extension: PALLET_EXTENSION }),
@@ -261,11 +261,11 @@ describe("the work screen of a shift with pallets (plan ПЛ-Ц)", () => {
     await work.scan(`(00)${PALLET_SSCC}`);
     expect(screen.getByText(/Это этикетка другого короба/)).toBeTruthy();
     await work.scan(`(00)${BOX_SSCC(1500)}`);
-    expect(screen.getByText("Отсканируйте SSCC на этикетке паллеты.")).toBeTruthy();
-    expect(screen.getByText(/SSCC паллеты:/)).toBeTruthy();
+    expect(screen.getByText("Отсканируйте SSCC на этикетке палеты.")).toBeTruthy();
+    expect(screen.getByText(/SSCC палеты:/)).toBeTruthy();
     expect(screen.queryByText(/План выполнен/)).toBeNull();
     await work.scan(`(00)${PALLET_SSCC}`);
-    expect(screen.queryByText("Отсканируйте SSCC на этикетке паллеты.")).toBeNull();
+    expect(screen.queryByText("Отсканируйте SSCC на этикетке палеты.")).toBeNull();
     expect(screen.getByText("План выполнен: принято 1 из 1.")).toBeTruthy();
     expect(kinds(at)).toEqual(["box_closed", "pallet_closed", "box_label", "pallet_label"]);
   });
@@ -297,7 +297,7 @@ describe("the work screen of a shift with pallets (plan ПЛ-Ц)", () => {
 
     await work.scan(`(00)${BOX_SSCC(1500)}`);
     expect(sentLabels()).toEqual([box, renderedText(ZEBRA, PALLET_SSCC, "100x150")]);
-    expect(screen.getByText("Отсканируйте SSCC на этикетке паллеты.")).toBeTruthy();
+    expect(screen.getByText("Отсканируйте SSCC на этикетке палеты.")).toBeTruthy();
   });
 
   it("stops on a pallet's label that did not print, says why in the pallet's words, and goes on without it", async () => {
@@ -310,16 +310,16 @@ describe("the work screen of a shift with pallets (plan ПЛ-Ц)", () => {
     await work.scanner.listening();
     await work.settled();
     await work.scan(km("A1"));
-    expect(screen.getByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(screen.getByText("Этикетка палеты не напечатана")).toBeTruthy();
     expect(
-      screen.getByText("Принтер для паллет не назначен. Назначьте его в настройке рабочего места."),
+      screen.getByText("Принтер для палет не назначен. Назначьте его в настройке рабочего места."),
     ).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Закрыть паллету досрочно" })).toHaveProperty(
+    expect(screen.getByRole("button", { name: "Закрыть палету досрочно" })).toHaveProperty(
       "disabled",
       true,
     );
     await work.press("Продолжить без этикетки");
-    expect(screen.getByText(/Паллета уже закрыта/)).toBeTruthy();
+    expect(screen.getByText(/Палета уже закрыта/)).toBeTruthy();
     await work.press("Продолжить без этикетки");
     expect(kinds(at)).toEqual(["box_closed", "pallet_closed", "pallet_label"]);
     await work.scan(km("A2"));
@@ -381,13 +381,13 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     const work = renderWork({ local: at.local, shift: broken });
     await work.scanner.listening();
     await work.settled();
-    expect(screen.getByText("Паллеты смены не настроены на этой станции")).toBeTruthy();
+    expect(screen.getByText("Палеты смены не настроены на этой станции")).toBeTruthy();
     expect(count(at, "floor_boxes", "closed_at IS NOT NULL")).toBe(0);
     await work.scan(km("A2"));
     expect(count(at, "floor_codes")).toBe(1);
     expect(kinds(at)).toEqual([]);
-    expect(screen.queryByText("Паллета", { selector: "dt" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Закрыть паллету досрочно" })).toBeNull();
+    expect(screen.queryByText("Палета", { selector: "dt" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Закрыть палету досрочно" })).toBeNull();
   });
 
   it("goes on with the label that cannot move on, never sending it round in a loop", async () => {
@@ -421,7 +421,7 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     expect(work.shell.sends.at(-1)?.text).toBe(
       renderedText(ZEBRA, buildSscc(PALLET_EXTENSION, PREFIX, 2), "100x150"),
     );
-    expect(screen.queryByText("Паллета заполнена, но не закрыта")).toBeNull();
+    expect(screen.queryByText("Палета заполнена, но не закрыта")).toBeNull();
     expect(palletLine()).toBe("0 из 1 коробов");
   });
 
@@ -434,12 +434,12 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     await work.scan(km("A1"));
     expect(kinds(at)).toEqual(["box_closed"]);
     expect(palletCursor(at)).toEqual([3]);
-    expect(screen.getByText("Паллета заполнена, но не закрыта")).toBeTruthy();
-    expect(screen.getByText(/Номер SSCC паллеты не подошёл и пропущен/)).toBeTruthy();
-    expect(screen.queryByText(/Нет номеров SSCC паллет: паллета закроется/)).toBeNull();
+    expect(screen.getByText("Палета заполнена, но не закрыта")).toBeTruthy();
+    expect(screen.getByText(/Номер SSCC палеты не подошёл и пропущен/)).toBeTruthy();
+    expect(screen.queryByText(/Нет номеров SSCC палет: палета закроется/)).toBeNull();
     await work.scan(km("A2"));
     expect(kinds(at)).toEqual(["box_closed", "box_closed", "pallet_closed"]);
-    expect(screen.queryByText("Паллета заполнена, но не закрыта")).toBeNull();
+    expect(screen.queryByText("Палета заполнена, но не закрыта")).toBeNull();
   });
 
   it("closes a pallet that a stopped station left full as soon as the screen opens with pallet serials", async () => {
@@ -460,12 +460,12 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     await work.scanner.listening();
     await work.settled();
     await work.scan(km("A1"));
-    expect(screen.getByText("Паллета заполнена, но не закрыта")).toBeTruthy();
+    expect(screen.getByText("Палета заполнена, но не закрыта")).toBeTruthy();
     seedBlock(at.db, { blockId: PALLET_BLOCK, from: 0, to: 199, extension: 1 });
-    await work.press("Закрыть паллету досрочно");
-    await work.press("Закрыть паллету");
+    await work.press("Закрыть палету досрочно");
+    await work.press("Закрыть палету");
     expect(kinds(at).at(-1)).toBe("pallet_closed");
-    expect(screen.queryByText("Паллета заполнена, но не закрыта")).toBeNull();
+    expect(screen.queryByText("Палета заполнена, но не закрыта")).toBeNull();
     expect(palletLine()).toBe("0 из 1 коробов");
   });
 
@@ -482,12 +482,12 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     await work.scanner.listening();
     await work.settled();
     await work.scan(km("A1"));
-    await work.press("Закрыть паллету досрочно");
-    await work.press("Закрыть паллету");
-    expect(screen.getByText("Нет номеров SSCC паллет: паллета не закрыта")).toBeTruthy();
+    await work.press("Закрыть палету досрочно");
+    await work.press("Закрыть палету");
+    expect(screen.getByText("Нет номеров SSCC палет: палета не закрыта")).toBeTruthy();
     expect(
       screen.getByText(
-        "Номера выдаёт хост, а связи с ним нет. Паллета закроется, как только номера придут.",
+        "Номера выдаёт хост, а связи с ним нет. Палета закроется, как только номера придут.",
       ),
     ).toBeTruthy();
     expect(kinds(at)).not.toContain("pallet_closed");
@@ -495,12 +495,12 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     await work.scan(km("A2"));
     expect(count(at, "floor_codes")).toBe(1);
     await work.press("Повторить");
-    expect(screen.getByText("Нет номеров SSCC паллет: паллета не закрыта")).toBeTruthy();
+    expect(screen.getByText("Нет номеров SSCC палет: палета не закрыта")).toBeTruthy();
     work.rerender({ online: true });
     await work.settled();
     await work.settled();
     expect(kinds(at).at(-1)).toBe("pallet_closed");
-    expect(screen.queryByText("Нет номеров SSCC паллет: паллета не закрыта")).toBeNull();
+    expect(screen.queryByText("Нет номеров SSCC палет: палета не закрыта")).toBeNull();
     expect(requestBlock).toHaveBeenCalledWith(
       expect.objectContaining({ extension: PALLET_EXTENSION }),
     );
@@ -515,11 +515,11 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     await work.scanner.listening();
     await work.settled();
     await work.scan(km("A1"));
-    await work.press("Закрыть паллету досрочно");
-    await work.press("Закрыть паллету");
+    await work.press("Закрыть палету досрочно");
+    await work.press("Закрыть палету");
     expect(
       screen.getByText(
-        "Номера SSCC паллет префикса организации закончились. Обратитесь к администратору.",
+        "Номера SSCC палет префикса организации закончились. Обратитесь к администратору.",
       ),
     ).toBeTruthy();
     expect(kinds(at)).not.toContain("pallet_closed");
@@ -532,9 +532,9 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     await work.scanner.listening();
     await work.settled();
     await work.scan(km("A1"));
-    await work.press("Закрыть паллету досрочно");
-    await work.press("Закрыть паллету");
-    expect(screen.queryByText("Паллета не закрыта")).toBeNull();
+    await work.press("Закрыть палету досрочно");
+    await work.press("Закрыть палету");
+    expect(screen.queryByText("Палета не закрыта")).toBeNull();
     expect(kinds(at).at(-1)).toBe("pallet_closed");
     expect(palletCursor(at)).toEqual([2]);
     expect(work.shell.sends.at(-1)?.text).toBe(
@@ -549,12 +549,12 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     await work.scanner.listening();
     await work.settled();
     await work.scan(km("A1"));
-    await work.press("Закрыть паллету досрочно");
-    await work.press("Закрыть паллету");
-    expect(screen.getByText("Паллета не закрыта")).toBeTruthy();
+    await work.press("Закрыть палету досрочно");
+    await work.press("Закрыть палету");
+    expect(screen.getByText("Палета не закрыта")).toBeTruthy();
     expect(
       screen.getByText(
-        "Номер SSCC паллеты не подошёл (вне диапазона префикса или уже занят другой паллетой) и пропущен, или паллета изменилась. Повторите закрытие.",
+        "Номер SSCC палеты не подошёл (вне диапазона префикса или уже занят другой палетой) и пропущен, или палета изменилась. Повторите закрытие.",
       ),
     ).toBeTruthy();
     // The early close is not the shift's: nothing is said of the shift.
@@ -563,7 +563,7 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     expect(palletCursor(at)).toEqual([3]);
     await work.press("Повторить");
     expect(kinds(at).at(-1)).toBe("pallet_closed");
-    expect(screen.queryByText("Паллета не закрыта")).toBeNull();
+    expect(screen.queryByText("Палета не закрыта")).toBeNull();
     expect(work.shell.sends.at(-1)?.text).toBe(
       renderedText(ZEBRA, buildSscc(PALLET_EXTENSION, PREFIX, 3), "100x150"),
     );
@@ -575,9 +575,9 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     await work.scanner.listening();
     await work.settled();
     await work.scan(km("A1"));
-    await work.press("Закрыть паллету досрочно");
+    await work.press("Закрыть палету досрочно");
     work.rerender({ isLeaving: () => true });
-    await work.press("Закрыть паллету");
+    await work.press("Закрыть палету");
     expect(kinds(at)).not.toContain("pallet_closed");
   });
 
@@ -587,11 +587,11 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     await work.scanner.listening();
     await work.settled();
     await work.scan(km("A1"));
-    await work.press("Закрыть паллету досрочно");
+    await work.press("Закрыть палету досрочно");
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Не закрывать" }));
     await work.press("Не закрывать");
     expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "Закрыть паллету досрочно" }),
+      screen.getByRole("button", { name: "Закрыть палету досрочно" }),
     );
   });
 
@@ -627,14 +627,14 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     await work.scanner.listening();
     await work.settled();
     await work.scan(km("A1"));
-    expect(screen.getByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(screen.getByText("Этикетка палеты не напечатана")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Исключения" })).toHaveProperty("disabled", true);
     await setUpPrinting(at.local, {
       assignments: { box: "zebra", pallet: "zebra", duplicate: null },
     });
     await work.press("Напечатать снова");
     expect(work.shell.sends.at(-1)?.text).toBe(renderedText(ZEBRA, PALLET_SSCC, "100x150"));
-    expect(screen.queryByText("Этикетка паллеты не напечатана")).toBeNull();
+    expect(screen.queryByText("Этикетка палеты не напечатана")).toBeNull();
   });
 
   it("refuses another pallet's SSCC and a code that is no SSCC in the pallet's words, and asks the reprint's reason about the pallet", async () => {
@@ -650,14 +650,14 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     await work.scan(`(00)${BOX_SSCC(1500)}`);
     await work.scan(`(00)${BOX_SSCC(1500)}`);
     expect(
-      screen.getByText(`Это этикетка другой паллеты или короба: ${formatSsccHri(BOX_SSCC(1500))}.`),
+      screen.getByText(`Это этикетка другой палеты или короба: ${formatSsccHri(BOX_SSCC(1500))}.`),
     ).toBeTruthy();
     await work.scan(km("P12"));
-    expect(screen.getByText("Это не код SSCC. Отсканируйте этикетку паллеты.")).toBeTruthy();
+    expect(screen.getByText("Это не код SSCC. Отсканируйте этикетку палеты.")).toBeTruthy();
     await work.press("Напечатать снова");
     expect(
       screen.getByText(
-        "Если этикетка уже вышла, новая будет с тем же номером SSCC: на паллете должна остаться одна.",
+        "Если этикетка уже вышла, новая будет с тем же номером SSCC: на палете должна остаться одна.",
       ),
     ).toBeTruthy();
   });
@@ -717,7 +717,7 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     seedBlock(at.db, { blockId: PALLET_BLOCK, from: 0, to: 199, extension: 1 });
     await work.scan(`(00)${BOX_SSCC(1500)}`);
     expect(kinds(at)).toEqual(["box_closed", "box_label", "pallet_closed"]);
-    expect(screen.getByText("Отсканируйте SSCC на этикетке паллеты.")).toBeTruthy();
+    expect(screen.getByText("Отсканируйте SSCC на этикетке палеты.")).toBeTruthy();
   });
 
   it("asks the host for pallet serials by the half rule on entry and after a box closes", async () => {
@@ -757,8 +757,8 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     expect(
       requestBlock.mock.calls.filter(([request]) => request.extension === PALLET_EXTENSION),
     ).toEqual([]);
-    expect(screen.queryByText("Паллета", { selector: "dt" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Закрыть паллету досрочно" })).toBeNull();
+    expect(screen.queryByText("Палета", { selector: "dt" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Закрыть палету досрочно" })).toBeNull();
   });
 
   it("says no pallet serials will come while the link is held off for the rest of the shift", async () => {
@@ -767,15 +767,15 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     await work.scanner.listening();
     await work.settled();
     await work.scan(km("A1"));
-    await work.press("Закрыть паллету досрочно");
-    await work.press("Закрыть паллету");
+    await work.press("Закрыть палету досрочно");
+    await work.press("Закрыть палету");
     expect(screen.getByText(/Связь с хостом остановлена до выхода из смены/)).toBeTruthy();
-    expect(screen.getByText(/номера паллет не придут/)).toBeTruthy();
+    expect(screen.getByText(/номера палет не придут/)).toBeTruthy();
   });
 });
 
 describe("the pallet-waits message cannot outlive the pallet it speaks of", () => {
-  const WAITS = "Паллета заполнена, но не закрыта";
+  const WAITS = "Палета заполнена, но не закрыта";
 
   it("drops the message when the next box fills and closes the waiting pallet in its own turn while the box's label check stands", async () => {
     const at = await palletStation({
@@ -834,7 +834,7 @@ describe("the pallet-waits message cannot outlive the pallet it speaks of", () =
 });
 
 describe("the pallet's early-close button and the full pallet's retries (plan ПЛ-Ц)", () => {
-  const early = () => screen.getByRole("button", { name: "Закрыть паллету досрочно" });
+  const early = () => screen.getByRole("button", { name: "Закрыть палету досрочно" });
 
   it("keeps the early close away while a label stop stands, though the pallet holds a box", async () => {
     const at = await palletStation({
@@ -896,7 +896,7 @@ describe("the pallet's early-close button and the full pallet's retries (plan П
     await work.scan(km("A1"));
     expect(kinds(at)).toEqual(["box_closed", "pallet_closed"]);
     expect(palletLine()).toBe("0 из 1 коробов");
-    expect(screen.queryByText("Паллета заполнена, но не закрыта")).toBeNull();
+    expect(screen.queryByText("Палета заполнена, но не закрыта")).toBeNull();
     expect(work.shell.sends.at(-1)?.text).toBe(renderedText(ZEBRA, PALLET_SSCC, "100x150"));
   });
 

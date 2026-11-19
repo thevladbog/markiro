@@ -73,18 +73,28 @@ async function newShiftDetails(page) {
   await page.waitForTimeout(500);
 }
 
-/** The incomplete box closed, then «Закрыть смену»: the panel with the open pallet and the reason. */
+/** Close the seeded box and pallet, acknowledging their local print jobs, to reach the totals. */
 async function closePanel(page) {
-  await page.getByRole("button", { name: "Закрыть короб" }).click();
-  await page.getByRole("button", { name: "Закрыть короб" }).last().click();
-  await page.getByText("Коробов закрыто").waitFor();
-  await page.waitForTimeout(2000);
-  await page.getByRole("button", { name: "Закрыть смену" }).click();
-  await page
-    .getByText(/Закрытие смены/)
-    .first()
-    .waitFor();
-  await page.waitForTimeout(1000);
+  await page.getByRole("button", { name: "Закрыть смену", exact: true }).click();
+  const panel = page.locator(".shift-close");
+  const printed = page.getByRole("button", { name: "Этикетка напечаталась", exact: true });
+  const training = page.getByRole("button", { name: "Продолжить без этикетки", exact: true });
+  for (const [action, next] of [
+    ["Закрыть короб", panel.getByRole("button", { name: "Закрыть палету", exact: true })],
+    ["Закрыть палету", panel.getByRole("group", { name: "Итоги станции" })],
+  ]) {
+    const button = panel.getByRole("button", { name: action, exact: true });
+    await button.waitFor();
+    await page.waitForTimeout(500); // Past the station's view-change guard.
+    await button.click();
+    const label = printed.or(training).first();
+    await next.or(label).first().waitFor();
+    if (!(await next.isVisible())) {
+      await page.waitForTimeout(500);
+      await label.click();
+    }
+    await next.waitFor();
+  }
 }
 
 /** «Исключения» from the work screen. */
@@ -179,7 +189,7 @@ export const STATION_STATES = {
     },
   },
   "station/new-shift-details": {
-    title: "Станция: новая смена, режим и паллеты",
+    title: "Станция: новая смена, режим и палеты",
     async run({ computer, shoot }) {
       const { page } = await signedIn(computer);
       await newShiftDetails(page);
@@ -203,7 +213,7 @@ export const STATION_STATES = {
     },
   },
   "station/new-shift-pallet-template": {
-    title: "Станция: новая смена, шаблон этикетки паллеты",
+    title: "Станция: новая смена, шаблон этикетки палеты",
     async run({ computer, shoot }) {
       const { page } = await signedIn(computer);
       await newShiftDetails(page);
@@ -305,11 +315,11 @@ export const STATION_STATES = {
     },
   },
   "station/pallet-close-confirm": {
-    title: "Станция: закрыть паллету досрочно?",
+    title: "Станция: закрыть палету досрочно?",
     async run({ computer, shoot }) {
       const { page } = await atWork(computer);
-      await page.getByRole("button", { name: "Закрыть паллету досрочно" }).click();
-      await page.getByText("Закрыть паллету досрочно?").waitFor();
+      await page.getByRole("button", { name: "Закрыть палету досрочно" }).click();
+      await page.getByText("Закрыть палету досрочно?").waitFor();
       await page.waitForTimeout(500);
       await shoot(page);
     },
@@ -358,11 +368,11 @@ export const STATION_STATES = {
     },
   },
   "station/leave-shift": {
-    title: "Станция: выход из смены",
+    title: "Станция: список смен после паузы",
     async run({ computer, shoot }) {
       const { page } = await atWork(computer);
-      await page.getByRole("button", { name: "Выйти из смены" }).click();
-      await page.waitForTimeout(1200);
+      await page.getByRole("button", { name: "Пауза" }).click();
+      await page.getByRole("heading", { name: "Смены линии" }).waitFor();
       await shoot(page);
     },
   },
@@ -377,7 +387,7 @@ export const STATION_STATES = {
     },
   },
   "station/close-shift": {
-    title: "Станция: закрытие смены с паллетой и причиной",
+    title: "Станция: закрытие смены с палетой и причиной",
     async run({ computer, shoot }) {
       const { page } = await atWork(computer);
       await closePanel(page);
@@ -389,8 +399,9 @@ export const STATION_STATES = {
     async run({ computer, shoot }) {
       const { page } = await atWork(computer);
       await closePanel(page);
+      await page.waitForTimeout(500); // A deliberate press after the totals appeared.
       await page.getByRole("button", { name: "Недостаток сырья" }).click();
-      await page.getByRole("button", { name: "Закрыть паллету и смену" }).click();
+      await page.getByRole("button", { name: "Подтвердить закрытие" }).click();
       await page
         .getByText(/закрыта на этой станции/)
         .first()
@@ -405,7 +416,7 @@ export const STATION_STATES = {
       const { page } = await atWork(computer);
       await host.stop();
       await scanRange(page, SEEDED_SCANS + 1, SEEDED_SCANS + 2);
-      await page.getByRole("button", { name: "Выйти из смены" }).click();
+      await page.getByRole("button", { name: "Пауза" }).click();
       await page.getByRole("heading", { name: "Смены линии" }).waitFor({ timeout: 30_000 });
       await page.getByRole("button", { name: /Очередь отправки/ }).click();
       await page.waitForTimeout(2500);
@@ -498,15 +509,15 @@ export const STATION_STATES = {
     },
   },
   "station/pallet-exceptions": {
-    title: "Станция: исключения с паллетой — выбор паллеты",
+    title: "Станция: исключения с палетой — выбор палеты",
     async run({ computer, shoot }) {
       const { page } = await atWork(computer);
       // A closed pallet first: the pallet's two boxes, closed early.
-      await page.getByRole("button", { name: "Закрыть паллету досрочно" }).click();
-      await page.getByRole("button", { name: "Закрыть паллету", exact: true }).click();
+      await page.getByRole("button", { name: "Закрыть палету досрочно" }).click();
+      await page.getByRole("button", { name: "Закрыть палету", exact: true }).click();
       await page.waitForTimeout(2500);
       await exceptions(page);
-      await page.getByRole("button", { name: "Расформировать паллету" }).first().click();
+      await page.getByRole("button", { name: "Расформировать палету" }).first().click();
       await guarded(page);
       await page.waitForTimeout(800);
       await shoot(page);

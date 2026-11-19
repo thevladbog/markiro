@@ -209,7 +209,7 @@ describe("the closed pallets of a shift (plan ПЛ-Ц)", () => {
   });
 });
 
-describe("«Расформировать паллету» (plan ПЛ-Ц)", () => {
+describe("«Расформировать палету» (plan ПЛ-Ц)", () => {
   it("takes the pallet apart with its reason; its boxes stay closed, with their codes and their pallet", async () => {
     const { at, palletId } = await closedPallet();
     const context = palletContext(at);
@@ -316,7 +316,7 @@ describe("«Расформировать паллету» (plan ПЛ-Ц)", () =>
   });
 });
 
-describe("«Перепечатать этикетку паллеты» (plan ПЛ-Ц)", () => {
+describe("«Перепечатать этикетку палеты» (plan ПЛ-Ц)", () => {
   it("prints the same label again with the reason, the dates of the pallet's own close, once", async () => {
     const { at, palletId, job } = await closedPallet();
     const shell = fakeHardware();
@@ -589,7 +589,7 @@ describe("the closed pallets of a shift, beyond the first list (plan ПЛ-Ц)", 
   });
 });
 
-describe("«Расформировать паллету», beyond the first list (plan ПЛ-Ц)", () => {
+describe("«Расформировать палету», beyond the first list (plan ПЛ-Ц)", () => {
   it("counts only the boxes not taken apart", async () => {
     const { at, palletId } = await closedPallet();
     const [box] = rows(
@@ -701,7 +701,7 @@ describe("«Расформировать паллету», beyond the first list
   });
 });
 
-describe("«Перепечатать этикетку паллеты», beyond the first list (plan ПЛ-Ц)", () => {
+describe("«Перепечатать этикетку палеты», beyond the first list (plan ПЛ-Ц)", () => {
   async function reprint(
     at: PalletStation,
     palletId: string,

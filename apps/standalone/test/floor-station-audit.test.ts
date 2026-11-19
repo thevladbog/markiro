@@ -564,15 +564,15 @@ describe("the close of a part (plan 2b)", () => {
     );
   });
 
-  it("gives the last closer's line up to the reasons, and keeps a part's six tiles in one row", () => {
+  it("gives the last closer's line up to the reasons, and sizes the station counters to the available width", () => {
     const short = "@media (max-height: 860px)";
     expect(
       rule(close, ".shift-close__body:has(> .shift-close__reasons) > .shift-close__part", short)[
         "display"
       ],
     ).toBe("none");
-    expect(rule(close, ".shift-close__facts:has(> :nth-child(7))")["grid-template-columns"]).toBe(
-      "repeat(auto-fit, minmax(112px, 1fr))",
+    expect(rule(close, ".shift-close__counters")["grid-template-columns"]).toBe(
+      "repeat(auto-fit, minmax(min(130px, 100%), 1fr))",
     );
   });
 

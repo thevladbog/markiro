@@ -17,6 +17,7 @@ const CASES = [
   { name: "check", query: "mode=check" },
   { name: "cap6", query: "mode=pallets&capacity=6&items=4" },
   { name: "cap12", query: "mode=pallets&capacity=12&items=5" },
+  { name: "maxCapacity", query: "mode=pallets&capacity=100000&items=99999" },
   { name: "cap48", query: "mode=plain&capacity=48&items=20" },
 ];
 
@@ -76,18 +77,14 @@ function inspect() {
   for (const p of out.panels) {
     if (p.overflowY > 1) out.problems.push(`panel ${p.cls} overflows by ${p.overflowY}px`);
   }
-  out.cells = [...document.querySelectorAll(".work-box-fill__cell")].slice(0, 1).map((el) => ({
-    w: Math.round(box(el).width),
-    h: Math.round(box(el).height),
-    serialShown: !!el.querySelector(".work-box-fill__serial"),
-  }));
-  for (const cell of document.querySelectorAll(".work-box-fill__cell")) {
-    if (clipped(cell)) out.problems.push("box cell content overflows");
-    const serial = cell.querySelector(".work-box-fill__serial");
-    if (serial && serial.scrollWidth - serial.clientWidth > 1)
-      out.problems.push("cell serial clipped");
-    if (serial && parseFloat(getComputedStyle(serial).fontSize) < 12)
-      out.problems.push("cell serial under 12px");
+  const carton = document.querySelector(".work-carton");
+  if (carton) {
+    const summary = document.querySelector(".work-box-fill__summary");
+    const count = summary.querySelector(".work-box-fill__count");
+    const body = box(document.querySelector(".work-box-fill__body"));
+    if (box(carton).height < 1 || box(carton).width < 1) out.problems.push("carton is hidden");
+    if (clipped(count) || clipped(summary) || box(summary).bottom > body.bottom + 1)
+      out.problems.push("box count or remaining quantity clipped");
   }
   for (const code of document.querySelectorAll(".scan-code__serial, .scan-code__gtin")) {
     if (code.scrollWidth - code.clientWidth > 1) out.problems.push("code line clipped");
@@ -109,16 +106,6 @@ function inspect() {
       photoW: Math.round(box(photo).width),
     };
   }
-  const head = document.querySelector(".work-box-fill__head");
-  if (head) {
-    const title = head.querySelector("h2");
-    const count = head.querySelector(".work-box-fill__count");
-    out.head = {
-      titleLeft: Math.round(box(title).left),
-      countRight: Math.round(box(count).right),
-      headRight: Math.round(box(head).right),
-    };
-  }
   return out;
 }
 
@@ -128,9 +115,11 @@ for (const width of WIDTHS)
   for (const height of HEIGHTS) {
     const page = await browser.newPage({ viewport: { width, height } });
     for (const c of CASES) {
-      await page.goto(`${base}/test/harness/work-fit/index.html?${c.query}`);
+      await page.goto(`${base}/test/harness/work-fit/index.html?${c.query}`, {
+        waitUntil: "domcontentloaded",
+      });
       await page.waitForSelector(".work-screen");
-      await page.waitForTimeout(150);
+      await page.evaluate(() => document.fonts.ready);
       const result = await page.evaluate(inspect);
       if (process.env.SHOT)
         await page.screenshot({ path: `${process.env.SHOT}/${width}x${height}-${c.name}.png` });

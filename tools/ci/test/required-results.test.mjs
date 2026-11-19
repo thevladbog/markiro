@@ -17,8 +17,6 @@ const jobPairs = [
   ["platform_forward_recovery", "platform-forward-recovery"],
   // The two scenario runners (one matrix result) share the accepting job's output.
   ["platform_forward_recovery", "platform-forward-recovery-scenario"],
-  ["station_rust", "station-rust"],
-  ["station_windows_build", "station-windows-build"],
   ["signer_rust", "signer-rust"],
   ["signer_windows_build", "signer-windows-build"],
   ["handheld_android", "handheld-android"],
@@ -194,8 +192,8 @@ test("the optional cabinet and station galleries never decide the required resul
 test("rejects an unselected job with a non-success terminal result", () => {
   for (const result of ["failure", "cancelled"]) {
     assert.throws(
-      () => assertRequiredResults(needsFixture({ results: { "station-rust": result } })),
-      new RegExp(`unselected job station-rust finished with ${result}`),
+      () => assertRequiredResults(needsFixture({ results: { "handheld-android": result } })),
+      new RegExp(`unselected job handheld-android finished with ${result}`),
     );
   }
 });

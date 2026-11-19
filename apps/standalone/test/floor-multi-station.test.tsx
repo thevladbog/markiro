@@ -299,7 +299,7 @@ describe("two stations in one shift (plan 2b, spec §9.6)", () => {
     expect(host.state()).toMatchObject({ status: "closed", reasonMissing: true });
   });
 
-  it("«Выйти из смены» frees the slot; an entry before the pause reaches the host drops it; a stale pause undoes nothing", async () => {
+  it("«Пауза» frees the slot; an entry before the pause reaches the host drops it; a stale pause undoes nothing", async () => {
     const host = multiHost(VALIDATION_ENTERED, 2, NAMES);
     host.open(DEVICE_ID);
     const a = station(host, DEVICE_ID);
@@ -309,7 +309,7 @@ describe("two stations in one shift (plan 2b, spec §9.6)", () => {
     await a.press("Продолжить");
     await b.press("Присоединиться");
 
-    await b.press("Выйти из смены");
+    await b.press("Пауза");
     await waitFor(() => expect(b.requestLeaves).toHaveBeenCalledTimes(1));
     await b.sendLeaves();
     expect(host.state().parts.get(OTHER_STATION)?.row.state).toBe("left");
@@ -318,7 +318,7 @@ describe("two stations in one shift (plan 2b, spec §9.6)", () => {
 
     // A leaves while the host is away and comes back before the pause reaches it.
     await a.goOffline();
-    await a.press("Выйти из смены");
+    await a.press("Пауза");
     await waitFor(() => expect(a.requestLeaves).toHaveBeenCalledTimes(1));
     await a.press("Продолжить");
     await a.goOnline();
@@ -333,7 +333,7 @@ describe("two stations in one shift (plan 2b, spec §9.6)", () => {
     await b.press("Продолжить");
     const secondStay = host.state().parts.get(OTHER_STATION)?.row.joinedRev ?? null;
     expect(secondStay).not.toBe(firstStay);
-    await b.press("Выйти из смены");
+    await b.press("Пауза");
     await waitFor(() => expect(b.requestLeaves).toHaveBeenCalledTimes(2));
     await waitFor(async () =>
       expect(
@@ -400,7 +400,7 @@ describe("two stations in one shift (plan 2b, spec §9.6)", () => {
     await b.press("Присоединиться");
 
     // B leaves with the link up: the host frees its slot and the cache says so.
-    await b.press("Выйти из смены");
+    await b.press("Пауза");
     await waitFor(() => expect(b.requestLeaves).toHaveBeenCalledTimes(1));
     await b.sendLeaves();
     expect(host.state().parts.get(OTHER_STATION)?.row.state).toBe("left");
@@ -427,7 +427,7 @@ describe("two stations in one shift (plan 2b, spec §9.6)", () => {
     for (const one of [a, b, c]) await one.readShifts();
     await a.press("Продолжить");
     await b.press("Присоединиться");
-    await b.press("Выйти из смены");
+    await b.press("Пауза");
     await waitFor(() => expect(b.requestLeaves).toHaveBeenCalledTimes(1));
     await b.sendLeaves();
     await b.goOffline();
@@ -447,7 +447,7 @@ describe("two stations in one shift (plan 2b, spec §9.6)", () => {
     await waitFor(() => expect(b.mine()).toBe("1"));
 
     // C leaves: B's next read takes the slot, and the notice goes.
-    await c.press("Выйти из смены");
+    await c.press("Пауза");
     await waitFor(() => expect(c.requestLeaves).toHaveBeenCalledTimes(1));
     await c.sendLeaves();
     await b.readShifts();
@@ -464,7 +464,7 @@ describe("two stations in one shift (plan 2b, spec §9.6)", () => {
     for (const one of [a, b]) await one.readShifts();
     await a.press("Продолжить");
     await b.press("Присоединиться");
-    await b.press("Выйти из смены");
+    await b.press("Пауза");
     await waitFor(() => expect(b.requestLeaves).toHaveBeenCalledTimes(1));
 
     // The pause is read and on its way; the operator comes back and the entry reaches the host

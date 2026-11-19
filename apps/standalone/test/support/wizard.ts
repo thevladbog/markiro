@@ -37,7 +37,7 @@ export async function reachAddress(): Promise<void> {
 
   await screen.findByText("Шаг 3 из 6 · Номера SSCC");
   type("Следующий номер короба", "1500");
-  type("Следующий номер паллеты", "40");
+  type("Следующий номер палеты", "40");
   next();
 
   await screen.findByText("Шаг 4 из 6 · Линии");

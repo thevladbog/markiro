@@ -87,14 +87,14 @@ try {
   await scan(page, OPERATORS[0].badge);
   // The station opens on the shift it works, or on its list.
   await page
-    .getByRole("button", { name: "Выйти из смены" })
+    .getByRole("button", { name: "Пауза" })
     .or(page.getByRole("heading", { name: "Смены линии" }))
     .first()
     .waitFor();
   const working = page.getByText(number, { exact: false }).first();
-  if (await page.getByRole("button", { name: "Выйти из смены" }).isVisible()) {
+  if (await page.getByRole("button", { name: "Пауза" }).isVisible()) {
     if (!(await working.isVisible())) {
-      await page.getByRole("button", { name: "Выйти из смены" }).click();
+      await page.getByRole("button", { name: "Пауза" }).click();
       await page.getByRole("heading", { name: "Смены линии" }).waitFor({ timeout: 30_000 });
     }
   }

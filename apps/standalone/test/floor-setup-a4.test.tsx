@@ -253,7 +253,7 @@ describe("the workstation setup's A4 printer (plan А4)", () => {
     choose("Бумага", "a4");
     click("Готово");
     expect(screen.getByText("Лист А4 · HP LaserJet")).toBeTruthy();
-    choose("Этикетка паллеты", "HP на складе");
+    choose("Этикетка палеты", "HP на складе");
     await act(async () => {
       click("Сохранить");
     });
@@ -269,7 +269,7 @@ describe("the workstation setup's A4 printer (plan А4)", () => {
     await setup();
     expect(optionsOf("Этикетка короба")).toEqual(["Не назначен", ZEBRA.name, GODEX_DRIVER.name]);
     expect(optionsOf("Дубль кода")).toEqual(["Не назначен", ZEBRA.name, GODEX_DRIVER.name]);
-    expect(optionsOf("Этикетка паллеты")).toEqual([
+    expect(optionsOf("Этикетка палеты")).toEqual([
       "Не назначен",
       ZEBRA.name,
       HP_A4.name,
@@ -289,7 +289,7 @@ describe("the workstation setup's A4 printer (plan А4)", () => {
     click("Готово");
     expect(shownInList("Этикетка короба")).toBe("Не назначен");
     expect(shownInList("Дубль кода")).toBe("Не назначен");
-    expect(shownInList("Этикетка паллеты")).toBe("Godex через драйвер");
+    expect(shownInList("Этикетка палеты")).toBe("Godex через драйвер");
     await act(async () => {
       click("Сохранить");
     });

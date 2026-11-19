@@ -432,6 +432,10 @@ export function palletStep(context: PalletContext, pallets: ShiftPallets): Close
   };
 }
 
+export const CLOSED_PALLET_COUNT_SQL =
+  "SELECT count(*) AS n FROM floor_pallets WHERE host_id = ? AND device_id = ? AND shift_id = ? " +
+  "AND closed_at IS NOT NULL AND disassembled_at IS NULL";
+
 /** The check of an open pallet in the close of a shift (pinned in both lists of plans). */
 export const OPEN_PALLET_GUARD_SQL =
   "UPDATE floor_shifts AS s SET local_state = local_state WHERE s.host_id = ? " +
@@ -446,10 +450,18 @@ export const OPEN_PALLET_GUARD_SQL =
  * и смену»), so its boxes are on a printed pallet. An open pallet with no box
  * left does not keep the shift open and spends no serial.
  */
-export function openPalletGuard(pairing: Pairing, shiftId: string): LocalStatement {
+export function openPalletGuard(
+  pairing: Pairing,
+  shiftId: string,
+  expectedClosed?: number,
+): LocalStatement {
+  const scope = [pairing.hostId, pairing.deviceId, shiftId];
   return {
-    sql: OPEN_PALLET_GUARD_SQL,
-    values: [pairing.hostId, pairing.deviceId, shiftId],
+    sql:
+      expectedClosed === undefined
+        ? OPEN_PALLET_GUARD_SQL
+        : OPEN_PALLET_GUARD_SQL + ` AND (${CLOSED_PALLET_COUNT_SQL}) = ?`,
+    values: expectedClosed === undefined ? scope : [...scope, ...scope, expectedClosed],
     expectedChanges: 1,
   };
 }

@@ -112,7 +112,7 @@ describe("a box joins the shift's open pallet as it closes (plan ПЛ-Ц)", () =
     });
     await expect(remainingSerials(at.local, PAIRING, PREFIX, PALLET_EXTENSION)).resolves.toBe(199);
     // The pallet's label: its own job, from the snapshot's pallet layout, on the
-    // printer of the purpose «Паллета»; the box's label goes first.
+    // printer of the purpose «Палета»; the box's label goes first.
     const jobs = rows(
       at.db,
       "SELECT id, purpose, subject_id, sscc, state, template_id, template_rev, bytes_base64, " +
@@ -202,7 +202,7 @@ describe("a full pallet without pallet serials (plan ПЛ-Ц)", () => {
   });
 });
 
-describe("«Закрыть паллету досрочно» (plan ПЛ-Ц)", () => {
+describe("«Закрыть палету досрочно» (plan ПЛ-Ц)", () => {
   it("closes the open pallet with the boxes it holds", async () => {
     const at = await palletStation({ capacity: 40 });
     await closeBoxes(at, "A", 2);
