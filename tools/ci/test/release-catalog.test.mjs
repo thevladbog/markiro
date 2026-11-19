@@ -10,7 +10,6 @@ const required = [
   "verify_app_tests",
   "production_bundle",
   "platform_contracts",
-  "station_windows_build",
   "handheld_android",
   "standalone_windows_build",
   "signer_windows_build",

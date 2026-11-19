@@ -5,6 +5,7 @@ import { test } from "node:test";
 function config(overrides = {}) {
   const env = { ...process.env };
   for (const key of [
+    "PRODUCT_LABELS_CABINET_ONLY",
     "PRODUCT_LABELS_ADMIN_PORT",
     "PRODUCT_LABELS_STATION_PORT",
     "STATION_PRODUCT_LABELS_URL",
@@ -17,7 +18,7 @@ function config(overrides = {}) {
       "-e",
       `
     import config from ${JSON.stringify(new URL("../product-labels.playwright.config.ts", import.meta.url).href)};
-    console.log(JSON.stringify({ servers: config.webServer, baseURL: config.use?.baseURL }));
+    console.log(JSON.stringify({ servers: config.webServer, baseURL: config.use?.baseURL, testIgnore: config.testIgnore }));
   `,
     ],
     { env: { ...env, ...overrides }, encoding: "utf8" },
@@ -61,4 +62,21 @@ test("explicit navigation URL survives a configured local server port", () => {
   const value = JSON.parse(result.stdout);
   assert.equal(value.baseURL, "http://example.test/station");
   assert.match(value.servers[1].command, /--port 43482 --strictPort/);
+});
+
+test("cabinet CI runs the label gallery without starting the cloud Station", () => {
+  const result = config({ PRODUCT_LABELS_CABINET_ONLY: "1" });
+  assert.equal(result.status, 0, result.stderr);
+  const value = JSON.parse(result.stdout);
+  assert.deepEqual(
+    value.servers.map((server) => server.url),
+    ["http://127.0.0.1:43181"],
+  );
+  assert.equal(value.baseURL, value.servers[0].url);
+  assert.deepEqual(value.testIgnore, [
+    "**/station.spec.ts",
+    "**/pallet-sheet-station.spec.ts",
+    "**/pallet-reprint.spec.ts",
+    "**/bundled-logo.spec.ts",
+  ]);
 });

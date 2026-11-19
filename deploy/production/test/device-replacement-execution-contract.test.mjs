@@ -36,7 +36,7 @@ test("replacement migrations ship in journal order and API image before readers"
   assert.match(compose, /migrate:[\s\S]*service_completed_successfully/);
 });
 
-test("every replacement runtime has a release artifact and owned CI gate", async () => {
+test("replacement runtimes keep their release artifacts and supported consumers have CI gates", async () => {
   const edge = await read("deploy/platform/edge.Dockerfile");
   assert.ok(edge.includes("/workspace/apps/saas-admin/dist /srv/saas-admin"));
   // The platform edge serves the SaaS admin; the cabinet is no longer served
@@ -60,10 +60,6 @@ test("every replacement runtime has a release artifact and owned CI gate", async
     [
       "apps/api/src/cli/repair-device-replacement.ts",
       ["verify_static", "verify_api_tests", "production_bundle"],
-    ],
-    [
-      "apps/station/src/lib/device-replacement.ts",
-      ["verify_app_tests", "station_rust", "station_windows_build"],
     ],
     ["apps/handheld/app/src/main/kotlin/Replacement.kt", ["handheld_android"]],
     [

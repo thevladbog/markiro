@@ -15,8 +15,6 @@ const jobNames = [
   "production_bundle",
   "platform_contracts",
   "platform_forward_recovery",
-  "station_rust",
-  "station_windows_build",
   "signer_rust",
   "signer_windows_build",
   "handheld_android",
@@ -40,8 +38,6 @@ const signerOnly = {
     production_bundle: false,
     platform_contracts: false,
     platform_forward_recovery: false,
-    station_rust: false,
-    station_windows_build: false,
     signer_rust: true,
     signer_windows_build: true,
     handheld_android: false,
@@ -62,7 +58,7 @@ function enabledJobs(result) {
     .map(([name]) => name);
 }
 
-test("the cabinet and station galleries are classified but never required", () => {
+test("the cabinet galleries are classified but never required", () => {
   assert.deepEqual(OPTIONAL_JOBS, ["cabinet_station_galleries"]);
   assert.deepEqual([...HEAVY_JOBS, ...OPTIONAL_JOBS], jobNames);
   for (const job of OPTIONAL_JOBS) assert.ok(!HEAVY_JOBS.includes(job), job);
@@ -118,19 +114,21 @@ test("Signer UI changes include JavaScript verification and both native builds",
   ]);
 });
 
-test("Station native and web changes select different downstream work", () => {
-  const native = classifyChangedFiles(["apps/station/src-tauri/src/scanner.rs"]);
-  assert.deepEqual(enabledJobs(native), ["station_rust", "station_windows_build"]);
-
-  const web = classifyChangedFiles(["apps/station/src/App.tsx"]);
-  // The cloud station is no longer served, so no platform image depends on it.
-  assert.deepEqual(enabledJobs(web), [
-    "verify_static",
-    "verify_app_tests",
-    "station_rust",
-    "station_windows_build",
-    "cabinet_station_galleries",
-  ]);
+test("cloud Station changes alone do not select automatic app or native checks", () => {
+  for (const path of [
+    "apps/station/src/App.tsx",
+    "apps/station/src-tauri/src/scanner.rs",
+    "tools/station-printer-tests/lib.rs",
+    "tools/station-release/build-manifest.mjs",
+  ]) {
+    const result = classifyChangedFiles([path]);
+    assert.equal(result.full, false, path);
+    assert.deepEqual(enabledJobs(result), [], path);
+  }
+  assert.deepEqual(
+    enabledJobs(classifyChangedFiles(["apps/station/src/assets/markiro-print-logo.svg"])),
+    ["standalone_app_tests"],
+  );
 });
 
 test("Standalone native and web changes select their jobs; its Vitest suite has its own job", () => {
@@ -286,8 +284,6 @@ test("shared packages fan out to their current consumers", () => {
         "verify_app_tests",
         "production_bundle",
         "platform_contracts",
-        "station_rust",
-        "station_windows_build",
         "signer_rust",
         "signer_windows_build",
         "standalone_rust",
@@ -307,8 +303,6 @@ test("shared packages fan out to their current consumers", () => {
         "verify_app_tests",
         "production_bundle",
         "platform_contracts",
-        "station_rust",
-        "station_windows_build",
         "standalone_rust",
         "standalone_windows_build",
         "standalone_app_tests",
@@ -327,8 +321,6 @@ test("shared packages fan out to their current consumers", () => {
         "tenant_team_infrastructure",
         "production_bundle",
         "platform_contracts",
-        "station_rust",
-        "station_windows_build",
         "saas_admin_browser",
         "cabinet_station_galleries",
       ],
@@ -466,8 +458,6 @@ test("deployment and release tooling selects its consuming jobs", () => {
         "tenant_team_infrastructure",
         "production_bundle",
         "platform_contracts",
-        "station_rust",
-        "station_windows_build",
         "signer_rust",
         "signer_windows_build",
         "handheld_android",
@@ -478,7 +468,6 @@ test("deployment and release tooling selects its consuming jobs", () => {
       ],
     ],
     ["tools/handheld-release/version.mjs", ["verify_static"]],
-    ["tools/station-release/build-manifest.mjs", ["station_rust", "station_windows_build"]],
     ["tools/signer-release/build-manifest.mjs", ["signer_rust", "signer_windows_build"]],
     ["tools/standalone-release/smoke.ps1", ["standalone_rust", "standalone_windows_build"]],
     ["tools/standalone-support/decrypt.mjs", ["verify_static", "standalone_app_tests"]],
@@ -655,8 +644,6 @@ test("CLI writes exact GitHub outputs for a NUL-delimited diff", () => {
       "production_bundle=false",
       "platform_contracts=false",
       "platform_forward_recovery=false",
-      "station_rust=false",
-      "station_windows_build=false",
       "signer_rust=true",
       "signer_windows_build=true",
       "handheld_android=false",
@@ -724,8 +711,6 @@ test("offline grant protocol and signed fixture changes exercise every native co
         "verify_app_tests",
         "production_bundle",
         "platform_contracts",
-        "station_rust",
-        "station_windows_build",
         "handheld_android",
         "standalone_rust",
         "standalone_windows_build",
@@ -738,14 +723,6 @@ test("offline grant protocol and signed fixture changes exercise every native co
       path,
     );
   }
-});
-
-test("the standalone Windows printer harness selects both Station native gates", () => {
-  const result = classifyChangedFiles(["tools/station-printer-tests/lib.rs"]);
-  assert.equal(result.full, false);
-  const jobs = enabledJobs(result);
-  assert.ok(jobs.includes("station_rust"));
-  assert.ok(jobs.includes("station_windows_build"));
 });
 
 test("printer output byte producers select Android parity", () => {

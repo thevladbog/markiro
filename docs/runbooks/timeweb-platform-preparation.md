@@ -267,8 +267,8 @@ still build from scratch) and, after the role, backup and recovery harnesses, ru
 The `deploy/platform` Node contracts run in the required `platform-contracts` job,
 split across two runners with `node --test --test-shard`. The landing browser and
 Lighthouse gates and the SaaS-admin browser suites run in their own required jobs
-(`landing-browser`, `landing-lighthouse`, `saas-admin-browser`); the cabinet and station galleries run in the optional
-`cabinet-galleries` and `station-galleries` jobs, outside `ci-required`.
+(`landing-browser`, `landing-lighthouse`, `saas-admin-browser`). The cabinet galleries are optional.
+Cloud Station checks run only when an operator selects `cloud_station` in a manual CI run.
 This harness verifies a local Unix Docker endpoint, uses a unique project,
 synthetic credentials in a protected temporary file and loopback-only edge ports.
 It starts its own Postgres, Mailpit and private SeaweedFS, migrates twice, verifies

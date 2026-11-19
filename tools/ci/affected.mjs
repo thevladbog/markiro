@@ -19,8 +19,6 @@ export const HEAVY_JOBS = Object.freeze([
   // other app changes do not select it. A push to main selects it with
   // production_bundle (see `releaseGate`): the platform release requires both.
   "platform_forward_recovery",
-  "station_rust",
-  "station_windows_build",
   "signer_rust",
   "signer_windows_build",
   "handheld_android",
@@ -32,21 +30,18 @@ export const HEAVY_JOBS = Object.freeze([
   "saas_admin_browser",
 ]);
 
-// Classified like the jobs above but outside ci-required: the cabinet, kiosk and
-// cloud-station galleries keep regression coverage for code that stays in the
-// repository while those online surfaces are retired (owner decision 2026-10-21).
+// Cabinet galleries run outside ci-required. Cloud Station checks are manual.
 export const OPTIONAL_JOBS = Object.freeze(["cabinet_station_galleries"]);
 
 const ALL_JOBS = Object.freeze([...HEAVY_JOBS, ...OPTIONAL_JOBS]);
 
 const signerJobs = ["signer_rust", "signer_windows_build"];
-const stationJobs = ["station_rust", "station_windows_build"];
 const standaloneJobs = ["standalone_rust", "standalone_windows_build"];
 // The standalone webview's Vitest suite has a runner of its own: inside
 // verify-app-tests it pushed that job past its wall-clock budget.
 const standaloneAppTests = "standalone_app_tests";
 const landingJobs = ["landing_browser", "landing_lighthouse"];
-// The landing, SaaS-admin and cabinet/station browser suites, each in its own job.
+// Landing and SaaS admin have dedicated required browser jobs.
 const browserJobs = [...landingJobs, "saas_admin_browser"];
 const galleries = "cabinet_station_galleries";
 
@@ -76,7 +71,6 @@ const sharedJobs = Object.freeze({
     "production_bundle",
     ...browserJobs,
     galleries,
-    ...stationJobs,
     ...signerJobs,
     ...standaloneJobs,
     standaloneAppTests,
@@ -88,7 +82,6 @@ const sharedJobs = Object.freeze({
     "production_bundle",
     ...browserJobs,
     galleries,
-    ...stationJobs,
     ...standaloneJobs,
     standaloneAppTests,
   ],
@@ -100,7 +93,6 @@ const sharedJobs = Object.freeze({
     "production_bundle",
     "saas_admin_browser",
     galleries,
-    ...stationJobs,
   ],
   email: [
     "verify_static",
@@ -172,7 +164,6 @@ const catalogJobs = [
   ...new Set([
     ...appJobs.api,
     "verify_app_tests",
-    ...stationJobs,
     ...signerJobs,
     ...standaloneJobs,
     standaloneAppTests,
@@ -183,7 +174,7 @@ const canonicalReleaseValidator =
   /^tools\/(?:station-release\/(?:artifacts|origins|version)|handheld-release\/manifest|signer-release\/(?:artifacts|manifest|version))\.mjs$/u;
 
 function jobsForPath(path) {
-  if (path.startsWith("tools/station-printer-tests/")) return stationJobs;
+  if (path.startsWith("tools/station-printer-tests/")) return [];
   if (isDocumentation(path)) return [];
   if (isRootToolchainPath(path)) return ALL_JOBS;
   // Shared publication/restore safety owns API/DB/platform and every publisher.
@@ -262,10 +253,14 @@ function jobsForPath(path) {
     return ["verify_static", "verify_app_tests", ...signerJobs];
   }
 
-  if (path.startsWith("apps/station/")) {
-    if (path.startsWith("apps/station/src-tauri/")) return stationJobs;
-    return ["verify_static", "verify_app_tests", galleries, ...stationJobs];
-  }
+  // These inputs are still consumed outside the manual cloud Station suites.
+  if (path === "apps/station/src/assets/markiro-print-logo.svg") return [standaloneAppTests];
+  if (
+    path === "apps/station/src/lib/rasterizer.ts" ||
+    path === "apps/station/src/lib/organization-branding.ts"
+  )
+    return appJobs.admin;
+  if (path.startsWith("apps/station/")) return [];
 
   // Host and shell crates run only the Rust jobs; everything else in the app
   // (webview, protocol fixtures read by the webview, the host, the shell and the Android app, package files) also runs
@@ -320,7 +315,7 @@ function jobsForPath(path) {
   if (packageMatch) return sharedJobs[packageMatch[1]] ?? null;
 
   if (path.startsWith("tools/signer-release/")) return signerJobs;
-  if (path.startsWith("tools/station-release/")) return stationJobs;
+  if (path.startsWith("tools/station-release/")) return [];
   // The installer's contracts and smoke test run in the standalone Windows job.
   if (path.startsWith("tools/standalone-release/")) return standaloneJobs;
   // Node contracts for the Android release, so they run in the Node job -- the
