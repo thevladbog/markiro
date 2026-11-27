@@ -150,11 +150,11 @@ async function locallyInSet(context: ScanContext, codeHash: string): Promise<boo
 }
 
 /**
- * Another device's scan the host knows owns the code (stage 2a spec §5.7.3,
- * step 4), asked only while the link is `online`. No answer in 300 ms, any
- * failure, `free`, and a scan of this very station (whose own registry is
- * newer than the host's: an undo it has not sent yet) all let the scan
- * through; a duplicate the host finds later is a `conflict` receipt.
+ * Ask the host while online. An unavailable host or a free code lets the scan
+ * through. For a same-device claim, a matching boxed scan in the journal with
+ * no local owner means the code was released locally. Retention deletes both
+ * the journal and the local owner, so a purged scan still blocks a repeat when
+ * the host holds its claim.
  */
 async function hostCheck(
   context: ScanContext,
@@ -174,7 +174,24 @@ async function hostCheck(
     return null;
   }
   if (check.status === "in_set") return aggregation ? check : null;
-  return check.status === "taken" && !check.owner.sameDevice ? check : null;
+  if (check.status === "free") return null;
+  if (check.owner.sameDevice) {
+    const [released] = await context.local.query(
+      "SELECT scanned_at FROM floor_scans WHERE host_id = ? AND device_id = ? AND shift_id = ? " +
+        "AND scanned_at = ? AND code_hash = ? AND verdict = 'ok' AND box_id IS NOT NULL " +
+        "AND conflict = 0 LIMIT 1",
+      [
+        context.pairing.hostId,
+        context.pairing.deviceId,
+        check.owner.shiftId,
+        check.owner.scannedAt,
+        codeHash,
+      ],
+      localOwnerRow,
+    );
+    if (released !== undefined) return null;
+  }
+  return check;
 }
 
 function scanRow(context: ScanContext, id: string, data: ScanFact): LocalStatement {
@@ -208,9 +225,9 @@ function scanRow(context: ScanContext, id: string, data: ScanFact): LocalStateme
 /**
  * One scan of the work screen (stage 2a spec §5.7.3), run strictly one at a
  * time (`createWorkQueue`): read it; a code of another product is
- * `wrong_gtin`; a code this station holds is a local duplicate; a code
- * another device's scan owns on the host is a host duplicate; otherwise it
- * is accepted into the shift's open box, which opens with it — or, in a
+ * `wrong_gtin`; a code this station holds is a local duplicate; a code the host
+ * confirms it holds is a host duplicate if the station still needs to honor
+ * that claim. Otherwise it is accepted into the shift's open box — or, in a
  * validation shift (plan РЕЖ), into no box at all. Every scan is
  * journalled with its outbox record in ONE transaction: the accepted one with
  * its box and its place in `floor_codes`, whose key keeps a code in one box

@@ -452,17 +452,28 @@ describe("the work screen of a shift", () => {
     expect(withoutMotion).not.toMatch(/\.work-screen[^{]*\{[^}]*(transition|animation)/);
   });
 
-  it("asks the host while online and names the shift that took the code first", async () => {
-    const at = await station();
-    const checkCode = vi.fn(async (): Promise<CodeCheck> => TAKEN);
-    const screenWork = work(at, { online: true, checkCode });
-    await screenWork.scanner.listening();
-    await screenWork.scan(km("E1"));
-    expect(lastLine()).toBe(
-      `Дубль: код принят в смене OCT26-003 в ${scanTime(TAKEN.owner.scannedAt)}.`,
-    );
-    expect(checkCode).toHaveBeenCalledTimes(1);
-  });
+  it.each([false, true])(
+    "shows the host's duplicate warning with the original shift (same device: %s)",
+    async (sameDevice) => {
+      const at = await station();
+      const checkCode = vi.fn(async (): Promise<CodeCheck> => ({
+        ...TAKEN,
+        owner: {
+          ...TAKEN.owner,
+          sameDevice,
+          deviceId: sameDevice ? PAIRING.deviceId : TAKEN.owner.deviceId,
+        },
+      }));
+      const screenWork = work(at, { online: true, checkCode });
+      await screenWork.scanner.listening();
+      await screenWork.scan(km("E1"));
+      expect(lastLine()).toBe(
+        `Дубль: код принят в смене OCT26-003 в ${scanTime(TAKEN.owner.scannedAt)}.`,
+      );
+      expect(checkCode).toHaveBeenCalledTimes(1);
+      expect(rows(at.db, "SELECT id FROM floor_boxes")).toEqual([]);
+    },
+  );
 
   it("names cloud origin and the original shift in an online duplicate notice", async () => {
     const at = await station();

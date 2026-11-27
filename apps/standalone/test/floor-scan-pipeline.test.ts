@@ -6,6 +6,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { buildSscc, canonicalizeKm, kmHash } from "@markiro/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { clearOpenBox, undoLastCode } from "../src/floor/exceptions/box-exceptions.js";
 import { scanRecord } from "../src/floor/facts.js";
 import type { WorkShift } from "../src/floor/shifts/shift-copies.js";
 import { HOST_MAX_SERIAL_BYTES, processScan, readScan } from "../src/floor/work/scan-pipeline.js";
@@ -454,7 +455,7 @@ describe("a scan of the work screen", () => {
     ]);
   });
 
-  it("accepts without the host when offline, when the check fails or times out, and over its own scan", async () => {
+  it("accepts without the host when offline or when the check times out", async () => {
     const { db, local, shift } = await station();
     const timeout = new HostError({ kind: "transport", code: "timeout", message: "300 ms" });
     const offline = vi.fn(async (): Promise<CodeCheck> => TAKEN);
@@ -474,16 +475,7 @@ describe("a scan of the work screen", () => {
       itemCount: 2,
     });
     expect(onHostError).toHaveBeenCalledWith(timeout);
-    const own = scanContext(local, shift, {
-      online: () => true,
-      checkCode: async () => ({ ...TAKEN, owner: { ...TAKEN.owner, sameDevice: true } }),
-      newId: () => crypto.randomUUID(),
-    });
-    await expect(processScan(own, km("E3"))).resolves.toMatchObject({
-      kind: "accepted",
-      itemCount: 3,
-    });
-    expect(rows(db, "SELECT count(*) AS n FROM floor_codes")).toEqual([{ n: 3 }]);
+    expect(rows(db, "SELECT count(*) AS n FROM floor_codes")).toEqual([{ n: 2 }]);
   });
 
   it("lets no host hiccup lose a scan: a callback that throws decides nothing", async () => {
@@ -939,7 +931,7 @@ describe("a scan while the host may not answer", () => {
     expect(checkCode).toHaveBeenCalledTimes(2);
   });
 
-  it("takes the code, asks nobody, and reports nothing when the host says free or owns it itself", async () => {
+  it("takes a code when the host says it is free", async () => {
     const { local, shift } = await station();
     const onHostError = vi.fn();
     const context = scanContext(local, shift, {
@@ -948,19 +940,69 @@ describe("a scan while the host may not answer", () => {
       newId: () => crypto.randomUUID(),
     });
     await expect(processScan(context, km("V1"))).resolves.toMatchObject({ kind: "accepted" });
+    expect(onHostError).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["undoing the scan", undoLastCode],
+    ["clearing the box", clearOpenBox],
+  ] as const)(
+    "allows rescanning after %s locally before the release reaches the host",
+    async (_, release) => {
+      const { local, shift } = await station();
+      const context = scanContext(local, shift);
+      const raw = km("RELEASED");
+      const original = await processScan(context, raw);
+      expect(await release(context)).toMatchObject({ kind: "done", itemCount: 0 });
+
+      await expect(
+        processScan(
+          {
+            ...context,
+            online: () => true,
+            checkCode: async () => ({
+              status: "taken",
+              owner: {
+                shiftId: shift.copy.id,
+                shiftNumber: shift.copy.number,
+                deviceId: PAIRING.deviceId,
+                scannedAt: original.scannedAt,
+                sameDevice: true,
+              },
+            }),
+          },
+          raw,
+        ),
+      ).resolves.toMatchObject({ kind: "accepted", itemCount: 1 });
+    },
+  );
+
+  it("refuses the host's older scan even if this station undid a later scan of the same code", async () => {
+    const { local, shift } = await station();
+    const context = scanContext(local, shift);
+    const raw = km("RELEASED");
+    await processScan(context, raw);
+    expect(await undoLastCode(context)).toMatchObject({ kind: "done", itemCount: 0 });
+
     await expect(
       processScan(
         {
           ...context,
-          checkCode: async () => ({ ...TAKEN, owner: { ...TAKEN.owner, sameDevice: true } }),
+          online: () => true,
+          checkCode: async () => ({
+            status: "taken",
+            owner: {
+              shiftId: shift.copy.id,
+              shiftNumber: shift.copy.number,
+              deviceId: PAIRING.deviceId,
+              scannedAt: TAKEN.owner.scannedAt,
+              sameDevice: true,
+            },
+          }),
         },
-        km("V2"),
+        raw,
       ),
-    ).resolves.toMatchObject({ kind: "accepted" });
-    await expect(
-      processScan({ ...context, checkCode: async () => TAKEN }, km("V3")),
     ).resolves.toMatchObject({ kind: "duplicate", source: "host" });
-    expect(onHostError).not.toHaveBeenCalled();
   });
 
   const failures: [string, unknown][] = [

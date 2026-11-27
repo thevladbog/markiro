@@ -5031,11 +5031,14 @@ reads as unknown, for the host would refuse it. A code of another product is
 `wrong_gtin`. A code this pairing holds in any box (`floor_codes`) is a local
 duplicate with the time of its first scan, without asking the host. Otherwise,
 while the link is `online`, the host is asked within 300 ms (`HostApi.checkCode`,
-`CODE_CHECK_TIMEOUT_MS`): another device's scan that owns the code is a host
-duplicate with that shift's number; no answer, a failure, `free` or this
-station's own scan (its own registry is newer: an undo not yet sent) let the
-scan through, and a failure goes to `onHostError`, where the shell acts on a
-refused key. An accepted code goes into the shift's open box, which opens with
+`CODE_CHECK_TIMEOUT_MS`): a code the host holds is a host duplicate with
+that shift's number, including a scan from the same device after retention.
+A same-device claim can be bypassed while the station has a matching accepted
+boxed scan in `floor_scans` (pairing, shift, scan time, code hash) and its code
+is absent from `floor_codes` after a local release, such as an undo still
+waiting to sync. No answer, a failure or `free` lets the scan through. A
+failure goes to `onHostError`, where the shell acts on a refused key.
+An accepted code goes into the shift's open box, which opens with
 it, in ONE `local_transaction` with its place in `floor_codes`, its journal row
 (`floor_scans`) and its `scan` record in the outbox (`outboxStatement`, which
 checks the record against `factRecordSchema` and its size against
