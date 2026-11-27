@@ -45,9 +45,11 @@ export interface OpenPallet {
 /**
  * The boxes of the pallet `p` that are not taken apart, and their units, as
  * SQL: never stored, always counted (the cloud's derived count).
+ * Use the pallet index so SQLite reads only the boxes on this pallet.
  */
 export const LIVE_BOXES =
-  "FROM floor_boxes b WHERE b.host_id = p.host_id AND b.device_id = p.device_id " +
+  "FROM floor_boxes b INDEXED BY floor_boxes_pallet " +
+  "WHERE b.host_id = p.host_id AND b.device_id = p.device_id " +
   "AND b.pallet_id = p.id AND b.disassembled_at IS NULL";
 
 /**

@@ -2779,17 +2779,19 @@ const QUEUE_STRANDED: &str =
 /// pallet and its counts, a pallet's close, a box joining it, the shift close's check and
 /// summary, and the label queue's read.
 const OPEN_PALLET: &str =
-    "SELECT p.id, p.opened_at, (SELECT count(*) FROM floor_boxes b WHERE b.host_id = \
-     p.host_id AND b.device_id = p.device_id AND b.pallet_id = p.id AND b.disassembled_at \
-     IS NULL) AS boxes, (SELECT coalesce(sum(b.item_count), 0) FROM floor_boxes b WHERE \
-     b.host_id = p.host_id AND b.device_id = p.device_id AND b.pallet_id = p.id AND \
-     b.disassembled_at IS NULL) AS items FROM floor_pallets p WHERE p.host_id = ? AND \
-     p.device_id = ? AND p.shift_id = ? AND p.closed_at IS NULL";
+    "SELECT p.id, p.opened_at, (SELECT count(*) FROM floor_boxes b INDEXED BY floor_boxes_pallet \
+     WHERE b.host_id = p.host_id AND b.device_id = p.device_id AND b.pallet_id = p.id \
+     AND b.disassembled_at IS NULL) AS boxes, (SELECT coalesce(sum(b.item_count), 0) \
+     FROM floor_boxes b INDEXED BY floor_boxes_pallet WHERE b.host_id = p.host_id AND \
+     b.device_id = p.device_id AND b.pallet_id = p.id AND b.disassembled_at IS NULL) AS items \
+     FROM floor_pallets p WHERE p.host_id = ? AND p.device_id = ? AND p.shift_id = ? \
+     AND p.closed_at IS NULL";
 const CLOSE_PALLET: &str =
     "UPDATE floor_pallets AS p SET closed_at = ?, sscc = ?, block_id = ?, serial = ?, \
      closed_by = ? WHERE p.id = ? AND p.host_id = ? AND p.device_id = ? AND p.closed_at IS \
-     NULL AND (SELECT count(*) FROM floor_boxes b WHERE b.host_id = p.host_id AND \
-     b.device_id = p.device_id AND b.pallet_id = p.id AND b.disassembled_at IS NULL) = ?";
+     NULL AND (SELECT count(*) FROM floor_boxes b INDEXED BY floor_boxes_pallet WHERE \
+     b.host_id = p.host_id AND b.device_id = p.device_id AND b.pallet_id = p.id AND \
+     b.disassembled_at IS NULL) = ?";
 const JOIN_PALLET: &str =
     "UPDATE floor_pallets SET id = id WHERE id = ? AND host_id = ? AND device_id = ? AND \
      closed_at IS NULL";
@@ -2804,16 +2806,17 @@ const PALLET_SSCC_HELD: &str = "SELECT 1 AS n FROM floor_pallets WHERE sscc = ? 
 /// disassembly and the reprint's comparison that it is still closed and whole, the pallet's
 /// newest job and the comparison that no newer job came.
 const CLOSED_PALLETS: &str =
-    "SELECT p.id, p.sscc, p.closed_at, (SELECT count(*) FROM floor_boxes b WHERE b.host_id = \
-     p.host_id AND b.device_id = p.device_id AND b.pallet_id = p.id AND b.disassembled_at \
-     IS NULL) AS boxes FROM floor_pallets p WHERE p.host_id = ? AND p.device_id = ? AND \
+    "SELECT p.id, p.sscc, p.closed_at, (SELECT count(*) FROM floor_boxes b INDEXED BY \
+     floor_boxes_pallet WHERE b.host_id = p.host_id AND b.device_id = p.device_id AND \
+     b.pallet_id = p.id AND b.disassembled_at IS NULL) AS boxes FROM floor_pallets p \
+     WHERE p.host_id = ? AND p.device_id = ? AND \
      p.shift_id = ? AND p.closed_at IS NOT NULL AND p.disassembled_at IS NULL ORDER BY \
      p.closed_at DESC, p.serial DESC";
 const PALLET_STATE: &str =
-    "SELECT p.closed_at, p.disassembled_at, (SELECT count(*) FROM floor_boxes b WHERE \
-     b.host_id = p.host_id AND b.device_id = p.device_id AND b.pallet_id = p.id AND \
-     b.disassembled_at IS NULL) AS boxes FROM floor_pallets p WHERE p.id = ? AND p.host_id \
-     = ? AND p.device_id = ? AND p.shift_id = ?";
+    "SELECT p.closed_at, p.disassembled_at, (SELECT count(*) FROM floor_boxes b INDEXED BY \
+     floor_boxes_pallet WHERE b.host_id = p.host_id AND b.device_id = p.device_id AND \
+     b.pallet_id = p.id AND b.disassembled_at IS NULL) AS boxes FROM floor_pallets p \
+     WHERE p.id = ? AND p.host_id = ? AND p.device_id = ? AND p.shift_id = ?";
 const DISASSEMBLE_PALLET: &str =
     "UPDATE floor_pallets SET disassembled_at = ? WHERE id = ? AND host_id = ? AND \
      device_id = ? AND shift_id = ? AND closed_at IS NOT NULL AND disassembled_at IS NULL";
@@ -2839,9 +2842,9 @@ const OPEN_PALLET_GUARD: &str =
     "UPDATE floor_shifts AS s SET local_state = local_state WHERE s.host_id = ? AND \
      s.device_id = ? AND s.id = ? AND NOT EXISTS (SELECT 1 FROM floor_pallets p WHERE \
      p.host_id = s.host_id AND p.device_id = s.device_id AND p.shift_id = s.id AND \
-     p.closed_at IS NULL AND EXISTS (SELECT 1 FROM floor_boxes b WHERE b.host_id = \
-     p.host_id AND b.device_id = p.device_id AND b.pallet_id = p.id AND b.disassembled_at \
-     IS NULL))";
+     p.closed_at IS NULL AND EXISTS (SELECT 1 FROM floor_boxes b INDEXED BY floor_boxes_pallet \
+     WHERE b.host_id = p.host_id AND b.device_id = p.device_id AND b.pallet_id = p.id \
+     AND b.disassembled_at IS NULL))";
 const CLOSE_SUMMARY: &str =
     "SELECT s.local_state, (SELECT count(*) FROM floor_codes c WHERE c.host_id = s.host_id \
      AND c.device_id = s.device_id AND c.shift_id = s.id) AS actual, (SELECT count(*) FROM \
@@ -2852,8 +2855,9 @@ const CLOSE_SUMMARY: &str =
      open_items, (SELECT count(*) FROM floor_print_jobs j WHERE j.host_id = s.host_id AND \
      j.device_id = s.device_id AND j.shift_id = s.id AND (state IN ('prepared', 'sending', \
      'failed', 'unknown') OR (state = 'sent' AND verify = 1))) AS waiting, (SELECT \
-     coalesce(sum((SELECT count(*) FROM floor_boxes b WHERE b.host_id = p.host_id AND \
-     b.device_id = p.device_id AND b.pallet_id = p.id AND b.disassembled_at IS NULL)), 0) \
+     coalesce(sum((SELECT count(*) FROM floor_boxes b INDEXED BY floor_boxes_pallet \
+     WHERE b.host_id = p.host_id AND b.device_id = p.device_id AND b.pallet_id = p.id AND \
+     b.disassembled_at IS NULL)), 0) \
      FROM floor_pallets p WHERE p.host_id = s.host_id AND p.device_id = s.device_id AND \
      p.shift_id = s.id AND p.closed_at IS NULL) AS pallet_boxes FROM floor_shifts s WHERE \
      s.host_id = ? AND s.device_id = ? AND s.id = ?";
