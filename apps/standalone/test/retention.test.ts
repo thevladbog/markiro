@@ -242,6 +242,43 @@ describe("the retention of a shift's records on the station", () => {
     expect(kept(at, SECOND.id)).toEqual(NONE);
   });
 
+  it("refuses a duplicate from this station's purged shift when the host still owns it", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", CUTOFF);
+    const [original] = rows(
+      at.db,
+      "SELECT scanned_at FROM floor_codes WHERE shift_id = ?",
+      ENTERED.id,
+    );
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(1);
+
+    const shift = await enteredShift(at.local, SECOND);
+    const context = scanContext(at.local, shift, {
+      now: () => NOW,
+      online: () => true,
+      checkCode: async () => ({
+        status: "taken",
+        owner: {
+          shiftId: ENTERED.id,
+          shiftNumber: ENTERED.number,
+          deviceId: PAIRING.deviceId,
+          scannedAt: String(original?.["scanned_at"]),
+          sameDevice: true,
+        },
+      }),
+    });
+    await expect(processScan(context, km("A1"))).resolves.toMatchObject({
+      kind: "duplicate",
+      source: "host",
+      shiftNumber: ENTERED.number,
+    });
+    expect(rows(at.db, "SELECT verdict, duplicate_source, box_id FROM floor_scans")).toEqual([
+      { verdict: "duplicate", duplicate_source: "host", box_id: null },
+    ]);
+    expect(rows(at.db, "SELECT id FROM floor_boxes")).toEqual([]);
+    expect(rows(at.db, "SELECT code_hash FROM floor_codes")).toEqual([]);
+  });
+
   // A displaced scan of a shift the retention deletes keeps its shift's number and its box's
   // SSCC in its own row (plan КНФ, the owner's decision): the queue screen still names them.
   it("leaves a displacement readable after its shift is deleted", async () => {
